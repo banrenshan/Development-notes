@@ -13,6 +13,7 @@
 * formatted audio data:音频格式化信息
 * AudioSystem:提供音频资源的访问服务
 
+
 #示例
 1.播放音乐
 ````
