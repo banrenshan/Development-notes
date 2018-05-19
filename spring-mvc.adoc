@@ -1,0 +1,111 @@
+= spring-mvc
+
+== DispatcherServlet
+
+与其他web框架一样，spring mvc 采用前端控制器模式设计了一个中央Servlet-DispatcherServlet。该类接受前端所有请求，并委托给其他组件处理。
+
+DispatcherServlet的本质仍然是一个Servlet，需要根据Servlet规范使用Java配置或在web.xml中进行声明和映射。
+
+项目启动之后，DispatcherServlet根据Spring配置自动发现它在请求映射，视图解析，异常处理等方面所需的委托组件。
+
+
+DispatcherServlet需要一个WebApplicationContext（一个普通的ApplicationContext的扩展）用于其自己的配置。WebApplicationContext有一个指向它所关联的ServletContext和Servlet的链接。DispatcherServlet也被绑定到ServletContext，以便应用程序可以使用RequestContextUtils上的静态方法查找WebApplicationContext。
+
+对于许多应用程序来说，具有单个WebApplicationContext就足够了。但是，也可能出现多个并且具有上下文层次结构，其中一个根WebApplicationContext在多个DispatcherServlet（或其他Servlet）实例中共享，每个实例都有其自己的子WebApplicationContext配置。 
+
+
+根WebApplicationContext通常包含需要跨多个Servlet实例共享的基础架构bean，例如数据存储库和业务服务。那些bean被有效地继承，并且可以在特定的Servlet的子WebApplicationContext中重写（即重新声明）。
+
+image::images/mvc-context-hierarchy.png[]
+
+
+=== java 配置
+
+[source,java]
+----
+public class MyWebApplicationInitializer implements WebApplicationInitializer {
+
+    @Override
+    public void onStartup(ServletContext servletCxt) {
+
+        // Load Spring web application configuration
+        AnnotationConfigWebApplicationContext ac = new AnnotationConfigWebApplicationContext();
+        ac.register(AppConfig.class);
+        ac.refresh();
+
+        // Create and register the DispatcherServlet
+        DispatcherServlet servlet = new DispatcherServlet(ac);
+        ServletRegistration.Dynamic registration = servletCxt.addServlet("app", servlet);
+        registration.setLoadOnStartup(1);
+        registration.addMapping("/app/*");
+    }
+}
+----
+
+除了直接使用ServletContext API之外，您还可以扩展AbstractAnnotationConfigDispatcherServletInitializer并覆盖特定的方法。
+
+[source,java]
+----
+public class MyWebAppInitializer extends AbstractAnnotationConfigDispatcherServletInitializer {
+
+    @Override
+    protected Class<?>[] getRootConfigClasses() {
+        return new Class<?>[] { RootConfig.class };
+    }
+
+    @Override
+    protected Class<?>[] getServletConfigClasses() {
+        return new Class<?>[] { App1Config.class };
+    }
+
+    @Override
+    protected String[] getServletMappings() {
+        return new String[] { "/app1/*" };
+    }
+}
+----
+
+
+=== xml配置
+[source,xml]
+----
+
+
+<web-app>
+
+    <listener>
+        <listener-class>org.springframework.web.context.ContextLoaderListener</listener-class>
+    </listener>
+
+    <context-param>
+        <param-name>contextConfigLocation</param-name>
+        <param-value>/WEB-INF/root-context.xml</param-value>
+    </context-param>
+
+    <servlet>
+        <servlet-name>app1</servlet-name>
+        <servlet-class>org.springframework.web.servlet.DispatcherServlet</servlet-class>
+        <init-param>
+            <param-name>contextConfigLocation</param-name>
+            <param-value>/WEB-INF/app1-context.xml</param-value>
+        </init-param>
+        <load-on-startup>1</load-on-startup>
+    </servlet>
+
+    <servlet-mapping>
+        <servlet-name>app1</servlet-name>
+        <url-pattern>/app1/*</url-pattern>
+    </servlet-mapping>
+
+</web-app>
+
+
+----
+
+如果不需要应用程序上下文层次结构，则应用程序可以仅配置“根”上下文，并将contextConfigLocation Servlet参数留空。
+
+== 特殊的bean 
+
+DispatcherServlet委托特殊的bean来处理请求并呈现适当的响应.。 “特殊bean”是指实现WebFlux框架协议的Spring管理的对象实例。您可以自定义其属性，扩展或替换它们。
+
+下表列出了DispatcherHandler检测到的特殊bean：
