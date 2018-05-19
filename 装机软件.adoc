@@ -1,0 +1,19 @@
+= 软件安装
+
+== 开发软件
+jdk
+eclipse
+idea
+sublime text 3
+ruby ===> gem install asciidoctor
+git
+GitHub 
+nodejs
+docker
+postman
+erlang ===> rabbitmq
+findbug
+checkstyle
+yarn
+python
+pycharm
