@@ -1,0 +1,9 @@
+= linux使用手册
+
+== 安装文件上传下载客户端
+[source,shell]
+----
+yum install -y lrzsz #安装
+rz #上传
+sz 文件路径 #默认下载到系统的download目录
+----
