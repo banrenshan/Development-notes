@@ -1,1 +1,10 @@
 = git使用
+
+== 配置用户信息
+[source,shell]
+----
+git config --global user.email "you@example.com"
+git config --global user.name "Your Name"
+----
+
+NOTE: 如果不设置这些信息,无法进行commit操作
