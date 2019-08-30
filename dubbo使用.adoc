@@ -1,3 +1,597 @@
 = dubbo使用
 
 == 快速入门
+
+
+== dubbo重要配置项
+
+=== 启动时检查
+
+Dubbo 缺省会在启动时检查依赖的服务是否可用，不可用时会抛出异常，阻止Spring初始化完成，以便上线时，能及早发现问题。配置选项如下:
+[source,properties]
+----
+dubbo.reference.com.foo.BarService.check=false #特定于服务部开启检查
+dubbo.reference.check=false #所有的服务都关闭检查,缺省时使用dubbo.consumer.check的值
+dubbo.consumer.check=false #消费者是否开启检查
+dubbo.registry.check=false #检查注册中心是否开启
+----
+
+NOTE: dubbo.reference.check和dubbo.consumer.check的关系到底是怎样的?
+
+=== 负载均衡
+
+策略如下:
+
+. Random : 随机
+. RoundRobin : 轮询
+. LeastActive : 最少活跃数
+. ConsistentHash : 一致hash
+
+
+*可以在生产端和消费端设置,如果同时设置,消费端覆盖生产端*
+
+.生产端
+[source,xml]
+----
+<dubbo:service interface="..." loadbalance="roundrobin" />
+----
+
+.消费端
+[source,xml]
+----
+<dubbo:reference interface="..." loadbalance="roundrobin" />
+----
+
+*可以在服务级别和方法级别设置*
+
+.生产端
+[source,xml]
+----
+<dubbo:service interface="...">
+    <dubbo:method name="..." loadbalance="roundrobin"/>
+</dubbo:service>
+----
+
+.消费端
+[source,xml]
+----
+<dubbo:reference interface="...">
+    <dubbo:method name="..." loadbalance="roundrobin"/>
+</dubbo:reference>
+----
+
+=== 禁止注册
+[source,xml]
+----
+<dubbo:registry address="10.20.153.10:9090" register="false" />
+----
+
+=== 禁止获取服务
+[source,xml]
+----
+<dubbo:registry id="qdRegistry" address="10.20.141.150:9090" subscribe="false" />
+----
+
+=== 服务直连
+在开发及测试环境下，经常需要绕过注册中心，只测试指定服务提供者，这时候可能需要点对点直连.
+[source,xml]
+----
+<dubbo:reference id="xxxService" interface="com.alibaba.xxx.XxxService" url="dubbo://localhost:20890" />
+----
+
+=== 服务分组
+当一个接口有多种实现时，可以用 group 区分。
+[source,xml]
+----
+<dubbo:service group="feedback" interface="com.xxx.IndexService" /> <1>
+<dubbo:service group="member" interface="com.xxx.IndexService" />
+
+<dubbo:reference id="feedbackIndexService" group="feedback" interface="com.xxx.IndexService" /> <2>
+<dubbo:reference id="memberIndexService" group="member" interface="com.xxx.IndexService" />
+
+<dubbo:reference id="barService" interface="com.foo.BarService" group="*" /> <3>
+
+----
+
+<1> 定义相同服务的不同实现
+<2> 引用同一个服务的不同实现
+<3> 任意选择一个实现
+
+=== 服务版本
+当一个接口实现，出现不兼容升级时，可以用版本号过渡，版本号不同的服务相互间不引用。
+
+. 在低压力时间段，先升级一半提供者为新版本
+. 再将所有消费者升级为新版本
+. 然后将剩下的一半提供者升级为新版本
+
+.老版本服务提供者配置：
+[source,xml]
+----
+<dubbo:service interface="com.foo.BarService" version="1.0.0" />
+----
+
+.新版本服务提供者配置：
+[source,xml]
+----
+<dubbo:service interface="com.foo.BarService" version="2.0.0" />
+----
+
+.老版本服务消费者配置：
+[source,xml]
+----
+<dubbo:reference id="barService" interface="com.foo.BarService" version="1.0.0" />
+----
+
+.新版本服务消费者配置：
+[source,xml]
+----
+<dubbo:reference id="barService" interface="com.foo.BarService" version="2.0.0" />
+----
+
+.如果不需要区分版本，可以按照以下的方式配置 [1]：
+[source,xml]
+----
+<dubbo:reference id="barService" interface="com.foo.BarService" version="*" />
+----
+
+=== 服务多协议
+
+Dubbo 允许配置多协议，在不同服务上支持不同协议或者同一服务上同时支持多种协议。
+
+出于性能考虑配置不同协议进行传输，例如大数据用短连接协议，小数据大并发用长连接协议
+
+.不同服务不同协议
+[source,xml]
+----
+    <!-- 多协议配置 -->
+    <dubbo:protocol name="dubbo" port="20880" />
+    <dubbo:protocol name="rmi" port="1099" />
+    <!-- 使用dubbo协议暴露服务 -->
+    <dubbo:service interface="com.alibaba.hello.api.HelloService" version="1.0.0" ref="helloService" protocol="dubbo" />
+    <!-- 使用rmi协议暴露服务 -->
+    <dubbo:service interface="com.alibaba.hello.api.DemoService" version="1.0.0" ref="demoService" protocol="rmi" />
+----
+
+.同一服务多协议
+[source,xml]
+----
+    <!-- 多协议配置 -->
+    <dubbo:protocol name="dubbo" port="20880" />
+    <dubbo:protocol name="hessian" port="8080" />
+    <!-- 使用多个协议暴露服务 -->
+    <dubbo:service id="helloService" interface="com.alibaba.hello.api.HelloService" version="1.0.0" protocol="dubbo,hessian" />
+----
+
+=== 多注册中心
+Dubbo 支持同一服务向多注册中心同时注册，或者不同服务分别注册到不同的注册中心上去，甚至可以同时引用注册在不同注册中心上的同名服务。另外，注册中心是支持自定义扩展的
+
+.同一服务多注册中心
+[source,xml]
+----
+    <!-- 多注册中心配置 -->
+    <dubbo:registry id="hangzhouRegistry" address="10.20.141.150:9090" />
+    <dubbo:registry id="qingdaoRegistry" address="10.20.141.151:9010" default="false" />
+    <!-- 向多个注册中心注册 -->
+    <dubbo:service interface="com.alibaba.hello.api.HelloService" version="1.0.0" ref="helloService" registry="hangzhouRegistry,qingdaoRegistry" />
+----
+
+
+.不同服务不同注册中心
+[source,xml]
+----
+<!-- 多注册中心配置 -->
+   <dubbo:registry id="chinaRegistry" address="10.20.141.150:9090" />
+   <dubbo:registry id="intlRegistry" address="10.20.154.177:9010" default="false" />
+   <!-- 向中文站注册中心注册 -->
+   <dubbo:service interface="com.alibaba.hello.api.HelloService" version="1.0.0" ref="helloService" registry="chinaRegistry" />
+   <!-- 向国际站注册中心注册 -->
+   <dubbo:service interface="com.alibaba.hello.api.DemoService" version="1.0.0" ref="demoService" registry="intlRegistry" />
+----
+
+=== 手动上下线
+
+有时候希望人工管理服务提供者的上线和下线，此时需在服务提供者中将注册中心标识为非动态管理模式。
+[source,xml]
+----
+<dubbo:registry address="10.20.141.150:9090" dynamic="false" />
+----
+
+服务提供者初次注册时为禁用状态，需手动启用。断线时，将不会被自动删除，需手动禁用。
+
+=== 服务分组聚合
+
+有的时候,我们需要调用服务的不同实现,并将结果合并,这个时候可以使用服务聚合.请看下面的实例:
+
+1.定义服务接口
+[source,java]
+----
+public interface MergeService {
+    List<String> mergeResult();
+}
+----
+
+2.定义不同的实现
+
+.实现1
+[source,java]
+----
+public class MergeServiceImpl implements MergeService {
+
+    @Override
+    public List<String> mergeResult() {
+        List<String> menus = new ArrayList<>();
+        menus.add("group-1.1");
+        menus.add("group-1.2");
+        return menus;
+    }
+
+}
+----
+
+.实现2
+[source,java]
+----
+public class MergeServiceImpl2 implements MergeService {
+
+    @Override
+    public List<String> mergeResult() {
+        List<String> menus = new ArrayList<>();
+        menus.add("group-2.1");
+        menus.add("group-2.2");
+        return menus;
+    }
+
+}
+----
+
+
+3.配置不同实现在不同的分组
+[source,xml]
+----
+ <bean id="mergeService" class="org.apache.dubbo.samples.merge.impl.MergeServiceImpl"/>
+
+ <dubbo:service group="merge" interface="org.apache.dubbo.samples.merge.api.MergeService" ref="mergeService"/>
+
+ <bean id="mergeService2" class="org.apache.dubbo.samples.merge.impl.MergeServiceImpl2"/>
+
+ <dubbo:service group="merge2" interface="org.apache.dubbo.samples.merge.api.MergeService" ref="mergeService2"/>
+----
+
+
+4.定义消费者
+[source,java]
+----
+public class MergeConsumer {
+
+    public static void main(String[] args) throws Exception {
+        ClassPathXmlApplicationContext context = new ClassPathXmlApplicationContext("spring/merge-consumer.xml");
+        context.start();
+
+        MergeService mergeService = (MergeService) context.getBean("mergeService");
+        System.out.println(mergeService.mergeResult());
+    }
+}
+----
+
+[source,xml]
+----
+<dubbo:reference id="mergeService" interface="org.apache.dubbo.samples.merge.api.MergeService" group="*"
+                 merger="true"/>
+----
+
+也可以使用下面的写法:
+[source,xml]
+----
+<dubbo:reference id="mergeService" interface="org.apache.dubbo.samples.merge.api.MergeService"
+                 group="merge2,merge3"/>
+----
+
+上面分组的单元是服务,我们也可以细化到具体的方法上:
+[source,xml]
+----
+<dubbo:reference interface="com.xxx.MenuService" group="*">
+    <dubbo:method name="getMenuItems" merger="mymerge" />
+</dubbo:reference>
+----
+
+=== 参数校验
+
+1.定义参数校验实体类
+[source,java]
+----
+public class ValidationParameter implements Serializable {
+
+    private static final long serialVersionUID = 7158911668568000392L;
+
+    @NotNull
+    @Size(min = 2, max = 20)
+    private String name;
+
+    @NotNull(groups = ValidationService.Save.class)  <1>
+    @Pattern(regexp = "^\\s*\\w+(?:\\.{0,1}[\\w-]+)*@[a-zA-Z0-9]+(?:[-.][a-zA-Z0-9]+)*\\.[a-zA-Z]+\\s*$")
+    private String email;
+
+    @Min(18)
+    @Max(100)
+    private int age;
+
+    @Past
+    private Date loginDate;
+
+    @Future
+    private Date expiryDate;
+
+    ....getter setter....
+}
+----
+
+<1> 限定分组,只有属于Save组,该校验才起作用.例如,下面的save方法会校验非空,update方法则不会.
+
+2.定义使用校验参数的接口
+[source,java]
+----
+public interface ValidationService {
+
+    void save(ValidationParameter parameter);
+
+    void update(ValidationParameter parameter);
+
+    void delete(@Min(1) long id, @NotNull @Size(min = 2, max = 16) @Pattern(regexp = "^[a-zA-Z]+$") String operator);
+
+    @interface Save { <1>
+    }
+
+    @interface Update { <2>
+    }
+}
+
+----
+
+<1> 该注解和save方法名称相同,如果校验注解上使用了该类,表明save方法会使用该校验
+<2> update方法,
+
+3.生产端开启验证
+[source,xml]
+----
+<bean id="validationService" class="org.apache.dubbo.samples.validation.impl.ValidationServiceImpl"/>
+
+<dubbo:service interface="org.apache.dubbo.samples.validation.api.ValidationService" ref="validationService"
+               validation="true"/>
+----
+
+4.消费端执行验证
+[source,xml]
+----
+<dubbo:reference id="validationService" interface="org.apache.dubbo.samples.validation.api.ValidationService"
+                 validation="true"/>
+----
+
+[source,java]
+----
+public class ValidationConsumer {
+
+    public static void main(String[] args) throws Exception {
+        ClassPathXmlApplicationContext context = new ClassPathXmlApplicationContext("spring/validation-consumer.xml");
+        context.start();
+
+        ValidationService validationService = (ValidationService) context.getBean("validationService");
+
+        // Save OK
+        ValidationParameter parameter = new ValidationParameter();
+        parameter.setName("liangfei");
+        parameter.setEmail("liangfei@liang.fei");
+        parameter.setAge(50);
+        parameter.setLoginDate(new Date(System.currentTimeMillis() - 1000000));
+        parameter.setExpiryDate(new Date(System.currentTimeMillis() + 1000000));
+        validationService.save(parameter);
+        System.out.println("Validation Save OK");
+
+        // Save Error
+        try {
+            parameter = new ValidationParameter();
+            validationService.save(parameter);
+            System.err.println("Validation Save ERROR");
+        } catch (Exception e) {
+            ConstraintViolationException ve = (ConstraintViolationException) e;
+            Set<ConstraintViolation<?>> violations = ve.getConstraintViolations();
+            System.out.println(violations);
+        }
+
+        // Delete OK
+        validationService.delete(2, "abc");
+        System.out.println("Validation Delete OK");
+
+        // Delete Error
+        try {
+            validationService.delete(0, "abc");
+            System.err.println("Validation Delete ERROR");
+        } catch (Exception e) {
+            ConstraintViolationException ve = (ConstraintViolationException) e;
+            Set<ConstraintViolation<?>> violations = ve.getConstraintViolations();
+            System.out.println(violations);
+        }
+    }
+
+}
+----
+
+=== 结果缓存
+
+用于加速热门数据的访问速度，Dubbo 提供声明式缓存，以减少开发者添加缓存的代码工作量。
+缓存策略:
+
+. lru 基于最近最少使用原则删除多余缓存，保持最热的数据被缓存。
+. threadlocal 当前线程缓存，比如一个页面渲染，用到很多 portal，每个 portal 都要去查用户信息，通过线程缓存，可以减少这种多余访问。
+. jcache 与 JSR107 集成，可以桥接各种缓存实现。
+
+[source,xml]
+----
+<dubbo:reference interface="com.foo.BarService" cache="lru" />
+----
+
+=== 泛化引用
+
+有的时候,我们并没有接口的定义源码文件,此时我们要调用服务,该怎么办呢?这个时候,泛化可以帮我们解决问题:
+[source,xml]
+----
+<dubbo:reference id="barService" interface="com.foo.BarService" generic="true" /> <1>
+----
+
+<1> 类路径下不需要有com.foo.BarService接口文件
+
+[source,java]
+----
+GenericService barService = (GenericService) applicationContext.getBean("barService"); <1>
+Object result = barService.$invoke("sayHello", new String[] { "java.lang.String" }, new Object[] { "World" }); <2>
+----
+
+<1> 获取的bean类型不再是BarService,而是通用类型GenericService
+<2> 调用具体的服务,有点类似于反射
+
+相关的API
+[source,java]
+----
+import org.apache.dubbo.rpc.service.GenericService;
+...
+
+// 引用远程服务
+// 该实例很重量，里面封装了所有与注册中心及服务提供方连接，请缓存
+ReferenceConfig<GenericService> reference = new ReferenceConfig<GenericService>();
+// 弱类型接口名
+reference.setInterface("com.xxx.XxxService");
+reference.setVersion("1.0.0");
+// 声明为泛化接口
+reference.setGeneric(true);
+
+// 用org.apache.dubbo.rpc.service.GenericService可以替代所有接口引用
+GenericService genericService = reference.get();
+
+// 基本类型以及Date,List,Map等不需要转换，直接调用
+Object result = genericService.$invoke("sayHello", new String[] {"java.lang.String"}, new Object[] {"world"});
+
+// 用Map表示POJO参数，如果返回值为POJO也将自动转成Map
+Map<String, Object> person = new HashMap<String, Object>();
+person.put("name", "xxx");
+person.put("password", "yyy");
+// 如果返回POJO将自动转成Map
+Object result = genericService.$invoke("findPerson", new String[]
+{"com.xxx.Person"}, new Object[]{person});
+----
+
+=== 泛化调用
+
+服务器端没有API接口及模型类的情况，参数及返回值中的所有POJO均用Map表示，通常用于框架集成，比如：实现一个通用的远程服务Mock框架，可通过实现GenericService接口处理所有服务请求。
+
+[source,java]
+----
+package com.foo;
+public class MyGenericService implements GenericService {
+
+    public Object $invoke(String methodName, String[] parameterTypes, Object[] args) throws GenericException {
+        if ("sayHello".equals(methodName)) {
+            return "Welcome " + args[0];
+        }
+    }
+}
+----
+
+[source,xml]
+----
+<bean id="genericService" class="com.foo.MyGenericService" />
+<dubbo:service interface="com.foo.BarService" ref="genericService" />
+----
+
+WARNNING: 作用是什么啊,没有理解
+
+=== 回声测试
+
+回声测试用于检测服务是否可用，回声测试按照正常请求流程执行，能够测试整个调用是否通畅，可用于监控。
+
+所有服务自动实现 EchoService 接口，只需将任意服务引用强制向上转型为 EchoService，即可使用。例如:
+[source,xml]
+----
+<dubbo:reference id="memberService" interface="com.xxx.MemberService" />
+----
+
+[source,java]
+----
+// 远程服务引用
+MemberService memberService = ctx.getBean("memberService");
+
+EchoService echoService = (EchoService) memberService; // 强制转型为EchoService
+
+// 回声测试可用性
+String status = echoService.$echo("OK");
+
+assert(status.equals("OK"));
+----
+
+=== 上下文信息
+
+上下文中存放的是当前调用过程中所需的环境信息。所有配置信息都将转换为 URL 的参数，参见 **schema 配置参考手册** 中的对应URL参数一列。
+
+RpcContext 是一个 ThreadLocal 的临时状态记录器，当接收到 RPC 请求，或发起 RPC 请求时，RpcContext 的状态都会变化。比如：A 调 B，B 再调 C，则 B 机器上，在 B 调 C 之前，RpcContext 记录的是 A 调 B 的信息，在 B 调 C 之后，RpcContext 记录的是 B 调 C 的信息。
+
+.服务消费者
+[source,java]
+----
+// 远程调用
+xxxService.xxx();
+// 本端是否为消费端，这里会返回true
+boolean isConsumerSide = RpcContext.getContext().isConsumerSide();
+// 获取最后一次调用的提供方IP地址
+String serverIP = RpcContext.getContext().getRemoteHost();
+// 获取当前服务配置信息，所有配置信息都将转换为URL的参数
+String application = RpcContext.getContext().getUrl().getParameter("application");
+// 注意：每发起RPC调用，上下文状态会变化
+yyyService.yyy();
+----
+
+.服务生产者
+[source,java]
+----
+public class XxxServiceImpl implements XxxService {
+
+    public void xxx() {
+        // 本端是否为提供端，这里会返回true
+        boolean isProviderSide = RpcContext.getContext().isProviderSide();
+        // 获取调用方IP地址
+        String clientIP = RpcContext.getContext().getRemoteHost();
+        // 获取当前服务配置信息，所有配置信息都将转换为URL的参数
+        String application = RpcContext.getContext().getUrl().getParameter("application");
+        // 注意：每发起RPC调用，上下文状态会变化
+        yyyService.yyy();
+        // 此时本端变成消费端，这里会返回false
+        boolean isProviderSide = RpcContext.getContext().isProviderSide();
+    }
+}
+----
+
+=== 隐式参数传递
+
+image::images\dubbo使用-c5fd7.png[]
+
+.在服务消费方端设置隐式参数
+[source,java]
+----
+RpcContext.getContext().setAttachment("index", "1"); // 隐式传参，后面的远程调用都会隐式将这些参数发送到服务器端，类似cookie，用于框架集成，不建议常规业务使用
+xxxService.xxx(); // 远程调用
+// ...
+----
+
+NOTE: setAttachment 设置的 KV 对，在完成下面一次远程调用会被清空，即多次远程调用要多次设置。
+
+
+.在服务提供方端获取隐式参数
+[source,java]
+----
+public class XxxServiceImpl implements XxxService {
+
+    public void xxx() {
+        // 获取客户端隐式传入的参数，用于框架集成，不建议常规业务使用
+        String index = RpcContext.getContext().getAttachment("index");
+    }
+}
+----
+
+NOTE: path, group, version, dubbo, token, timeout 几个 key 是保留字段，请使用其它值。
