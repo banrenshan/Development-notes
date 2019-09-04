@@ -1392,3 +1392,147 @@ ctx.getEnvironment().setActiveProfiles("development");
 ctx.register(SomeConfig.class, StandaloneDataConfig.class, JndiDataConfig.class);
 ctx.refresh();
 ----
+
+此外，您还可以通过spring.profiles.active属性声明性地激活配置文件，该属性可以通过系统环境变量，JVM系统属性，web.xml中的servlet上下文参数或甚至作为JNDI中的条目来指定（请参阅PropertySource Abstraction））。 在集成测试中，可以使用spring-test模块中的@ActiveProfiles批注声明活动配置文件（请参阅具有环境配置文件的上下文配置）。
+
+请注意，配置文件不是“either-or”命题。 您可以一次激活多个配置文件。 以编程方式，您可以为setActiveProfiles（）方法提供多个配置文件名称，该方法接受String ... varargs。 以下示例激活多个配置文件：
+[source,java]
+----
+ctx.getEnvironment().setActiveProfiles("profile1", "profile2");
+----
+
+spring.profiles.active属性接受以逗号分隔的列表:
+[source,shell]
+----
+-Dspring.profiles.active="profile1,profile2"
+----
+
+===== 默认Profile
+
+表示默认启用的配置文件。 请考虑以下示例：
+[source,java]
+----
+@Configuration
+@Profile("default")
+public class DefaultDataConfig {
+
+    @Bean
+    public DataSource dataSource() {
+        return new EmbeddedDatabaseBuilder()
+            .setType(EmbeddedDatabaseType.HSQL)
+            .addScript("classpath:com/bank/config/sql/schema.sql")
+            .build();
+    }
+}
+----
+
+如果没有激活配置文件，则创建dataSource。 您可以将此视为一种为一个或多个bean提供默认定义的方法。 如果启用了任何配置文件，则默认配置文件不适用。
+
+您可以使用环境上的setDefaultProfiles（）或声明性地使用spring.profiles.default属性更改默认配置文件的名称。
+
+===== PropertySource 抽象
+
+Spring的Environment抽象通过可配置的属性源层次结构提供搜索操作。 请考虑以下列表：
+[source,java]
+----
+ApplicationContext ctx = new GenericApplicationContext();
+Environment env = ctx.getEnvironment();
+boolean containsMyProperty = env.containsProperty("my-property");
+System.out.println("Does my environment contain the 'my-property' property? " + containsMyProperty);
+----
+
+在前面的代码片段中，我们看到了一种向Spring询问my-property属性是否为当前环境定义的高级方法。 要回答此问题，Environment对象会对一组PropertySource对象执行搜索。 PropertySource是对任何键值对源的简单抽象，Spring的StandardEnvironment配置有两个PropertySource对象 - 一个表示JVM系统属性集(System.getProperties())，另一个表示系统环境变量集（System.getenv()）。
+
+NOTE: 这些默认属性源存在于StandardEnvironment中，用于独立应用程序。 StandardServletEnvironment使用其他默认属性源填充，包括servlet配置和servlet上下文参数。 它可以选择启用JndiPropertySource。 有关详细信息，请参阅javadoc。
+
+具体地说，当您使用StandardEnvironment时，如果在运行时存在my-property系统属性或my-property环境变量，则对env.containsProperty（“my-property”）的调用将返回true。
+
+执行的搜索是分层的。 默认情况下，系统属性优先于环境变量。 因此，如果在调用env.getProperty（“my-property”）期间碰巧在两个位置都设置了my-property属性，则系统属性值“wins”并返回。 请注意，属性值不会合并，而是由前面的条目完全覆盖。
+
+对于常见的StandardServletEnvironment，完整层次结构如下，优先级从高往下：
+
+1. ServletConfig参数（如果适用 - 例如，在DispatcherServlet上下文的情况下）
+2. ServletContext参数（web.xml context-param条目）
+3. JNDI环境变量（java：comp / env / entries）
+4. JVM系统属性（-D命令行参数）
+5. JVM系统环境（操作系统环境变量）
+
+最重要的是，整个机制是可配置的。 您可能希望将自定义的属性源集成到此搜索中。 为此，请实现并实例化您自己的PropertySource，并将其添加到当前Environment的PropertySource集合中。 以下示例显示了如何执行此操作：
+[source,java]
+----
+ConfigurableApplicationContext ctx = new GenericApplicationContext();
+MutablePropertySources sources = ctx.getEnvironment().getPropertySources();
+sources.addFirst(new MyPropertySource());
+----
+
+在上面的代码中，MyPropertySource在搜索中添加了最高优先级。 如果它包含my-property属性，则检测并返回该属性，以支持任何其他PropertySource中的任何my-property属性。 MutablePropertySources API公开了许多方法，允许精确操作属性源集。
+
+===== 使用@PropertySource
+
+@PropertySource注释提供了一种方便的声明式机制，用于向Spring的环境添加PropertySource。
+
+给定一个名为app.properties的文件，其中包含键值对testbean.name = myTestBean，以下@Configuration类使用@PropertySource，以便调用testBean.getName（）返回myTestBean：
+[source,java]
+----
+@Configuration
+@PropertySource("classpath:/com/myco/app.properties")
+public class AppConfig {
+
+    @Autowired
+    Environment env;
+
+    @Bean
+    public TestBean testBean() {
+        TestBean testBean = new TestBean();
+        testBean.setName(env.getProperty("testbean.name"));
+        return testBean;
+    }
+}
+----
+
+@PropertySource资源位置中存在的任何$ {...}占位符将根据已针对环境注册的属性源集进行解析，如以下示例所示：
+[source,java]
+----
+@Configuration
+@PropertySource("classpath:/com/${my.placeholder:default/path}/app.properties")
+public class AppConfig {
+
+    @Autowired
+    Environment env;
+
+    @Bean
+    public TestBean testBean() {
+        TestBean testBean = new TestBean();
+        testBean.setName(env.getProperty("testbean.name"));
+        return testBean;
+    }
+}
+----
+
+假设my.placeholder存在于已注册的其中一个属性源中（例如，系统属性或环境变量），则占位符将解析为相应的值。 如果不是，则/path用作默认值。 如果未指定缺省值且无法解析属性，则抛出IllegalArgumentException。
+
+==== 注册LoadTimeWeaver
+
+Spring使用LoadTimeWeaver在将类加载到Java虚拟机（JVM）时动态转换类。要启用加载时织入，可以将@EnableLoadTimeWeaving添加到其中一个@Configuration类中，如以下示例所示：
+[source,java]
+----
+@Configuration
+@EnableLoadTimeWeaving
+public class AppConfig {
+}
+----
+xml配置方式:
+[source,xml]
+----
+<beans>
+    <context:load-time-weaver/>
+</beans>
+----
+
+一旦为ApplicationContext配置，该ApplicationContext中的任何bean都可以实现LoadTimeWeaverAware，从而接收对load-time weaver实例的引用。 这与Spring的JPA支持结合使用特别有用，其中JPA类转换可能需要加载时织入。 有关更多详细信息，请参阅LocalContainerEntityManagerFactoryBean javadoc。 有关AspectJ加载时织入的更多信息，请参阅Spring Framework中使用AspectJ的加载时编织。
+
+=== ApplicationContext的其他能力
+
+正如章节介绍中所讨论的，org.springframework.beans.factory包提供了管理和操作bean的基本功能，包括以编程方式。 org.springframework.context包添加了ApplicationContext接口，该接口扩展了BeanFactory接口，此外还扩展了其他接口，以更面向应用程序框架的方式提供其他功能。 许多人以完全声明的方式使用ApplicationContext，甚至不以编程方式创建它，而是依赖于诸如ContextLoader之类的支持类来自动实例化ApplicationContext，作为Java EE Web应用程序的正常启动过程的一部分。
+
+为了以更加面向框架的样式增强BeanFactory功能，上下文包还提供以下功能：
