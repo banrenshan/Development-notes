@@ -372,14 +372,61 @@ WebClient webClient = WebClient.builder()
 
 === DispatcherHandler
 
+类似于springmvc,webflux也有一个中心的DispatcherHandler.提供了一种用于请求处理的共享算法，而实际的工作是由可配置的，委托组件来执行。该模型非常灵活，支持多种工作流程。
+
+DispatcherHandler从Spring配置中发现它需要的委托组件。它本身也被设计为一个Spring bean，ApplicationContextAware 用于访问它运行的上下文。如果DispatcherHandler声明的bean名称为webHandler，则他被WebHttpHandlerBuilder发现，然后组合成请求处理链，如WebHandlerAPI中所述。
+
+WebFlux应用程序中的Spring配置通常包含：
+
+. DispatcherHandler bean,name是webHandler
+. WebFilter和WebExceptionHandler bean
+. DispatcherHandler 特殊的bean
+配置WebHttpHandlerBuilder用于构建处理链，如以下示例所示：
+[source,java]
+----
+ApplicationContext context = ...
+HttpHandler handler = WebHttpHandlerBuilder.applicationContext(context);
+----
+
+返回的handler被server适配器使用
+
 ==== 特殊bean
+
+DispatcherHandler 委托特殊的bean处理请求和渲染响应.你可以自定这些bean的属性,扩展甚至替换他们.
+
+下表列出了DispatcherHandler需要的特殊bean.
+
+|===
+|类型|说明
+
+|HandlerMapping|将请求映射到处理程序。映射基于某些标准，其细节因HandlerMapping实现而异- 带注释的控制器，简单的URL模式映射等。 主要HandlerMapping实现RequestMappingHandlerMapping用于 @RequestMapping注释方法，RouterFunctionMapping函数式端点路由以及SimpleUrlHandlerMappingURI路径模式和WebHandler实例的显式注册。
+|HandlerAdapter|DispatcherHandler无论实际调用处理程序如何，都可以帮助调用映射到请求的处理程序。例如，调用带注释的控制器需要解析注释
+|HandlerResultHandler|处理程序调用的结果并完成响应
+|===
 
 ==== webflux配置
 
-==== 处理
+==== 处理过程
+
+DispatcherHandler处理请求过程如下:
+. HandlerMapping要求每个请求找到匹配的处理程序，并使用第一个匹配
+. 如果找到一个处理程序，并执行，它将执行HandlerAdapter的返回值公开为HandlerResult。
+. HandlerResult被提供给一个适当的HandlerResultHandler,直接写入响应或者交由视图渲染。
 
 ==== 结果处理
 
+调用HandlerAdapter的返回值被包装成HandlerResult,并传递给第一个支持的HandlerResultHandler ,下表列出了所有可用的HandlerResultHandler :
+
+|===
+|类型|返回值|顺序
+
+|ResponseEntityResultHandler|ResponseEntity,通常来自@Controller实例。|0
+|ServerResponseResultHandler|ServerResponse，通常来自函数式端点。|0
+|ResponseBodyResultHandler|处理@ResponseBody方法或@RestController类的返回值。|100
+|ViewResolutionResultHandler|CharSequence, View, Model, Map, Rendering,或任何被当做model的对象|Integer.MAX_VALUE
+|===
 ==== 异常
+
+
 
 ==== 视图方案
