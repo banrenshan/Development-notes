@@ -1,0 +1,140 @@
+= CopyOnWriteArrayList
+
+:toc: left
+:icons: font
+:sectanchors: 
+:toclevels: 4
+:source-highlighter: pygments
+:pygments-style: manni
+:source-linenums-option:
+
+== CopyOnWrite容器
+
+CopyOnWrite容器即写时复制的容器。通俗的理解是当我们往一个容器添加元素的时候，不直接往当前容器添加，而是先将当前容器进行Copy，复制出一个新的容器，然后新的容器里添加元素，添加完元素之后，再将原容器的引用指向新的容器。这样做的好处是我们可以对CopyOnWrite容器进行并发的读，而不需要加锁，因为当前容器不会添加任何元素。所以CopyOnWrite容器也是一种读写分离的思想，读和写不同的容器。
+
+我们来看看读写方法：
+[source,java]
+----
+    public boolean add(E e) {
+	    final ReentrantLock lock = this.lock;
+	    lock.lock();
+	    try {
+	        Object[] elements = getArray();
+	        int len = elements.length;
+	        Object[] newElements = Arrays.copyOf(elements, len + 1);
+	        newElements[len] = e;
+	        setArray(newElements);
+	        return true;
+	    } finally {
+	        lock.unlock();
+	    }
+    }
+
+    public E get(int index) {
+   	 return get(getArray(), index);
+	}
+----
+
+写的时候加锁，读的时候不需要加锁。如果读的时候有多个线程正在向CopyOnWriteArrayList添加数据，读还是会读到旧的数据，因为写的时候不会锁住旧的
+
+== 使用示例
+[source,java]
+----
+public class MapTest {
+
+    public static void main(String[] args) {
+        List<String> list=new ArrayList<>();
+        //List<String> list=new CopyOnWriteArrayList<>();
+
+        list.add("ddd");
+        new Thread(new ReadThread(list)).start();
+        new Thread(new WriteThread(list)).start();
+    }
+
+    static class ReadThread implements Runnable {
+
+        private List<String> list;
+
+        public ReadThread(List<String> list) {
+            this.list = list;
+        }
+
+        @Override
+        public void run() {
+            Iterator<String> iterator = list.iterator();
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            while (iterator.hasNext()){
+                System.err.println(iterator.next());
+            }
+        }
+    }
+
+    static class WriteThread implements Runnable {
+
+        private List<String> list;
+
+        public WriteThread(List<String> list) {
+            this.list = list;
+        }
+
+        @Override
+        public void run() {
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            list.add("zhaozhiqiang");
+        }
+    }
+}
+
+----
+读线程先启动，读取数据后让出线程，然后写线程启动并写入数据，ArrayList会抛出ConcurrentModificationException。如果换成CopyOnWriteArrayList则正常运行，但是新加的数据没有被遍历出来。我们来看造成这样结果的原因
+
+[source,java]
+----
+    public Iterator<E> iterator() {
+        return new COWIterator<E>(getArray(), 0);
+    }
+
+    private static class COWIterator<E> implements ListIterator<E> {
+        /** Snapshot of the array */
+        private final Object[] snapshot;
+        /** Index of element to be returned by subsequent call to next.  */
+        private int cursor;
+
+        private COWIterator(Object[] elements, int initialCursor) { <1>
+            cursor = initialCursor;
+            snapshot = elements;
+        }
+
+        public boolean hasNext() {
+            return cursor < snapshot.length;
+        }
+
+        public boolean hasPrevious() {
+            return cursor > 0;
+        }
+
+        @SuppressWarnings("unchecked")
+        public E next() {
+            if (! hasNext())
+                throw new NoSuchElementException();
+            return (E) snapshot[cursor++];
+        }
+......
+
+----
+<1> 把需要遍历的数据传递给迭代器，相当于复制了一份数据，所以添加数据会不受影响。
+
+== 使用场景
+
+对写操作比较少，读操作比较多的情况。
+
+
+缺点：迭代器遍历，添加数据的时候都会推高内存。

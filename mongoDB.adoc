@@ -1,0 +1,155 @@
+---
+title: mongoDB
+---
+
+= mongoDB 
+:toc: left
+:icons: font
+:imagesdir: /blog/images
+
+== 概述
+
+== 安装
+
+== 基本命令
+
+查看数据库列表
+
+----
+show dbs;
+show databases;
+----
+
+进入数据库,如果不存在就创建
+
+----
+use test #test是数据库名称
+----
+
+显示集合列表
+
+----
+show collections
+----
+
+插入记录
+
+db.<collection>.insert(文档)
+
+----
+ db.stus.insert({"name":"zhaozhiqiang","age":1});
+ db.stus.insertOne({"name":"wangxu","age":26});
+ db.stus.insertMany([
+    {"name":"xusong","age":56},
+    {"name":"zhanganb","age":34}
+ ]);
+----
+
+db代表当前数据库,stus是集合,可以事先不存在.
+
+插入有三个方法,分别是insert,insertOne和insertMany.insert是其他两个综合体.
+
+在插入数据之后,我们会发现文档多了一个`_id`字段,这是系统生成的不可重复id,如果希望使用系统的,我们可以在插入文档的时候指定_id字段,例如:
+
+----
+db.stus.insertOne({"name":"liuheng","age":26,"_id":"sadsd"});
+----
+
+=== 查询记录
+
+查询有两个方法,find和findOne.
+
+. db.stus.find():查询集合中的所有文档
+. db.stus.find({age:26}):查询年龄为26的文档
+. db.stus.find({age:26}).count():统计查询到的条数
+. db.stus.find({age:26})[0]:查询年龄为26的文档,返回结果的第一条
+. db.stus.findOne({age:26}):查询年龄为26的文档,返回结果的第一条
+. db.stus.findOne({age:26}).name:查询年龄为26的名字
+
+=== 修改文档
+
+db.<collection>.update(查询条件,变更信息,配置信息) 
+
+配置信息限定update是修改还是替换
+
+----
+db.stus.update({age:1},{name:9999}) 
+----
+
+替换查询到的age=1的第一个文档的内容,注意update默认是替换而不是修改.如果是修改,可以使下面的sql
+
+----
+db.stus.update({name:9999},{name:888,age:23},{upsert:true})
+db.stus.update({age:26},{ $set:{addr:'shanghai'}})
+----
+
+如果要更新多条数据,例如:
+----
+db.stus.update({age:26},{ $set:{addr:'shanghai'}},{multi:true})
+----
+
+如何删除文档的某个字段呢?
+
+----
+db.stus.update({age:26},{ $unset:{addr:'anything'}})
+----
+
+删除字段的时候,字段的是可以使任何值.
+
+
+更新
+----
+db.stus.updateOne({age:34}, {$set:{name:'uodate'}})
+db.stus.updateMany({age:26}, {$set:{name:'26update'}})
+----
+
+替换
+----
+db.stus.replaceOne({age:26}, {name:'26replace'})
+----
+
+注意updateOne必须使用$set,replaceOne则不能使用.
+
+=== 删除文档
+
+删除方法有三个: remove,deleteOne,deleteMany
+
+----
+db.stus.remove({age:26})
+db.stus.deleteOne({age:26})
+db.stus.deleteMany({age:56})
+----
+
+remove默认是删除所有匹配的数据,可以通过设置来指定只删除一条
+----
+db.stus.remove({age:26},true)
+----
+
+== 排序和投影
+
+----
+db.stus.find().sort({name:-1}) 
+----
+
+-1:表示倒序
+1:表示正序
+
+----
+db.stus.find({},{name:1,_id:0})
+----
+1:表示显示改字段
+0:表达不显示改字段
+
+== 分页
+
+----
+db.stus.find().limit(5)
+----
+
+显示前五条数据
+
+----
+db.stus.find().skip(2).limit(5)
+----
+
+跳过前两条,然后显示5条

@@ -1,0 +1,222 @@
+= Future
+
+创建线程的2种方式，一种是直接继承Thread，另外一种就是实现Runnable接口。这两种方式都有一个缺陷就是：在执行完任务之后无法获取执行结果。 如果需要获取执行结果，就必须通过共享变量或者使用线程通信的方式来达到效果，这样使用起来就比较麻烦。而自从Java 1.5开始，就提供了Callable和Future，通过它们可以在异步任务执行完成之后获取任务执行结果。
+
+
+== 引子
+
+我们来从一个简单的例子调用来逐步展开讲解
+[source,java]
+----
+public class FutureTest {
+
+    public static void main(String[] args) {
+        Callable<String> name = () -> { <1>
+            Thread.sleep(1000);
+            System.err.println("Callable正在调用");
+            return "赵志强";
+        };
+
+        FutureTask<String> task = new FutureTask<String>(name); <2>
+
+        new Thread(task).start(); <3>
+
+        try {
+            System.err.println("等待获取结果");
+            String s = task.get(); <4>
+            System.err.println("获取到结果了:" + s);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } catch (ExecutionException e) {
+            e.printStackTrace();
+        }
+    }
+}
+----
+
+<1> 实现Callable接口
+<2> 创建FutureTask任务,该类实现了Runable和Callable接口
+<3> 启动异步任务
+<4> 获取任务结果,该方法会阻塞等待知道有结果返回.
+
+上面的代码一共涉及到两个类:Callable和FutureTask,我们来剖析一下源码
+
+== 源码分析
+
+.Callable
+[source,java]
+----
+public interface Callable<V> {
+    
+    V call() throws Exception;
+}
+----
+
+可以看出该接口是函数式接口,里面之定义了一个方法,用来定义有返回值的线程任务代码.
+
+
+接下来,我们分析FutureTask
+[source,java]
+----
+public class FutureTask<V> implements RunnableFuture<V> {
+----
+
+该类实现了RunnableFuture,所以先看一下这个接口的源码
+[source,java]
+----
+public interface RunnableFuture<V> extends Runnable, Future<V> {
+ 
+    void run();
+}
+----
+
+到这里,我们应该明白为什么Thread类可以调用FutureTask了吧,因为他本身就是Runnable接口的实现者.
+
+终于可以分析FutureTask了,我们可以看到程序的入口是run方法:
+[source,java]
+----
+    public void run() {
+        if (state != NEW ||
+            !UNSAFE.compareAndSwapObject(this, runnerOffset,
+                                         null, Thread.currentThread())) <1>
+            return;
+        try {
+            Callable<V> c = callable;
+            if (c != null && state == NEW) { <2>
+                V result;
+                boolean ran;
+                try {
+                    result = c.call(); <3>
+                    ran = true;
+                } catch (Throwable ex) {
+                    result = null;
+                    ran = false;
+                    setException(ex); <4>
+                }
+                if (ran)
+                    set(result); <5>
+            }
+        } finally {
+    
+            runner = null;
+            int s = state;
+            if (s >= INTERRUPTING) <6>
+                handlePossibleCancellationInterrupt(s);
+        }
+    }
+----
+
+<1> 判断线程的状态是否合法,不合法直接终止执行
+<2> 检验callable是否为空
+<3> 调用Callable的call方法
+<4> 异常发生之后,处理异常信息
+<5> 正常执行成功,保存返回值到当前实例中
+<6> 如果线程执行过程中,被中断,处理中断.
+
+[source,java]
+----
+    protected void set(V v) {
+        if (UNSAFE.compareAndSwapInt(this, stateOffset, NEW, COMPLETING)) {
+            outcome = v; <1>
+            UNSAFE.putOrderedInt(this, stateOffset, NORMAL); // final state
+            finishCompletion(); <2>
+        }
+    }
+    private void finishCompletion() {
+        // assert state > COMPLETING;
+        for (WaitNode q; (q = waiters) != null;) { <3>
+            if (UNSAFE.compareAndSwapObject(this, waitersOffset, q, null)) {
+                for (;;) {
+                    Thread t = q.thread; //获取等待节点上的线程
+                    if (t != null) {
+                        q.thread = null;
+                        LockSupport.unpark(t); //唤醒线程获取结果
+                    }
+                    WaitNode next = q.next; 
+                    if (next == null) //判断是否还有下一个线程等待获取结果
+                        break;
+                    q.next = null; // unlink to help gc
+                    q = next;
+                }
+                break;
+            }
+        }
+
+        done();  <4>
+
+        callable = null;        // to reduce footprint
+    }
+----
+
+<1> 保存call方法执行完成返回的结果
+<2> 唤醒等待获取结果的线程
+<3> WaitNode节点存储等待获取结果的线程信息
+<4> 任务执行完成之后执行的回调方法
+
+以上是异步任务的执行过程,我们来看get方法,如何获取结果:
+
+[source,java]
+----
+    public V get() throws InterruptedException, ExecutionException {
+        int s = state;
+        if (s <= COMPLETING) <1>
+            s = awaitDone(false, 0L); 
+        return report(s); <2>
+    }
+    private V report(int s) throws ExecutionException {
+        Object x = outcome;
+        if (s == NORMAL)
+            return (V)x;
+        if (s >= CANCELLED)
+            throw new CancellationException();
+        throw new ExecutionException((Throwable)x);
+    }    
+
+----
+
+<1> 如果线程的状态没有执行完成就等待
+<2> 返回获取到的结果
+
+[source,java]
+----
+    private int awaitDone(boolean timed, long nanos)
+        throws InterruptedException {
+        final long deadline = timed ? System.nanoTime() + nanos : 0L;
+        WaitNode q = null;
+        boolean queued = false;
+        for (;;) {
+            if (Thread.interrupted()) {
+                removeWaiter(q);
+                throw new InterruptedException();
+            }
+
+            int s = state;
+            if (s > COMPLETING) {
+                if (q != null)
+                    q.thread = null;
+                return s;
+            }
+            else if (s == COMPLETING) // cannot time out yet
+                Thread.yield();
+            else if (q == null)
+                q = new WaitNode(); <1>
+            else if (!queued)
+                queued = UNSAFE.compareAndSwapObject(this, waitersOffset,
+                                                     q.next = waiters, q); <2>
+            else if (timed) {
+                nanos = deadline - System.nanoTime();
+                if (nanos <= 0L) {
+                    removeWaiter(q);
+                    return state;
+                }
+                LockSupport.parkNanos(this, nanos);
+            }
+            else
+                LockSupport.park(this); <3>
+        }
+    }
+----
+
+<1> 线程第一次进入循环,创建节点
+<2> 线程第二次进入循环,CAS算法比较是否需要进入队列等待
+<3> 经过前两次的循环,如果任务状态没有执行完成,就会进入等待状态

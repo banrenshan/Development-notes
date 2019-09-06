@@ -1,0 +1,2755 @@
+= Spring Web MVC
+:toc: left
+:icons: font
+:source-highlighter: highlightjs
+:sectanchors: 
+:toclevels: 2
+
+== 1.1. 概述
+
+Spring Web MVC是构建在Servlet API上的Web框架，从一开始就包含在Spring框架中。
+
+== 1.2.  DispatcherServlet
+
+像许多其他Web框架一样，Spring MVC围绕前端控制器模式进行设计，其核心Servlet--DispatcherServlet为请求处理提供共享算法，而实际工作委托组件执行。
+
+DispatcherServlet需要根据Servlet规范使用Java配置或在web.xml中声明和映射。 DispatcherServlet根据配置来发现它在请求映射，视图解析，异常处理等方面所需的组件。
+
+以下是注册和初始化DispatcherServlet的Java配置示例。 该类由Servlet容器自动检测（请参阅Servlet配置）：
+
+[source,java]
+----
+public class MyWebApplicationInitializer implements WebApplicationInitializer {
+
+    @Override
+    public void onStartup(ServletContext servletCxt) {
+
+        // Load Spring web application configuration
+        AnnotationConfigWebApplicationContext ac = new AnnotationConfigWebApplicationContext();
+        ac.register(AppConfig.class);
+        // ac.refresh(); 这个操作的含义是什么？？？
+
+        // Create and register the DispatcherServlet
+        DispatcherServlet servlet = new DispatcherServlet(ac);
+        ServletRegistration.Dynamic registration = servletCxt.addServlet("app", servlet);
+        registration.setLoadOnStartup(1);
+        registration.addMapping("/app/*");
+    }
+}
+----
+
+NOTE: 除了直接使用ServletContext API之外，您还可以扩展AbstractAnnotationConfigDispatcherServletInitializer并重写特定方法（请参阅<<_1_2_1上下文层级>>）。
+
+以下是注册和初始化DispatcherServlet的web.xml配置示例：
+
+[source,xml]
+----
+<web-app>
+
+    <listener>
+        <listener-class>org.springframework.web.context.ContextLoaderListener</listener-class>
+    </listener>
+
+    <context-param>
+        <param-name>contextConfigLocation</param-name>
+        <param-value>/WEB-INF/app-context.xml</param-value>
+    </context-param>
+
+    <servlet>
+        <servlet-name>app</servlet-name>
+        <servlet-class>org.springframework.web.servlet.DispatcherServlet</servlet-class>
+        <init-param>
+            <param-name>contextConfigLocation</param-name>
+            <param-value></param-value>
+        </init-param>
+        <load-on-startup>1</load-on-startup>
+    </servlet>
+
+    <servlet-mapping>
+        <servlet-name>app</servlet-name>
+        <url-pattern>/app/*</url-pattern>
+    </servlet-mapping>
+
+</web-app>
+----
+
+=== 1.2.1. 上下文层级
+
+DispatcherServlet需要一个WebApplicationContext（一个普通的ApplicationContext的扩展）用于其自己的配置。 WebApplicationContext有一个指向它所关联的ServletContext和Servlet的链接。它也被绑定到ServletContext，以便应用程序可以在需要的时候使用RequestContextUtils上的静态方法查找WebApplicationContext。
+
+对于许多应用程序来说，具有单个WebApplicationContext，已经足够了。但有的时候，需要构建一个上下文层次结构，其中一个根WebApplicationContext在多个DispatcherServlet（或其他Servlet）实例中共享，每个实例都有其自己的WebApplicationContext配置。
+
+根WebApplicationContext通常包含需要跨多个Servlet实例共享的基础架构bean，例如数据存储库和业务服务。那些bean被有效地继承，并且可以在特定于Servlet的子WebApplicationContext中重写（即重新声明），子WebApplicationContext通常包含给定Servlet特定的本地化bean（即不能被其他WebApplicationContext管理和访问）：
+
+image::images/mvc-context-hierarchy.png[]
+
+下面是WebApplicationContext层级结构配置的例子：
+[source,java]
+----
+public class MyWebAppInitializer extends AbstractAnnotationConfigDispatcherServletInitializer {
+
+    @Override
+    protected Class<?>[] getRootConfigClasses() {
+        return new Class<?[] { RootConfig.class };
+    }
+
+    @Override
+    protected Class<?>[] getServletConfigClasses() {
+        return new Class<?[] { App1Config.class };
+    }
+
+    @Override
+    protected String[] getServletMappings() {
+        return new String[] { "/app1/*" };
+    }
+}
+----
+
+NOTE: 如果不需要应用程序上下文层次结构，则应用程序可以通过getRootConfigClasses（）返回所有配置，并且getServletConfigClasses（）返回null。
+
+以上java配置和下面的web.xml等效:
+[source,xml]
+----
+<web-app>
+
+    <listener>
+        <listener-class>org.springframework.web.context.ContextLoaderListener</listener-class>
+    </listener>
+
+    <context-param>
+        <param-name>contextConfigLocation</param-name>
+        <param-value>/WEB-INF/root-context.xml</param-value>
+    </context-param>
+
+    <servlet>
+        <servlet-name>app1</servlet-name>
+        <servlet-class>org.springframework.web.servlet.DispatcherServlet</servlet-class>
+        <init-param>
+            <param-name>contextConfigLocation</param-name>
+            <param-value>/WEB-INF/app1-context.xml</param-value>
+        </init-param>
+        <load-on-startup>1</load-on-startup>
+    </servlet>
+
+    <servlet-mapping>
+        <servlet-name>app1</servlet-name>
+        <url-pattern>/app1/*</url-pattern>
+    </servlet-mapping>
+
+</web-app>
+----
+
+NOTE: 如果不需要应用程序上下文层次结构，则应用程序可以仅配置根上下文，并将contextConfigLocation Servlet参数留空。
+
+[reftext="特殊Bean"]
+=== 1.2.2. 特殊Bean
+
+DispatcherServlet委托特殊的bean来处理请求并呈现适当的响应。“特殊bean”是指实现WebFlux框架协议的Spring管理的对象实例。这些通常会在项目内置默认的实例，但您可以自定义其属性，然后进行扩展或替换。
+
+[cols="1,4a"]
+|===
+|<<HandlerMapping>>|将请求映射到处理程序以及用于预处理和后处理的拦截器列表。该映射基于一些标准，其细节因HandlerMapping实现而异。HandlerMapping的两个主要实现是RequestMappingHandlerMapping，它支持@RequestMapping注释方法和SimpleUrlHandlerMapping（为URI处理程序显式注册URI路径模式）。
+|HandlerAdapter|帮助DispatcherServlet调用映射到请求的处理程序，而不管实际如何调用处理程序，例如，调用带注释的控制器需要解析注释。 HandlerAdapter的主要目的是屏蔽DispatcherServlet的细节。
+|<<HandlerExceptionResolver>>| 处理可能在请求映射，视图解析等阶段发生的异常
+|<<ViewResolver>>|将从处理程序返回的基于字符串的逻辑视图名称解析为实际的视图，以使用该视图呈现给响应。
+|<<LocaleResolver>>, <<LocaleContextResolver>>|解析客户端正在使用的区域设置以及可能的时区，以便能够提供国际化的视图。
+|<<ThemeResolver>>|解析您的Web应用程序可以使用的主题，例如提供个性化布局。
+|<<MultipartResolver>>|在多部分解析库的帮助下解析多部分请求的抽象（例如，浏览器表单文件上载）。
+|<<FlashMapManager>>|存储和检索可用于将属性从一个请求传递到另一个请求的“输入”和“输出”FlashMap，通常用于重定向。
+|===
+
+=== 1.2.3. Web MVC Config
+
+应用程序可以声明处理请求所需的<<特殊Bean>>中列出的基础架构bean。 DispatcherServlet在WebApplicationContext检查每个特殊bean。如果没有匹配的bean类型，它将使用DispatcherServlet.properties中列出的默认类型。
+
+在大多数情况下，MVC配置是最好的起点。它用Java或XML声明所需的bean，并提供更高级别的配置回调API来定制它。
+
+=== 1.2.4. Servlet Config
+在Servlet 3.0+环境中，您可以选择以编程方式配置Servlet容器或与web.xml文件组合使用。以下是注册DispatcherServlet的示例：
+[source,java]
+----
+import org.springframework.web.WebApplicationInitializer;
+
+public class MyWebApplicationInitializer implements WebApplicationInitializer {
+
+    @Override
+    public void onStartup(ServletContext container) {
+        XmlWebApplicationContext appContext = new XmlWebApplicationContext();
+        appContext.setConfigLocation("/WEB-INF/spring/dispatcher-config.xml");
+
+        ServletRegistration.Dynamic registration = container.addServlet("dispatcher", new DispatcherServlet(appContext));
+        registration.setLoadOnStartup(1);
+        registration.addMapping("/");
+    }
+}
+----
+
+WebApplicationInitializer是Spring MVC提供的一个接口，它确保您的实现被检测到并自动用于初始化Servlet 3容器。一个名为AbstractDispatcherServletInitializer的WebApplicationInitializer的抽象基类,通过简单地覆盖Servlet映射和DispatcherServlet配置文件位置的方法，可以更简单的注册DispatcherServlet。
+
+[source,java]
+----
+public class MyWebAppInitializer extends AbstractAnnotationConfigDispatcherServletInitializer {
+
+    @Override
+    protected Class<?>[] getRootConfigClasses() {
+        return null;
+    }
+
+    @Override
+    protected Class<?>[] getServletConfigClasses() {
+        return new Class<?>[] { MyWebConfig.class };
+    }
+
+    @Override
+    protected String[] getServletMappings() {
+        return new String[] { "/" };
+    }
+}
+----
+如果你使用基于xml的配置方式，你应该扩展AbstractDispatcherServletInitializer类：
+[source,java]
+----
+public class MyWebAppInitializer extends AbstractDispatcherServletInitializer {
+
+    @Override
+    protected WebApplicationContext createRootApplicationContext() {
+        return null;
+    }
+
+    @Override
+    protected WebApplicationContext createServletApplicationContext() {
+        XmlWebApplicationContext cxt = new XmlWebApplicationContext();
+        cxt.setConfigLocation("/WEB-INF/spring/dispatcher-config.xml");
+        return cxt;
+    }
+
+    @Override
+    protected String[] getServletMappings() {
+        return new String[] { "/" };
+    }
+}
+----
+AbstractDispatcherServletInitializer也提供了添加Filter 示例并映射到DispatcherServlet的方式：
+[source,java]
+----
+public class MyWebAppInitializer extends AbstractDispatcherServletInitializer {
+
+    // ...
+
+    @Override
+    protected Filter[] getServletFilters() {
+        return new Filter[] {
+            new HiddenHttpMethodFilter(), new CharacterEncodingFilter() };
+    }
+}
+----
+
+每个过滤器都会根据其具体类型添加一个默认名称，并自动映射到DispatcherServlet。
+
+AbstractDispatcherServletInitializer的isAsyncSupported方法提供了一个位置来启用DispatcherServlet上的异步支持以及映射到它的所有过滤器。默认情况下，该标志被设置为true。
+
+最后，如果您需要进一步自定义DispatcherServlet本身，则可以覆盖createDispatcherServlet方法。
+
+=== 1.2.5. 处理过程
+
+DispatcherServlet 处理过程如下：
+
+* 绑定WebApplicationContext到request的属性中，以便controller和其他元素后续使用。它被绑定在DispatcherServlet.WEB_APPLICATION_CONTEXT_ATTRIBUTE属性域中。
+
+* locale resolver处理请求（呈现视图，准备数据等）时要使用的语言环境。如果你不需要区域解析，你可以忽略他。
+
+* 主题解析器处理请求，以便视图解析器等元素决定使用哪个主题。如果你不使用主题，你可以忽略它。
+
+* 如果您指定了multipart 解析器，则将检查请求中的multipart;如果找到multipart，则将请求封装在MultipartHttpServletRequest中，以供进程中的其他元素进一步处理。
+
+* 搜索适当的handler 。如果找到handler ，则会执行与handler （预处理程序，后处理程序和控制器）关联的执行链以准备模型或渲染。或者对于带注释的控制器，响应数据（在HandlerAdapter内）而不是返回视图。
+
+* 如果返回模型，则会呈现视图。如果没有返回模型（可能是由于预处理程序或后处理程序拦截了请求，可能出于安全原因），则不会呈现视图，因为请求可能已经被满足。
+
+WebApplicationContext中声明的HandlerExceptionResolver bean用于解决请求处理期间抛出的异常。这些异常解析器允许定制逻辑来解决异常。
+
+Spring DispatcherServlet还支持返回最后修改日期，正如Servlet-API所指定的那样。确定特定请求的最后修改日期的过程很简单：DispatcherServlet查找适当的处理程序映射并测试找到的处理程序是否实现LastModified接口。如果是这样，则LastModified接口的long getLastModified（request）方法的值将返回给客户端。
+
+您可以通过将Servlet初始化参数（init-param元素）添加到web.xml文件中的Servlet声明来自定义单个DispatcherServlet实例。请参阅下表以获取支持的参数列表。
+
+[cols="1,4a"]
+|===
+|contextClass|实现WebApplicationContext的类，它实例化此Servlet使用的上下文。默认情况下，使用XmlWebApplicationContext。
+|contextConfigLocation|传递给上下文实例（由contextClass指定）的字符串，用于指示上下文的配置文件位置。该字符串可能包含多个字符串（使用逗号作为分隔符）以支持多个上下文。在定义了两次bean的多个上下文位置的情况下，最新的位置优先。
+|namespace|WebApplicationContext的命名空间。默认为[servlet-name] -servlet
+|===
+
+=== 1.2.6. 拦截器
+
+
+所有HandlerMapping实现都支持处理拦截器，当您想要将特定功能应用于某些请求时（例如，检查委托人），拦截器非常有用。 拦截器实现org.springframework.web.servlet包中HandlerInterceptor，并使用三种方法提供足够的灵活性来执行各种预处理和后处理：
+
+* preHandle(..) —handler之前执行
+* postHandle(..) — handler之后执行
+* afterCompletion(..) — 请求完成之后执行
+
+preHandle（..）方法返回一个布尔值。 您可以使用此方法来中断或继续处理执行链。 当此方法返回true时，处理程序执行链将继续; 当它返回false时，DispatcherServlet假定拦截器本身已经处理请求（并且例如呈现适当的视图）并且不继续执行链中的其他拦截器和实际handler。
+
+[NOTE]
+====
+postHandle对使用@ResponseBody注解和返回ResponseEntity对象方法不太有用，因为response已经在HandlerAdapter中写入并提交。这意味着对响应进行任何更改都为时已晚，例如添加额外的响应头。 对于这种场景，您可以实现ResponseBodyAdvice，并将其声明为Controller Advice bean或直接在RequestMappingHandlerAdapter上进行配置。
+
+[source,java]
+----
+@ControllerAdvice
+public class ResponseBodyAdviceController implements ResponseBodyAdvice {
+    public boolean supports(MethodParameter methodParameter, Class aClass) {
+        //判断是支持该请求
+        return methodParameter.hasMethodAnnotation(Record.class);
+    }
+
+    public Object beforeBodyWrite(Object o, MethodParameter methodParameter, MediaType mediaType, Class aClass, ServerHttpRequest serverHttpRequest, ServerHttpResponse serverHttpResponse) {
+        // o:响应结果
+        //在这里拦截响应数据并做修改，而不是拦截器中
+        return o;
+    }
+}
+----
+====
+
+
+=== 1.2.7. 异常处理
+
+如果在映射或调用请求处理程序（例如@Controller）期间发生异常，则DispatcherServlet委托HandlerExceptionResolver bean链尝试解决异常并为其提供替代处理，这通常意味着准备一个回应的HTML错误页面或错误状态或者两者。
+
+|===
+|HandlerExceptionResolver|描述
+|SimpleMappingExceptionResolver|异常类名称和错误视图名称之间的映射。用于在浏览器应用程序中呈现错误页面。
+|DefaultHandlerExceptionResolver|解决SpringMVC引发的异常并将它们映射到HTTP状态代码。另请参阅其他ResponseEntityExceptionHandler和REST API异常。
+|ResponseStatusExceptionResolver|
+使用@ResponseStatus注释解决异常，并根据注释中的值将它们映射到HTTP状态代码。
+|ExceptionHandlerExceptionResolver|通过在@Controller或@ControllerAdvice类中调用@ExceptionHandler方法来解决异常。请参阅异常方法。
+
+|===
+
+==== 异常过程
+
+通过声明多个异常解析器bean处理异常，并在必要时设置order属性来指定排序。请记住，order值越高，异常解析器定位在链中的越晚。
+
+HandlerExceptionResolver的规范指定它可以返回：
+* 指向错误视图的ModelAndView。
+* 如果在HandlerExceptionResolver发生异常，则为返回空的ModelAndView。
+* 如果异常未解决，则返回null，供后续解析器尝试使用;如果所有解析器都未解决异常，则将其重新抛出给Servlet容器。
+
+
+Spring MVC默认配置异常解析器，例如，针对@ResponseStatus注释的异常以及支持@ExceptionHandler方法。
+
+==== 容器错误页
+如果任何HandlerExceptionResolver未解决异常，或者响应状态设置为错误状态（即4xx，5xx），则Servlet容器可能会在HTML中呈现默认错误页面。要自定义容器的默认错误页面，可以在web.xml中声明错误页面映射：
+
+[source,xml]
+----
+<error-page>
+    <location>/error</location>
+</error-page>
+----
+
+鉴于上述情况，当异常抛出时，或者响应具有错误状态时，Servlet容器在容器内将ERROR分派到配置的URL（例如“/error”）。然后由DispatcherServlet进行处理，可能将其映射到一个@Controller，该实现可以通过模型返回错误视图名称或呈现JSON响应，如下所示：
+
+[source,java]
+----
+@RestController
+public class ErrorController {
+
+    @RequestMapping(path = "/error")
+    public Map<String, Object> handle(HttpServletRequest request) {
+        Map<String, Object> map = new HashMap<String, Object>();
+        map.put("status", request.getAttribute("javax.servlet.error.status_code"));
+        map.put("reason", request.getAttribute("javax.servlet.error.message"));
+        return map;
+    }
+}
+----
+
+Servlet API不提供在Java中创建错误页面映射的方法。但是，您可以同时使用WebApplicationInitializer和web.xml来避免这个问题。
+
+
+=== 1.2.8. 视图解析
+
+Spring MVC定义了ViewResolver和View接口，使您可以在浏览器中展示数据，而无需将绑定到特定的视图技术。 
+
+ViewResolver提供了视图名称和实际视图之间的映射。View在交付给特定视图技术之前准备数据。
+
+|===
+|ViewResolver|描述
+|AbstractCachingViewResolver|AbstractCachingViewResolver缓存视图实例的子类。缓存提高了某些视图技术的性能。可以通过将缓存属性设置为false来关闭缓存。此外，如果您必须在运行时刷新某个视图（例如，在修改FreeMarker模板时），则可以使用removeFromCache（String viewName，Locale loc）方法。
+|XmlViewResolver|XmlViewResolverViewResolver的实现，它接受用XML编写的配置文件，其中使用与Spring的XML bean工厂相同的DTD。默认配置文件是/WEB-INF/views.xml。
+|ResourceBundleViewResolver|实现ViewResolver，它使用ResourceBundle中的bean定义，由bundle基名指定，对于它应该解析的每个视图，它使用属性[viewname].(class)作为视图类的值，以及属性[viewname].url作为视图url。示例可以在View Technologies的章节中找到。
+
+|UrlBasedViewResolver|ViewResolver接口的简单实现，逻辑视图名称和url直接映射，对于没有逻辑处理的或者数据处理的数据，这很合适
+|InternalResourceViewResolver|UrlBasedViewResolver的便捷子类，支持InternalResourceView（实际上是Servlet和JSP）和子类（如JstlView和TilesView）。您可以使用setViewClass（..）为由此解析器生成的所有视图指定视图类。有关详细信息，请参阅UrlBasedViewResolver javadocs。
+|FreeMarkerViewResolverUrl|BasedViewResolver的便捷子类，支持FreeMarkerView及其自定义子类。
+|ContentNegotiating|ViewResolver实现，基于请求文件名或Accept头解析视图的ViewResolver接口。
+
+|===
+
+[reftext="ViewResolver"]
+==== 视图处理
+通过声明多个解析器bean来解析视图，并在必要时通过设置order属性来指定排序。请记住，订单属性越高，视图解析器在链中的位置越靠后。
+
+ViewResolver的规范指定它可以返回null来指示无法找到视图。但是，对于JSP和InternalResourceViewResolver，确定JSP是否存在的唯一方法是通过RequestDispatcher执行分派。因此，必须始终将InternalResourceViewResolver配置为视图解析程序的整体顺序中的最后一个。
+
+MVC Config为View Resolvers提供了一个专用的配置API，并且还有专门添加无逻辑的View Controller，这些View Controller无需Controller逻辑即可用于HTML模板渲染。
+
+==== 重定向
+
+视图名称中的“redirect:”前缀允许您执行重定向。UrlBasedViewResolver（和子类）将此识别为需要重定向的指令。视图名称的其余部分是重定向URL。
+
+实际效果与控制器返回RedirectView的效果相同，但明显这更简单。逻辑视图名称（如redirect/myapp/some/resource）将相对于当前的Servlet上下文重定向，而名称（如redirecthttp//myhost.com/some/arbitrary/path）将重定向到绝对URL。
+
+[NOTE]
+====
+如果控制器方法使用@ResponseStatus进行注释，则注释值优先于由RedirectView设置的响应状态
+[source,java]
+----
+    @GetMapping("/rd")
+    @ResponseStatus(code = HttpStatus.PERMANENT_REDIRECT)
+    public String rd() {
+        return "redirect:/hello";
+    }
+----
+重定向默认返回302，但是注解添加之后，优先返回了308
+====
+
+==== 转发
+
+对于最终由UrlBasedViewResolver和子类解析的视图名称，也可以使用"forward:"前缀。这会创建一个执行RequestDispatcher.forward（）的InternalResourceView。因此，对于InternalResourceViewResolver和InternalResourceView（对于JSP），此前缀不起作用，但如果使用其他视图技术，但仍想强制转发资源以由Servlet/JSP引擎处理，可能会有所帮助。
+
+==== 内容协商
+
+ContentNegotiatingViewResolver不会自行解析视图，而是委托给其他视图解析器，并选择类似于客户端请求的视图。该表示可以从Accept报头或查询参数确定，例如， “/路径？格式= PDF”。
+
+ContentNegotiatingViewResolver通过将请求媒体类型与ViewResolvers关联的View支持的媒体类型（也称为Content-Type）进行比较来选择适当的View来处理请求。具有兼容Content-Type的列表中的第一个视图将表示返回给客户端。如果ViewResolver链无法提供兼容视图，则会查看通过DefaultViews属性指定的视图列表。后一个选项适用于单例视图，该视图可以呈现当前资源的适当表示，而不管逻辑视图名称如何。Accept头可能包含通配符，例如text/*，在这种情况下，其内容类型为text/xml的View是兼容匹配。
+
+[reftext="LocaleResolver"]
+=== 1.2.9. Locale
+
+Spring的架构大部分支持国际化，就像Spring web MVC框架一样。 DispatcherServlet使您能够根据客户端的区域设置自动解析消息。这是通过LocaleResolver对象完成的。
+
+当请求进入时，DispatcherServlet会查找一个区域解析器，如果它找到一个，它会尝试使用它来设置区域。使用RequestContext.getLocale（）方法，您始终可以获取区域信息。
+
+除了自动区域设置解析之外，您还可以（例如基于请求中的参数）使用拦截器针对特定的路径（请参阅截取以获取有关处理程序映射拦截器的更多信息）以更改区域设置。
+
+Locale resolvers 和 interceptors在org.springframework.web.servlet.i18n包中定义，并在应用程序上下文中配置。
+
+[reftext="LocaleContextResolver"]
+==== 时区
+
+除了获取客户端的语言环境之外，了解他们的时区通常也很有用。 LocaleContextResolver接口提供了LocaleResolver的扩展，它允许解析器提供更丰富的LocaleContext，其中可能包含时区信息。
+
+如果可用，用户的TimeZone可以使用RequestContext.getTimeZone（）方法获得。时区信息自动地被Spring的ConversionService注册的日期/时间转换器和格式化对象使用。
+
+==== 请求头解析器
+locale resolver 检查客户端（例如Web浏览器）发送请求当中的accept-language头。通常这个头域包含客户端操作系统的区域设置。请注意，此解析器不支持时区信息。
+
+==== cookie解析器
+locale resolver检查客户端上可能存在的Cookie，以查看是否指定了区域设置或时区。如果是这样，它使用指定的信息。您可以指定cookie的名称以及最大年龄。在下面有一个定义CookieLocaleResolver的例子。
+
+[source,xml]
+----
+<bean id="localeResolver" class="org.springframework.web.servlet.i18n.CookieLocaleResolver">
+
+    <property name="cookieName" value="clientlanguage"/>
+
+    <!-- in seconds. If set to -1, the cookie is not persisted (deleted when browser shuts down) -->
+    <property name="cookieMaxAge" value="100000"/>
+
+</bean>
+----
+
+==== Session解析器
+SessionLocaleResolver允许您从会话中检索可能与用户请求关联的Locale和TimeZone。与CookieLocaleResolver相比，此策略将本地选择的区域设置存储在Servlet容器的HttpSession中。因此，这些设置对于每个会话都只是临时的，因此在每个会话终止时都会丢失。
+
+==== Locale interceptor
+
+您可以通过将LocaleChangeInterceptor添加到其中一个handlermapping来启用区域设置的更改。它会检测请求中的参数并更改语言环境。它调用上下文中也存在的LocaleResolver上的setLocale（）。
+
+以下示例显示调用包含名为siteLanguage的参数的所有*.view资源更改语言环境。因此，例如，对以下URL的请求（http://www.sf.net/home.view?siteLanguage=nl）会将网站语言更改为荷兰语。
+
+[source,xml]
+----
+<bean id="localeChangeInterceptor"
+        class="org.springframework.web.servlet.i18n.LocaleChangeInterceptor">
+    <property name="paramName" value="siteLanguage"/>
+</bean>
+
+<bean id="localeResolver"
+        class="org.springframework.web.servlet.i18n.CookieLocaleResolver"/>
+
+<bean id="urlMapping"
+        class="org.springframework.web.servlet.handler.SimpleUrlHandlerMapping">
+    <property name="interceptors">
+        <list>
+            <ref bean="localeChangeInterceptor"/>
+        </list>
+    </property>
+    <property name="mappings">
+        <value>/**/*.view=someController</value>
+    </property>
+</bean>
+----
+
+[reftext="ThemeResolver"]
+=== 1.2.10. Themes
+
+你可以使用Spring Web MVC框架的整体外观主题设定你的应用程序,从而提高用户体验。一个theme是静态资源的集合,通常样式表和图片,影响应用程序的视觉风格。
+
+==== 定义主题
+
+要在你的web应用程序中使用的主题,必须建立一个实现org.springframework.ui.context.ThemeSource接口。这个WebApplicationContext接口扩展ThemeSource但将责任委托给专门的实现。默认代理实现是org.springframework.ui.context.support.ResourceBundleThemeSource，它负责加载定义在classpath根据目录下properties文件。你也可以自定义ThemeSource实现或者配置ResourceBundleThemeSource的basenamePrefix属性。你可以在application context通过name为themeSource来注册ThemeSource这个bean.web应用程序上下文自动检测一个bean的名称和使用它。
+
+当使用ResourceBundleThemeSource,主题可以一个简单的属性文件中定义。属性文件列表的资源构成了主题.这里有一个例子:
+
+[source,shell]
+----
+styleSheet=/themes/cool/style.css
+background=/themes/cool/img/coolBg.jpg
+----
+
+properties的key值是页面代码引用主题元素的名称。对于一个JSP,你通常使用spring:theme自定义标记,这非常类似于spring:message标签.下面的JSP片段使用前面的例子中定义的主题定制的外观和感觉.
+[source,html]
+----
+<%@ taglib prefix="spring" uri="http://www.springframework.org/tags"%>
+<html>
+    <head>
+        <link rel="stylesheet" href="<spring:theme code='styleSheet'/>" type="text/css"/>
+    </head>
+    <body style="background=<spring:theme code='background'/>">
+        ...
+    </body>
+</html>
+----
+
+默认情况下,ResourceBundleThemeSource使用一个空的基本名称前缀。这样的话就会加载classpath根目录下的properties文件。（如果设置前缀cn.zhao,就会加载classpath根目录/cn/zhao目录下面的属性文件）因此,你将cool.properties主题属性定义在类路径的根目录,例如在/WEB-INF/classes。ResourceBundleThemeSourceuses使用标准Java资源包加载机制,允许全面国际化的主题。例如我们能够使用/WEB-INF/classes/cool_nl.properties引用一个特殊的背景图像与荷兰文字。
+
+==== 解析主题
+
+当你按照上个章节定义theme,你决定使用哪个theme。DispatcherServlet会寻找一个叫themeResolver的bean来找出使用ThemeResolver实现。theme解析器几乎和LocaleResolver解析器以相同的方式工作。它检测到的主题使用特定的请求并且可以改变请求的主题。下面是Spring提供的theme解析器:
+
+* FixedThemeResolver通过设置defaultThemeName属性,选择确定的theme（默认的主题名称是theme）。
+* SessionThemeResolver主题是保存在用户的HTTP会话。它只需要为每个会话设置一次,但不同的会话不会持续。
+* CookieThemeResolver所选主题存储在客户端的Cookie中。
+
+Spring同样提供ThemeChangeInterceptor允许通过对每个请求添加一个简单的请求参数来改变主题.
+
+NOTE: spring mvc默认使用FixedThemeResolver，FixedThemeResolver使用ResourceBundleThemeSource加载main/src/resource/theme.properties文件来装载属性。
+
+NOTE: ThemeChangeInterceptor会连接请求，根据请求设置ThemeResolver（SessionThemeResolver，CookieThemeResolver，FixedThemeResolver）变更主题名称达到换主题的效果。
+
+[reftext="MultipartResolver"]
+=== 1.2.11. Multipart resolver
+
+来自org.springframework.web.multipart包的MultipartResolver可以用来解决文件上传请求。有连个实现，一个基于Commons FileUpload，另一个基于Servlet 3.0 multipart 请求解析。
+
+要启用multipart 处理，您需要在配置中声明一个名为“multipartResolver”的MultipartResolver bean。 DispatcherServlet检测它并将其应用于传入的请求。当接收到内容类型为“multipart/form-data”的POST请求时，解析器解析内容并将当前HttpServletRequest包装为MultipartHttpServletRequest，以便将它们公开为请求参数。
+
+==== Apache FileUpload
+
+要使用Apache Commons FileUpload，只需使用名称为multipartResolver配置CommonsMultipartResolver类型的Bean即可。当然你也需要将commons-fileupload作为你类路径的依赖。
+
+==== Servlet 3.0 multipart
+
+要使用Servlet 3.0 multipart支持，您需要相应地注册DispatcherServlet。
+
+*java配置*
+[source,java]
+----
+        DispatcherServlet servlet = new DispatcherServlet(ac);
+        ServletRegistration.Dynamic registration = servletContext.addServlet("app", servlet);
+        registration.setLoadOnStartup(1);
+        registration.addMapping("/upload");
+        registration.setMultipartConfig();
+----
+*xml 配置*
+[source,xml]
+----
+<multipart-config>
+----
+
+由于Servlet 3.0 API无法让MultipartResolver执行此操作，因此需要在此级别设置诸如文件大小或存储位置等配置。
+
+一旦Servlet 3.0配置就绪后，只需添加一个名为multipartResolver的StandardServletMultipartResolver类型的bean。
+
+
+== 1.3. Filters
+
+spring-web提供了几个有用的过滤器
+
+=== 1.3.1. HTTP PUT Form
+
+浏览器只能通过GET或POST方法提交表单数据，但非浏览器客户端可以使用PUT和PATCH提交表单数据。 Servlet API要求ServletRequest.getParameter*()方法仅支持POST提交的表单字段访问。
+
+spring-web模块提供了HttpPutFormContentFilter，它拦截PUT和PATCH(内容类型为application/x-www-form-urlencoded)的请求，从请求主体读取表单数据，并封装到ServletRequest，使表单数据可用通过ServletRequest.getParameter*()系列方法获取。
+
+=== 1.3.2. Forwarded Headers(转发头)
+
+当请求经过负载均衡器等代理时，主机、端口和协议可能会改变，这对于需要创建资源链接的应用程序提出了挑战，因为从客观角度看，链接应反映原始请求的主机、端口和协议。怎么来理解这句话呢，请看下面的例子：
+
+*ngnix配置,端口9080*
+[source,shell]
+----
+        location /xforward{
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header Host $host;
+            proxy_pass http://localhost:8080;
+        }
+----
+
+*java服务，端口8080*
+[source,java]
+----
+    @GetMapping("/xforward")
+    @ResponseBody
+    public String forward(HttpServletRequest request){
+        Enumeration<String> headerNames = request.getHeaderNames();
+        while (headerNames.hasMoreElements()){
+            String s = headerNames.nextElement();
+            System.err.println(s+":"+request.getHeader(s));
+        }
+        return request.getServerName();
+    }
+----
+
+当访问http://10.176.169.40:9080/xforward的时候，getServerName返回的localhost.虽然负载的地址是localhost，但是对客户端来说，他访问的服务地址应该是10.176.169.40。这就是上面描述的问题，下面我们来看解决方案ForwardedHeaderFilter：
+
+RFC 7239定义了代理的Forwarded HTTP头，用于提供有关原始请求的信息。还有其他非标准的请求头正在使用，例如“X-Forwarded-Host”，“X-Forwarded-Port”和“X-Forwarded-Proto”。
+
+ForwardedHeaderFilter从“Forwarded”和“X-Forwarded- *”头中提取值包装请求和响应并重写了以下方法：
+
+* getServerName（）
+* getServerPort（）
+* getScheme（）
+* isSecure（）
+* sendRedirect（String）
+
+这样，包装的请求和响应反映了客户端发起的协议和地址，而不是负载指向的内网地址。
+
+NOTE: 没有代理并且不需要使用转发头的应用程序可以配置ForwardedHeaderFilter以删除并忽略这些转发头。
+
+NOTE: 使用转发标头时存在安全考虑因素，如RFC 7239第8节中所述。在应用程序级别，很难确定转发头是否可信。这就是为什么应该正确配置网络上游以从外部过滤掉不受信任的转发头的原因。
+
+[reftext="HandlerMapping"]
+== 1.4. Annotated Controllers
+
+Spring MVC提供了一种基于注解的编程模型，@Controller和@RestController注解的组件可以处理请求映射，请求输入，异常处理等。 带注解的controller具有灵活的方法签名，不必扩展基类，也不需要实现特定的接口。
+
+[source,java]
+----
+@Controller
+public class HelloController {
+
+    @GetMapping("/hello")
+    public String handle(Model model) {
+        model.addAttribute("message", "Hello World!");
+        return "index";
+    }
+}
+----
+
+在这个特定的例子中，该方法接受一个model并返回一个字符串作为视图的名称。
+
+=== 1.4.1. 声明
+
+您可以使用WebApplicationContext中的标准Spring bean规范来定义Controller。 @Controller注解的类和@Component注解的类效果一样，会被自动注册为bean。
+
+要启用@Controller bean的自动检测，您可以将组件扫描添加到您的Java配置中：
+[source,java]
+----
+@Configuration
+@ComponentScan("org.example.web")
+public class WebConfig {
+
+    // ...
+}
+----
+
+[source,xml]
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:p="http://www.springframework.org/schema/p"
+    xmlns:context="http://www.springframework.org/schema/context"
+    xsi:schemaLocation="
+        http://www.springframework.org/schema/beans
+        http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/context
+        http://www.springframework.org/schema/context/spring-context.xsd">
+
+    <context:component-scan base-package="org.example.web"/>
+
+    <!-- ... -->
+
+</beans>
+----
+
+@RestController是一个组合注解，它本身是用@Controller和@ResponseBody元注释的。表示Controller的每个方法都被@ResponseBody注解。
+
+==== AOP 代理 
+
+在某些情况下，控制器可能需要在运行时用AOP代理进行修饰。 一个例子是，如果您选择在控制器上直接使用@Transactional。 在这种情况下，对于控制器，我们建议使用基于类的代理。 这通常是控制器的默认选择。 但是，如果控制器必须实现不是Spring Context回调的接口（例如InitializingBean，* Aware等），则可能需要显式配置基于类的代理。 例如，使用<tx：annotation-driven />，切换到<tx：annotation-driven proxy-target-class =“true”/>。
+
+NOTE: proxy-target-class属性值为true则是基于类的代理将起作用（需要cglib库），为false或者省略这个属性，则标准的JDK 基于接口的代理将起作用。
+
+=== 1.4.2. 请求映射
+
+@RequestMapping将请求映射到控制器方法。 它可以通过URL，HTTP方法，请求参数，请求头和媒体类型来进行方法映射。 它可以在类级使用来表示共享映射，或者在方法级使用，以缩小到特定的端点映射。
+
+以下是@RequestMapping对应特定HTTP方法的快捷方式：
+
+* @GetMapping
+* @PostMapping
+* @PutMapping
+* @DeleteMapping
+* @PatchMapping
+
+[source,java]
+----
+@RestController
+@RequestMapping("/persons")
+class PersonController {
+
+    @GetMapping("/{id}")
+    public Person getPerson(@PathVariable Long id) {
+        // ...
+    }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public void add(@RequestBody Person person) {
+        // ...
+    }
+}
+----
+
+==== URI模式
+
+您可以使用glob模式和通配符映射请求：
+
+* ?:代表一个字符
+* *:代表一个路径中零到多个字符
+* **:代表零到多个路径
+
+您还可以声明URI变量并使用@PathVariable访问它们的值：
+[source,java]
+----
+@GetMapping("/owners/{ownerId}/pets/{petId}")
+public Pet findPet(@PathVariable Long ownerId, @PathVariable Long petId) {
+    // ...
+}
+----
+可以在类和方法级别声明URI变量：
+[source,java]
+----
+@Controller
+@RequestMapping("/owners/{ownerId}")
+public class OwnerController {
+
+    @GetMapping("/pets/{petId}")
+    public Pet findPet(@PathVariable Long ownerId, @PathVariable Long petId) {
+        // ...
+    }
+}
+----
+
+URI变量会自动转换为适当的类型或引发'TypeMismatchException'。 简单类型 - int，long，Date默认支持，您可以注册对任何其他数据类型的支持。
+
+NOTE: 可以显式地命名URI变量 - 例如 @PathVariable（“customId”），但如果名称相同，并且您的代码是使用调试信息编译的，或者使用Java 8上的-parameters编译器标志进行编译，则可以将该详细信息留空。
+
+语法{varName：regex}用正则表达式声明一个URI变量，其语法为{varName：regex} - 例如 给定URL“/spring-web-3.0.5 .jar”，下面的方法提取名称，版本和文件扩展名：
+[source,java]
+----
+@GetMapping("/{name:[a-z-]+}-{version:\\d\\.\\d\\.\\d}{ext:\\.[a-z]+}")
+public void handle(@PathVariable String version, @PathVariable String ext) {
+    // ...
+}
+----
+
+IMPORTANT: URI路径模式也可以嵌入$ {...}占位符，通过PropertyPlaceHolderConfigurer在启动时解析本地，系统，环境和其他属性源。 这可以用于，例如基于某些外部配置参数化的 base URL。
+
+NOTE: Spring MVC使用PathMatcher协议和spring-core的AntPathMatcher实现来进行URI路径匹配。
+
+==== 模式比较
+
+当多个模式匹配一个URL时，必须比较它们以找到最佳匹配。 这通过AntPathMatcher.getPatternComparator（String path）完成。
+
+我们来看一个例子：
+
+[source,java]
+----
+    @GetMapping("/pettern/hello?")
+    public String pettern1() {
+        return "pettern1";
+    }
+
+    @GetMapping("/pettern/hello*")
+    public String pettern2() {
+        return "pettern2";
+    }
+----
+
+
+访问http://localhost:8080/pettern/hello ，结果是pettern2
+
+访问http://localhost:8080/pettern/helloq ，结果是pettern1
+
+我们再看另外一个例子
+
+[source,java]
+----
+    @GetMapping("/pettern/{userid}/*")
+    public String pettern3(@PathVariable("userid") String userid) {
+        return "pettern3";
+    }
+
+    @GetMapping("/pettern/{userid}/{name}")
+    public String pettern4(@PathVariable("userid") String userid,@PathVariable("name") String name) {
+        return "pettern4";
+    }
+----
+
+访问http://localhost:8080/pettern/h/jj，结果是pettern4
+
+经过上面的例子，我们可以发现，路径匹配遵循最长模式的原则。当匹配长度一致的时候，优先选择URI变量多的
+
+模式"/$$**$$"总是最后匹配。像"/public/$$**$$"这样的前缀模式也总是在/public之后匹配。
+
+NOTE: 有关完整的详细信息，请参阅AntPathMatcher中的AntPatternComparator，自定义路径映射可以实现PathMatcher接口。 
+
+==== 后缀匹配
+默认情况下，Spring MVC执行“$$.*$$”后缀模式匹配，以便映射到/person.*。 然后使用文件扩展名来解释所请求的内容类型以用于响应（即，代替“Accept”报头），例如,/person.pdf，/person.xml等
+
+当浏览器用于发送难以一致解释的Accept头时，使用这样的文件扩展名是必要的(目前这不再是必要的，使用“Accept”标题应该是首选，使用文件扩展名已被证明存在各种问题)。
+
+要完全禁用文件扩展名，您必须同时设置以下两项：
+
+* useSuffixPatternMatching（false），请参阅PathMatchConfigurer
+* favorPathExtension（false），请参阅ContentNeogiationConfigurer
+
+基于URL的内容协商仍然很有用，例如，在浏览器中输入URL时。 基于查询参数的策略，能够避免文件扩展带来的大部分问题。如果您必须使用文件扩展名，请考虑通过ContentNeogiationConfigurer的mediaTypes属性将它们限制为显式注册的扩展名列表。
+
+==== 后缀匹配和RFD
+
+Reflected 文件下载（RFD）攻击类似于XSS，因为它依赖于请求输入，例如， 查询参数，URI变量，reflected在响应中。 然而，与javaScript插入HTML中不同的是，RFD攻击依赖于浏览器切换来执行下载，并在稍后双击时将响应视为可执行脚本。
+
+在Spring MVC中，@ResponseBody和ResponseEntity方法是存在风险的，因为它们可以呈现不同的内容类型，客户端可以通过URL路径扩展来请求这些内容类型。 禁用后缀模式匹配和使用路径扩展进行内容协商可降低风险，但不足以防止RFD攻击。
+
+为了防止RFD攻击，在呈现响应体之前，Spring MVC添加一个Content-Disposition：inline; filename = f.txt头文件来建议一个固定且安全的下载文件。只有当URL路径包含一个文件扩展名，既没有在白名单，也没有为了内容协商的目的而明确注册时，才会这样做。 但是，当URL直接输入浏览器时，它可能会有副作用。
+
+IMPORTANT: Content-disposition请求头用来告诉浏览器是内嵌显示文件还是下载文件。inline:在浏览器中显示。attachment:告诉浏览器下载文件
+
+NOTE: 默认情况下，许多常用路径扩展都列入白名单。 使用自定义HttpMessageConverter实现的应用程序可以显式注册用于内容协商的文件扩展名，以避免为这些扩展名添加Content-Disposition头。 请参阅内容类型。
+
+==== Consumable media types
+
+您可以根据请求的内容类型缩小请求映射的范围：
+[source,java]
+----
+@PostMapping(path = "/pets", consumes = "application/json")
+public void addPet(@RequestBody Pet pet) {
+    // ...
+}
+----
+
+consumes属性还支持否定表达式 - 例如 !text/plain表示除“text/plain”以外的任何内容类型。
+
+NOTE: 您可以在类级别声明@PostMapping的consumes属性。 与大多数其他请求映射属性不同，当在类级别使用时，方法级别的使用属性将覆盖而不是扩展类级别声明。
+
+==== Producible media types
+您可以根据Accept请求标头和控制器方法生成的内容类型列表缩小请求映射的范围：
+[source,java]
+----
+@GetMapping(path = "/pets/{petId}", produces = "application/json;charset=UTF-8")
+@ResponseBody
+public Pet getPet(@PathVariable String petId) {
+    // ...
+}
+----
+媒体类型可以指定一个字符集。 否定表达式被支持 - 例如， !text/plain表示除“text / plain”以外的任何内容类型。
+
+NOTE: 您可以在类级别声明@PostMapping的produces属性。 与大多数其他请求映射属性不同，当在类级别使用时，方法级别的产品属性将覆盖而不是扩展类级别声明。
+
+NOTE: 您可以将Content-Type和Accept与标题条件相匹配，但最好使用produces和consumes。
+
+==== 请求参数和请求头
+您可以根据请求参数条件缩小请求映射。 
+存在请求参数（“myParam”），缺少（“!myParam”）或特定值（“myParam = myValue”）：
+[source,java]
+----
+@GetMapping(path = "/pets/{petId}", params = "myParam=myValue")
+public void findPet(@PathVariable String petId) {
+    // ...
+}
+----
+您也可以对请求头使用相同的内容：
+[source,java]
+----
+@GetMapping(path = "/pets", headers = "myHeader=myValue")
+public void findPet(@PathVariable String petId) {
+    // ...
+}
+----
+
+
+==== HEAD和OPTIONS
+@GetMapping -透明地支持HEAD和OPTIONS请求方法。 控制器方法不需要改变。 
+
+NOTE: HEAD请求处理，与GET请求几乎一样，但不写入响应主体，而是响应头返回“Content-Length”。OPTIONS也不写入响应体，而是返回响应头Allow(GET，HEAD，POST，PUT，PATCH，DELETE，OPTIONS)
+
+@RequestMapping方法可以显式映射到HTTP HEAD和HTTP OPTIONS，但在常见情况下这不是必需的。
+
+==== 自定义注解
+Spring MVC支持使用组合的注解进行请求映射。 这些注解本身是用@RequestMapping进行元注解的。
+
+NOTE: Spring MVC还支持自定义请求映射属性和自定义请求匹配逻辑。 这是一个更高级的选项，需要子类化RequestMappingHandlerMapping并重写getCustomMethodCondition方法，您可以在其中检查自定义属性并返回自己的RequestCondition。
+
+=== 1.4.3. Handler Methods
+
+==== 类型转化
+
+HTTP的请求传入的参数一般是字符串，当匹配 @RequestParam，@RequestHeader，@PathVariable，@MatrixVariable和@CookieValue注解的方法签名时，可能需要进行类型转换。
+
+一般情况下，配置好的转换器会自动进行类型转换。 默认情况下，支持int，long，Date等简单类型的转化。但是你可以通过WebDataBinder进行在controller范围内定制，参见Binder方法，或者使用FormattingConversionService全局注册Formatter，参见Spring Field Formatting。
+
+==== Matrix variables
+
+
+矩阵变量可出现在任何路径段中，每个变量用分号分隔，多个值用逗号分隔，例如“/cars;color=red,green;year=2012”。 也可以通过重复的变量名称来指定多个值，例如，“color=red;color=green;color=blue”。
+
+如果URL需要包含矩阵变量，则控制器方法的请求映射必须使用URI变量来匹配该变量内容，确保可以成功匹配请求。矩阵变量顺序和呈现无关。 下面是一个例子：
+[source,java]
+----
+// GET /pets/42;q=11;r=22
+
+@GetMapping("/pets/{petId}")
+public void findPet(@PathVariable String petId, @MatrixVariable int q) {
+
+    // petId == 42
+    // q == 11
+}
+----
+考虑到所有路径段可能包含矩阵变量，有时您可能需要解决矩阵变量会在哪个路径变量中出现的歧义的问题。例如：
+[source,java]
+----
+// GET /owners/42;q=11/pets/21;q=22
+
+@GetMapping("/owners/{ownerId}/pets/{petId}")
+public void findPet(
+        @MatrixVariable(name="q", pathVar="ownerId") int q1,
+        @MatrixVariable(name="q", pathVar="petId") int q2) {
+
+    // q1 == 11
+    // q2 == 22
+}
+----
+
+矩阵变量是可选的并且指定一个默认值：
+[source,java]
+----
+// GET /pets/42
+
+@GetMapping("/pets/{petId}")
+public void findPet(@MatrixVariable(required=false, defaultValue="1") int q) {
+
+    // q == 1
+}
+----
+
+要获取所有矩阵变量，请使用MultiValueMap：
+[source,java]
+----
+// GET /owners/42;q=11;r=12/pets/21;q=22;s=23
+
+@GetMapping("/owners/{ownerId}/pets/{petId}")
+public void findPet(
+        @MatrixVariable MultiValueMap<String, String> matrixVars,
+        @MatrixVariable(pathVar="petId"") MultiValueMap<String, String> petMatrixVars) {
+
+    // matrixVars: ["q" : [11,22], "r" : 12, "s" : 23]
+    // petMatrixVars: ["q" : 22, "s" : 23]
+}
+----
+
+请注意，您需要启用矩阵变量。 在MVC Java配置中，您需要通过Path Matching设置一个带有removeSemicolonContent = false的UrlPathHelper。 在MVC XML命名空间中，使用<mvc：annotation-driven enable-matrix-variables =“true”/>。
+[source,java]
+----
+@Configuration
+@EnableWebMvc
+public class WebConfig implements WebMvcConfigurer {
+
+    @Override
+    public void configurePathMatch(PathMatchConfigurer configurer) {
+        configurer
+            .setUseSuffixPatternMatch(true)
+            .setUseTrailingSlashMatch(false)
+            .setUseRegisteredSuffixPatternMatch(true)
+            .setPathMatcher(antPathMatcher())
+            .setUrlPathHelper(urlPathHelper());
+    }
+
+    @Bean
+    public UrlPathHelper urlPathHelper() {
+        UrlPathHelper urlPathHelper = new UrlPathHelper();
+        urlPathHelper.setRemoveSemicolonContent(false);
+        return urlPathHelper;
+    }
+
+    @Bean
+    public PathMatcher antPathMatcher() {
+        //...
+    }
+
+}
+----
+
+==== @RequestParam
+使用@RequestParam注释将Servlet请求参数（即查询参数或表单数据）绑定到控制器中的方法参数。
+[source,java]
+----
+@Controller
+@RequestMapping("/pets")
+public class EditPetForm {
+
+    // ...
+
+    @GetMapping
+    public String setupForm(@RequestParam("petId") int petId, Model model) {
+        Pet pet = this.clinic.loadPet(petId);
+        model.addAttribute("pet", pet);
+        return "petForm";
+    }
+
+    // ...
+
+}
+----
+
+使用此批注的方法参数默认required=true，但您可以通过将@ RequestParam的required设置为false或通过用java.util.Optional包装器声明参数来指定方法参数是可选的。
+
+[source,java]
+----
+    @GetMapping("/op")
+    public String option(Optional<String> optional){
+        return optional.orElse("1234");
+    }
+----
+
+
+当@RequestParam注解被声明为Map<String，String>或MultiValueMap<String，String>自变量时，映射会填充所有请求参数。
+
+NOTE: 使用@RequestParam是可选的。 默认情况下，任何由BeanUtils＃isSimpleProperty确定的简单值类型的参数都会自动映射到方法入参，效果和@RequestParam一样。
+
+==== @RequestHeader
+使用@RequestHeader批注将请求标头绑定到控制器中的方法参数。
+[source,java]
+----
+@GetMapping("/demo")
+public void handle(
+        @RequestHeader("Accept-Encoding") String encoding,
+        @RequestHeader("Keep-Alive") long keepAlive) {
+    //...
+}
+----
+如果目标方法参数类型不是字符串，则会自动应用类型转换。 请参阅类型转换。
+
+在Map<String，String>，MultiValueMap <String，String>或HttpHeaders参数上使用@RequestHeader注释时，映射将填充所有标题值。
+
+[source,java]
+----
+    @GetMapping("headers2")
+    public MultiValueMap headers2(@RequestHeader MultiValueMap<String, String> map) {
+        List<String> strings = map.get("accept-encoding"); //MultiValueMap的值是多个
+        System.err.println(strings);
+        return map;
+    }
+----
+
+NOTE: MVC支持将逗号分隔的字符串转换为字符串的数组或集合。例如，用@RequestHeader（“Accept”）注解的方法参数可以是String类型，也可以是String[]或List<String>。
+
+==== @CookieValue
+使用@CookieValue将cookie的值绑定到控制器中的方法参数。
+
+[source,shell]
+----
+JSESSIONID=415A4AC178C59DACE0B2C9CA727CDD84
+----
+
+[source,java]
+----
+@GetMapping("/demo")
+public void handle(@CookieValue("JSESSIONID") String cookie) {
+    //...
+}
+----
+如果目标方法参数类型不是字符串，则会自动应用类型转换。
+
+==== @ModelAttribute
+
+在方法参数上使用@ModelAttribute注释来访问模型中的属性，如果不存在模型对象，则将其实例化。模型属性还覆盖了来自HTTP Servlet请求参数的名称与字段名称匹配的值。这被称为数据绑定，它不必处理解析和转换单个查询参数和表单字段。例如：
+[source,java]
+----
+@PostMapping("/owners/{ownerId}/pets/{petId}/edit")
+public String processSubmit(@ModelAttribute Pet pet) { }
+----
+
+上面的Pet实例解析如下：
+
+* 如果已经通过模型方法添加。
+* 从HTTP会话通过@SessionAttributes。
+* 来自通过转换器传递的URI路径变量。
+* 来自默认构造函数的调用。
+* 从调用具有与Servlet请求参数匹配的参数的“主构造函数”;参数名称通过JavaBeans @ConstructorProperties或通过字节码中的运行时保留参数名称确定。
+
+[NOTE]
+====
+*ModelAttribute实例化参数的过程*
+
+① 根据@SessionAttributes注解信息查找session内的对象，存在则放入到模型数据中；
+
+② 执行@ModelAttribute注解的方法：如果模型数据中包含同名的数据，则不执行@ModelAttribute注解方法，而是使用①步骤中的会话数据；如果模型数据中不包含同名的数据，执行@ModelAttribute注解的方法并将返回值添加到模型数据中；
+
+③ 执行@RequestMapping方法，绑定@ModelAttribute注解的参数：查找模型数据中是否有@ModelAttribute注解的同名对象，如果有直接使用，否则通过反射创建一个；并将请求参数绑定到该命令对象；
+
+WARNING: 如果使用@SessionAttributes注解控制器类之后，③步骤一定是从模型对象中取得同名的命令对象，如果模型数据中不存在将抛出HttpSessionRequiredException Expected session attribute ‘user’(Spring3.1)或HttpSessionRequiredException Session attribute ‘user’ required - not found in session(Spring3.0)异常。
+
+====
+
+虽然通常使用模型方法来填充模型属性，但另一种方法是依靠Converter <String，T>结合URI路径变量约定。在下面的示例中，模型属性名称“account”与URI路径变量account“account”匹配，并且通过将String account 数字值传递给已注册的Converter <String，Account>来加载帐户：
+
+[source,java]
+----
+@PutMapping("/accounts/{account}")
+public String save(@ModelAttribute("account") Account account) {
+    // ...
+}
+----
+
+在获得模型属性实例之后，将执行数据绑定。 WebDataBinder类将Servlet请求参数名称（查询参数和表单字段）与目标对象上的字段名称进行匹配。必要时执行类型转换后填充匹配字段。
+
+数据绑定可能会发生错误。默认情况下会引发一个BindException，但要在控制器方法中检查这些错误，请立即在@ModelAttribute旁边添加一个BindingResult参数，如下所示：
+
+[source,java]
+----
+@PostMapping("/owners/{ownerId}/pets/{petId}/edit")
+public String processSubmit(@ModelAttribute("pet") Pet pet, BindingResult result) {
+    if (result.hasErrors()) {
+        return "petForm";
+    }
+    // ...
+}
+----
+
+在某些情况下，您可能需要访问不带数据绑定的模型属性。对于这种情况，您可以将模型注入控制器并直接访问它，或者可以设置@ModelAttribute（binding = false），如下所示：
+
+[source,java]
+----
+@ModelAttribute
+public AccountForm setUpForm() {
+    return new AccountForm();
+}
+
+@ModelAttribute
+public Account findAccount(@PathVariable String accountId) {
+    return accountRepository.findOne(accountId);
+}
+
+@PostMapping("update")
+public String update(@Valid AccountUpdateForm form, BindingResult result,
+        @ModelAttribute(binding=false) Account account) {
+    // ...
+}
+----
+
+通过添加javax.validation.Valid注释或Spring的@Validated注释（另请参阅Bean验证和Spring验证），可以在数据绑定后自动应用验证。例如：
+[source,java]
+----
+@PostMapping("/owners/{ownerId}/pets/{petId}/edit")
+public String processSubmit(@Valid @ModelAttribute("pet") Pet pet, BindingResult result) {
+    if (result.hasErrors()) {
+        return "petForm";
+    }
+    // ...
+}
+----
+
+==== @SessionAttributes
+
+@SessionAttributes用于在session里面存储可共享的数据。它是声明在controller类上面。该注解通常会列出模型属性的名称或模型属性的类型，这些属性透明地存储在会话中供随后的访问请求使用。
+
+[source,java]
+----
+@RestController
+@RequestMapping("/session/")
+@SessionAttributes(value = "data", types = {User.class})
+public class SeesionController {
+
+    @GetMapping("add")
+    public String addSession(Model model) {
+        SessionData data = new SessionData();
+        data.setId("123");
+        data.setName("zhaozhiqiang");
+        model.addAttribute("data", data);
+        User u=new User();
+        u.setId("143");
+        u.setName("wangxu");
+        model.addAttribute(u);
+        return "add session";
+    }
+
+    @GetMapping("get")
+    public Object getSeesion(HttpSession session) {
+        Object data = session.getAttribute("data");
+        System.err.println(data);
+        Object user = session.getAttribute("user");
+        System.err.println(user);
+        return data;
+    }
+}
+----
+
+在第一个请求中，当名称为“data”和type为User的模型属性添加到模型中时，它会自动提升并保存在HTTP Servlet会话中。它会一直存在，直到另一个控制器方法使用SessionStatus方法参数清除存储：
+
+[source,java]
+----
+@Controller
+@SessionAttributes("pet")
+public class EditPetForm {
+
+    @PostMapping("/pets/{id}")
+    public String handle(Pet pet, BindingResult errors, SessionStatus status) {
+        if (errors.hasErrors) {
+            // ...
+        }
+            status.setComplete();
+            // ...
+        }
+    }
+}
+----
+
+
+
+==== @SessionAttribute
+
+如果您需要访问全局（即在控制器之外）管理的预先存在的会话属性，并且你无法确定是否存在，请在方法参数上使用@SessionAttribute注释，例如上面列子中的User，可以这样访问：
+[source,java]
+----
+@RequestMapping("/")
+public String handle(@SessionAttribute User user) {
+    // ...
+}
+----
+
+对于需要添加或删除会话的Attribute，请使用org.springframework.web.context.request.WebRequest或javax.servlet.http.HttpSession注入控制器方法。
+
+
+==== @RequestAttribute
+
+类似于@SessionAttribute，可以使用@RequestAttribute注解来访问先前创建的请求属性，例如，通过Servlet过滤器或HandlerInterceptor向请求中添加Attribute，然后在controller中获取：
+
+[source,java]
+----
+
+public class RequestFilter extends HandlerInterceptorAdapter {
+
+    @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        User user=new User();
+        user.setName("zhaozhiqiag");
+        user.setId("1223");
+        request.setAttribute("user",user);
+        return super.preHandle(request, response, handler);
+    }
+}
+
+
+
+@GetMapping("quser")
+public User getRequestUser(@RequestAttribute("user") User user){
+        return user;
+}
+----
+==== Redirect attributes
+
+默认情况下，模型中的所有属性都被视为在重定向URL中作为URI模板变量公开。他们之中属性值是原始类型或集合/基本类型数组，都会自动附加为查询参数。看下面的例子：
+[source,java]
+----
+@Controller
+@RequestMapping("/redirect/")
+public class RedirectController {
+
+    @RequestMapping("")
+    public String redirect(Model model) {
+        model.addAttribute("name", "zhaozhiqiang");
+        model.addAttribute("age", 28);
+        model.addAttribute("intest", new String[]{"zuqiu", "lanqiu"});
+        User u = new User("shishi", "henan");
+        model.addAttribute(u);
+        return "redirect:/redirect/accept";
+    }
+
+    @RequestMapping("accept")
+    @ResponseBody
+    public String accept(String name, int age) {
+        return name + age;
+    }
+}
+----
+当访问http://localhost:8080/redirect时，会重定向到
+http://localhost:8080/redirect/accept?name=zhaozhiqiang&age=28&intest=zuqiu&intest=lanqiu
+
+虽然可以在模型中添加基本数据类型来实现自动重定向，但是很多情况下，模型中有些属性，我们并不想在重定向的时候携带。这个时候，我们可以在@RequestMapping方法中声明一个RedirectAttributes类型的参数，使用它来指定提供给RedirectView的确切属性。如果该方法确实重定向，则使用RedirectAttributes的内容。否则使用模型的内容。
+
+[source,java]
+----
+    @RequestMapping("re")
+    public String redirect2(Model model, RedirectAttributes attributes) {
+        model.addAttribute("name", "zhaozhiqiang");
+        model.addAttribute("age", 28);
+        model.addAttribute("intest", new String[]{"zuqiu", "lanqiu"});
+        attributes.addAttribute("name","wangxu");
+        return "redirect:/redirect/accept";
+    }
+----
+
+当访问http://localhost:8080/redirect/re时，会重定向到 http://localhost:8080/redirect/accept?name=wangxu
+
+RequestMappingHandlerAdapter提供一个名为“ignoreDefaultModelOnRedirect”的标志，可用于指示在重定向的时候是否携带模型参数。相反，控制器方法应声明RedirectAttributes类型的属性，或者如果不这样做，则不应将属性传递给RedirectView。为了维持向后兼容性，MVC命名空间和MVC Java配置都将此标志设置为false(spring5默认开启)。但是，对于新应用程序，我们建议将其设置为true
+
+[source,java]
+----
+    @Bean
+    public RequestMappingHandlerAdapter setHandler(RequestMappingHandlerAdapter adapter){
+        adapter.setIgnoreDefaultModelOnRedirect(true);
+        return adapter;
+    }
+----
+
+
+请注意，当前请求中的URI模板变量在扩展重定向URL时自动可用，并且不需要通过Model或RedirectAttributes显式添加。例如：
+
+[source,java]
+----
+@PostMapping("/files/{path}")
+public String upload(...) {
+    // ...
+    return "redirect:files/{path}";
+}
+----
+
+将数据传递到重定向目标的另一种方式是通过Flash属性。与其他重定向属性不同，Flash属性保存在HTTP会话中（因此不会出现在URL中）。
+
+[reftext="FlashMapManager"]
+==== Flash attributes
+
+Flash attributes可以存储请求A的数据，然后供请求B使用。这是重定向时最常需要的 - 例如Post / Redirect / Get模式。在重定向（通常在会话中）之前，Flash属性会临时保存，以便在重定向后使用，用完之后会被删除
+
+Spring MVC有两个主要的抽象来支持Flash属性。FlashMap用于保存Flash属性，而FlashMapManager用于存储，检索和管理FlashMap实例。
+
+Flash属性在spring中默认开启，在使用中不会创建HttpSession。在每个请求中，都有一个“iuput”FlashMap，其中包含从先前请求（如果有）传递的属性以及带有用于保存后续请求的属性的“output”FlashMap。两个FlashMap实例都可以通过RequestContextUtils中的静态方法从Spring MVC中的任何位置访问
+
+带注释的控制器通常不需要直接使用FlashMap。因为，@RequestMapping方法可以接受RedirectAttributes类型的参数，并使用它为重定向场景添加Flash属性。通过RedirectAttributes添加的Flash属性会自动传播到“output”FlashMap。同样，在重定向之后，来自“iuput”FlashMap的属性将自动添加到目标URL的控制器的Model中。
+
+[source,java]
+----
+    @RequestMapping("flash")
+    public String flash( RedirectAttributes attributes) {
+        attributes.addFlashAttribute("name","zhaozhiqiang");
+        return "redirect:/redirect/result";
+    }
+
+    @RequestMapping("result")
+    @ResponseBody
+    public String accept2(HttpServletRequest request) {
+        Map<String, ?> outputFlashMap = RequestContextUtils.getInputFlashMap(request);
+        Object name = outputFlashMap.get("name");
+        return String.valueOf(name);
+    }
+----
+
+[NOTE]
+
+====
+Flash属性的概念存在于许多其他Web框架中，并且已被证明有时会暴露给并发问题。这是因为根据定义，flash属性将被存储直到下一个请求。然而，有些时候，“下一个”请求可能不是预期的接收者，而是另一个异步请求（例如轮询或资源请求），在这种情况下，Flash属性被过早移除。
+
+为了减少这种问题的可能性，RedirectView使用目标重定向URL的路径和查询参数自动“标记”FlashMap实例。反过来，在查找“输入”FlashMap时，默认的FlashMapManager将该信息与传入的请求匹配。
+
+这并不能完全消除并发问题的可能性，但尽管如此，通过重定向URL中已有的信息大大减少了这种可能性。因此，建议主要针对重定向场景使用Flash属性。
+====
+
+==== Multipart
+
+在启用MultipartResolver之后，具有“multipart/form-data”的POST请求内容将被解析并作为常规请求参数访问。 在下面的例子中，我们访问一个常规表单字段和一个上传的文件：
+[source,java]
+----
+@Controller
+public class FileUploadController {
+
+    @PostMapping("/form")
+    public String handleFormUpload(@RequestParam("name") String name,
+            @RequestParam("file") MultipartFile file) {
+
+        if (!file.isEmpty()) {
+            byte[] bytes = file.getBytes();
+            // store the bytes somewhere
+            return "redirect:uploadSuccess";
+        }
+
+        return "redirect:uploadFailure";
+    }
+
+}
+----
+当使用Servlet 3.0解析时，您也可以使用javax.servlet.http.Part作为方法参数，而不是Spring的MultipartFile。
+
+可以用作数据绑定到命令对象的一部分。 例如，上面的表单域和文件可能是表单对象上的域：
+[source,java]
+----
+class MyForm {
+
+    private String name;
+
+    private MultipartFile file;
+
+    // ...
+
+}
+
+@Controller
+public class FileUploadController {
+
+    @PostMapping("/form")
+    public String handleFormUpload(MyForm form, BindingResult errors) {
+
+        if (!form.getFile().isEmpty()) {
+            byte[] bytes = form.getFile().getBytes();
+            // store the bytes somewhere
+            return "redirect:uploadSuccess";
+        }
+
+        return "redirect:uploadFailure";
+    }
+
+}
+----
+multipart请求也可以在非RESTful服务场景中从非浏览器客户端提交。 例如，一个文件与JSON一起：
+
+[source,shell]
+----
+POST /someUrl
+Content-Type: multipart/mixed
+
+--edt7Tfrdusa7r3lNQc79vXuhIIMlatb7PQg7Vp
+Content-Disposition: form-data; name="meta-data"
+Content-Type: application/json; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+{
+    "name": "value"
+}
+--edt7Tfrdusa7r3lNQc79vXuhIIMlatb7PQg7Vp
+Content-Disposition: form-data; name="file-data"; filename="file.properties"
+Content-Type: text/xml
+Content-Transfer-Encoding: 8bit
+... File Data ...
+----
+您可以使用@RequestParam访问“meta-data”参数，但是参数绑定的值是字符串，我们需要从JSON反序列化（类似于@RequestBody）。 使可以使用@RequestPart：
+
+[source,java]
+----
+@PostMapping("/")
+public String handle(@RequestPart("meta-data") MetaData metadata,
+        @RequestPart("file-data") MultipartFile file) {
+    // ...
+}
+----
+
+@RequestPart可以与javax.validation.Valid或Spring的@Validated注释组合使用，会启用标准Bean验证。 默认情况下，验证错误会导致MethodArgumentNotValidException，该异常会变成400（BAD_REQUEST）响应。 或者，验证错误可以通过Errors或BindingResult参数在控制器内处理：
+
+[source,java]
+----
+@PostMapping("/")
+public String handle(@Valid @RequestPart("meta-data") MetaData metadata,
+        BindingResult result) {
+    // ...
+}
+----
+
+==== @RequestBody
+使用@RequestBody通过HttpMessageConverter将请求体读取并反序列化成一个Object。 下面是一个带有@RequestBody参数的例子：
+[source,java]
+----
+@PostMapping("/accounts")
+public void handle(@RequestBody Account account) {
+    // ...
+}
+----
+您可以使用MVC配置的Message Converters 选项来配置或自定义消息转换。
+
+@RequestBody可以与javax.validation.Valid或Spring的@Validated注解组合使用，这会导致应用标准Bean验证。 默认情况下，验证错误会导致MethodArgumentNotValidException，该异常会变成400（BAD_REQUEST）响应。 或者，验证错误可以通过Errors或BindingResult参数在控制器内处理：
+
+[source,java]
+----
+@PostMapping("/accounts")
+public void handle(@Valid @RequestBody Account account, BindingResult result) {
+    // ...
+}
+----
+
+==== HttpEntity
+
+HttpEntity或多或少与使用@RequestBody相同，但他是基于请求标头和主体的容器对象。 下面是一个例子：
+[source,java]
+----
+@PostMapping("/accounts")
+public void handle(HttpEntity<Account> entity) {
+    // ...
+}
+----
+
+==== @ResponseBody
+在一个方法上使用@ResponseBody注解，通过HttpMessageConverter将返回序列化为响应主体。 例如：
+
+[source,java]
+----
+@GetMapping("/accounts/{id}")
+@ResponseBody
+public Account handle() {
+    // ...
+}
+----
+
+@ResponseBody在类级别也受支持，在这种情况下，它由所有控制器方法继承。 这是@RestController的作用，它只不过是用@Controller和@ResponseBody标记的元注释。
+
+
+您可以使用MVC配置的Message Converters 选项来配置或自定义消息转换。
+
+@ResponseBody方法可以与JSON序列化视图结合使用。 详情请参阅<<Jackson JSON>>。
+
+==== ResponseEntity
+
+ResponseEntity或多或少与使用@ResponseBody相同，但基于指定请求标头和主体的容器对象。 下面是一个例子：
+
+[source,java]
+----
+@PostMapping("/something")
+public ResponseEntity<String> handle() {
+    // ...
+    URI location = ...
+    return new ResponseEntity.created(location).build();
+}
+----
+
+==== Jackson JSON
+
+Spring MVC为Jackson的序列化视图提供了内置的支持，它允许渲染对象中所有字段的一个子集。 要将其与@ResponseBody或ResponseEntity控制器方法一起使用，请使用Jackson的@JsonView注释来激活序列化视图类：
+
+[source,java]
+----
+@RestController
+public class UserController {
+
+    @GetMapping("/user")
+    @JsonView(User.WithoutPasswordView.class)
+    public User getUser() {
+        return new User("eric", "7!jd#h23");
+    }
+}
+
+public class User {
+
+    public interface WithoutPasswordView {};
+    public interface WithPasswordView extends WithoutPasswordView {};
+
+    private String username;
+    private String password;
+
+    public User() {
+    }
+
+    public User(String username, String password) {
+        this.username = username;
+        this.password = password;
+    }
+
+    @JsonView(WithoutPasswordView.class)
+    public String getUsername() {
+        return this.username;
+    }
+
+    @JsonView(WithPasswordView.class)
+    public String getPassword() {
+        return this.password;
+    }
+}
+
+----
+
+NOTE: @JsonView允许一个视图类的数组，但每个控制器方法只能指定一个。 如果您需要激活多个视图，请使用复合接口。
+
+对于依赖视图的控制器，只需将序列化视图类添加到模型中即可：
+
+[source,java]
+----
+@Controller
+public class UserController extends AbstractController {
+
+    @GetMapping("/user")
+    public String getUser(Model model) {
+        model.addAttribute("user", new User("eric", "7!jd#h23"));
+        model.addAttribute(JsonView.class.getName(), User.WithoutPasswordView.class);
+        return "userView";
+    }
+}
+----
+
+===== Jackson JSONP
+
+*JSONP原理*
+ajax请求受同源策略影响，不允许进行跨域请求，而script标签src属性中的链接却可以访问跨域的js脚本，利用这个特性，服务端不再返回JSON格式的数据，而是返回一段调用某个函数的js代码，在src中进行了调用，这样实现了跨域。
+
+
+
+为了启用JSONP对@ResponseBody和ResponseEntity方法的支持，声明一个@ControllerAdvice bean，它扩展AbstractJsonpResponseBodyAdvice，如下所示，其中constructor参数指示JSONP查询参数名称：
+
+[source,java]
+----
+@ControllerAdvice
+public class JsonpAdvice extends AbstractJsonpResponseBodyAdvice {
+
+    public JsonpAdvice() {
+        super("jsoncallback");
+    }
+}
+----
+
+[source,html]
+----
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>JSONP 实例</title>
+</head>
+<body>
+<script type="text/javascript">
+    function callbackFunction(result, methodName)
+    {
+       console.log(result);
+       console.log(methodName);
+    }
+</script>
+<script type="text/javascript" src="http://localhost:8080/model/add?jsoncallback=callbackFunction"></script>
+</body>
+</html>
+----
+
+[source,shell]
+----
+/**/callbackFunction({"id":0,"name":"sessionUser","addr":"hebai"});
+----
+
+对于依赖视图解析的Controller，当请求带有名为jsoncallback查询参数时，JSONP将自动启用。 查询参数的名称可以通过jsonpParameterNames属性进行定制。
+
+=== 1.4.4. Model Methods
+
+可以在@RequestMapping方法参数上使用@ModelAttribute注解来创建或访问模型中的Object并将其绑定到请求。 @ModelAttribute也可以用作controller方法的注释，其目的不是处理请求，而是在请求处理之前添加常用模型属性。
+
+控制器可以有任意数量的@ModelAttribute方法。 所有这些方法在controller的@RequestMapping方法之前被调用。 @ModelAttribute方法也可以通过@ControllerAdvice在控制器之间共享。
+
+@ModelAttribute方法具有灵活的方法签名。 它们支持许多与@RequestMapping相同的方法入参，除了@ModelAttribute本身或任何与请求主体相关的东西。
+
+[source,java]
+----
+@ModelAttribute
+public void populateModel(@RequestParam String number, Model model) {
+    model.addAttribute(accountRepository.findAccount(number));
+    // add more ...
+}
+----
+
+[source,java]
+----
+@ModelAttribute
+public Account addAccount(@RequestParam String number) {
+    return accountRepository.findAccount(number);
+}
+----
+
+如果没有明确指定名称，则根据对象类型选择默认名称（一般是类名小写）您可以使用重载的addAttribute方法或通过@ModelAttribute上的name属性（用于返回值）来指定名称。
+
+@ModelAttribute也可以用作@RequestMapping方法的注释，在这种情况下，@RequestMapping方法的返回值被解释为模型属性， 这通常spring默认的，但是要注意返回视图字符串的情况排除在外。
+
+[source,java]
+----
+@GetMapping("/accounts/{id}")
+@ModelAttribute("myAccount")
+public Account handle() {
+    // ...
+    return account;
+}
+----
+
+=== 1.4.5. Binder 方法
+
+@Controller或@ControllerAdvice类中被@InitBinder注解的方法，可用于自定义（例如请求参数，路径变量，标题，cookie等）方法参数的类型转换。类型转换也适用在将请求参数绑定到@ModelAttribute注解的参数。
+
+@InitBinder方法可以在Controller中注册java.bean.PropertyEditor或Spring Converter和Formatter组件。 另外，可以在全局配置中通过FormattingConversionService注册Converter和Formatter。
+
+ 通常，它们是用WebDataBinder参数声明注册的，并且该方法返回void值。 下面是一个例子：
+
+[source,java]
+----
+@Controller
+public class FormController {
+
+    @InitBinder
+    public void initBinder(WebDataBinder binder) {
+        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
+        dateFormat.setLenient(false);
+        binder.registerCustomEditor(Date.class, new CustomDateEditor(dateFormat, false));
+    }
+
+}
+----
+
+或者，当通过共享的FormattingConversionService使用基于Formatter的设置时，您可以重用相同的方法并注册特定于控制器的Formatter's：
+
+[source,java]
+----
+@Controller
+public class FormController {
+
+    @InitBinder
+    protected void initBinder(WebDataBinder binder) {
+        binder.addCustomFormatter(new DateFormatter("yyyy-MM-dd"));
+    }
+
+    // ...
+}
+----
+
+[reftext="HandlerExceptionResolver"]
+=== 1.4.6. Exception Methods
+
+@Controller中的@ExceptionHandler方法用于处理来自同一Controller的请求抛出的异常。 还可以在@ControllerAdvice类中声明@ExceptionHandler以跨Controller应用。 在Spring MVC中支持@ExceptionHandler方法是通过HandlerExceptionResolver机制提供的。
+
+[source,java]
+----
+@Controller
+public class SimpleController {
+
+    // ...
+
+    @ExceptionHandler(IOException.class)
+    public ResponseEntity<String> handle(IOException ex) {
+        // ...
+    }
+
+}
+----
+
+@ExceptionHandler的值可以设置为Exception类型的数组。 或者如果未设值，则会使用方法签名中声明的异常类型。 @ExceptionHandler方法也可以声明其他参数，例如 HttpServletRequest。 返回值类型可以是一个String（它被解析为一个视图名称），一个ModelAndView对象，一个ResponseEntity，或者你也可以添加@ResponseBody注解。
+
+@ExceptionHandler优先匹配与定义相近的异常，例如：
+[source,java]
+----
+@RestController
+public class ExceptionController {
+
+    @RequestMapping("/ex")
+    public void test() throws ArithmeticException {
+        System.err.println(1 / 0);
+    }
+
+    @ExceptionHandler(ArithmeticException.class)
+    public void exHandler() {
+        System.err.println("异常");
+    }
+
+    @ExceptionHandler(Exception.class)
+    public void exHandler2() {
+        System.err.println("异常2");
+    }
+}
+----
+在上面的例子中，访问/ex的时候，exHandler()方法会执行
+
+但是上面的情况也会有例外：
+[source,java]
+----
+@Order(1)
+@ControllerAdvice
+public class ExceptionControllerAdvice {
+
+    @ExceptionHandler(Exception.class)
+    public void exHandler2() {
+        System.err.println("异常2");
+    }
+}
+
+@Order(2)
+@ControllerAdvice
+public class ExceptionControllerAdvice2 {
+
+    @ExceptionHandler(ArithmeticException.class)
+    public void exHandler() {
+        System.err.println("异常");
+    }
+
+}
+----
+
+虽然ExceptionControllerAdvice2异常匹配更相近，但是ExceptionControllerAdvice的优先级高。所以exHandler2方法会执行。
+
+REST服务的一个常见要求是在响应正文中包含错误详细信息。 Spring Framework不会自动执行此操作，因为响应正文中的错误详细信息是特定于应用程序的。 然而，@RestController可以使用带有ResponseEntity返回值的@ExceptionHandler方法来设置响应的状态和主体。 这些方法也可以在@ControllerAdvice类中声明以全局应用它们。
+
+
+在响应主体中实现具有错误细节的全局异常处理的应用程序应该考虑扩展ResponseEntityExceptionHandler，它提供对Spring MVC引发的异常的处理以及钩子来定制响应主体。 为了利用它，创建一个ResponseEntityExceptionHandler的子类，用@ControllerAdvice注释，覆盖必要的方法，并将其声明为Spring bean 。
+
+=== 1.4.7. Controller Advice
+
+通常，@ExceptionHandler，@InitBinder和@ModelAttribute方法适用于它们声明的@Controller类（或类层次结构）中。如果希望这些方法跨controller在全局范围内应用，则可以在标有@ControllerAdvice或@RestControllerAdvice的类中声明它们。
+
+启动时，@RequestMapping和@ExceptionHandler方法的基础设施类检测被@ControllerAdvice注解的bean，然后在运行时绑定它们的方法。 全局@ExceptionHandler方法（来自@ControllerAdvice）优先级低于@Controller的@ExceptionHandler方法被绑定。 相比之下，全局@ModelAttribute和@InitBinder方法在优先@controller之前被绑定。footnote:[虽然绑定顺序不一样，但是本地执行的优先级是高于全局的，也就是说无论是异常匹配还是方法绑定，都是优先执行本地的]。
+
+默认情况下，@ControllerAdvice方法适用于每个请求，即所有Controller，但您可以设置将其缩小为Controller的子集：
+
+[source,java]
+----
+// Target all Controllers annotated with @RestController
+@ControllerAdvice(annotations = RestController.class)
+public class ExampleAdvice1 {}
+
+// Target all Controllers within specific packages
+@ControllerAdvice("org.example.controllers")
+public class ExampleAdvice2 {}
+
+// Target all Controllers assignable to specific classes
+@ControllerAdvice(assignableTypes = {ControllerInterface.class, AbstractController.class})
+public class ExampleAdvice3 {}
+----
+
+NOTE: 上述选择器在运行时进行评估，如果广泛使用，可能会对性能产生负面影响。 
+
+== 1.5. URI Links
+
+本节介绍Spring框架中可用于构建URI的各种选项。
+
+=== 1.5.1. UriComponents
+
+UriComponents与java.net.URI作用相同。 他由专门的UriComponentsBuilder构建，并支持URI模板变量：
+
+[source,java]
+----
+UriComponents uriComponents = UriComponentsBuilder.fromUriString(uriTemplate)  <1>
+        .queryParam("q", "{q}")  <2>
+        .build(); <3>
+
+URI uri = uriComponents.expand("Westin", "123").encode().toUri(); <4>
+----
+<1> 带有URI模板的静态工厂方法。
+<2> 添加或替换URI组件。
+<3> Build UriComponents.
+<4> 展开URI变量，编码并获取URI
+
+以上也可以用下面的快捷方式实现
+[source,java]
+----
+String uriTemplate = "http://example.com/hotels/{hotel}";
+
+URI uri = UriComponentsBuilder.fromUriString(uriTemplate) 
+        .queryParam("q", "{q}") 
+        .buildAndExpand("Westin", "123") 
+        .encode()
+        .toUri(); 
+----
+
+=== 1.5.2. UriBuilder
+
+UriComponentsBuilder是UriBuilder的一个实现。 UriBuilderFactory和UriBuilder一起提供了可从URI模板构建URI的可插入机制，以及共享公共属性（如基本URI，编码策略等）的方法。
+
+RestTemplate和WebClient都可以使用UriBuilderFactory进行配置，以便自定义如何从URI模板创建URI。 默认实现在内部依赖于UriComponentsBuilder，并提供了配置基本URI，编码模式等选项。
+
+配置RestTemplate
+[source,java]
+----
+String baseUrl = "http://example.com";
+DefaultUriBuilderFactory factory = new DefaultUriBuilderFactory(baseUrl);
+
+RestTemplate restTemplate = new RestTemplate();
+restTemplate.setUriTemplateHandler(factory);
+----
+配置WebClient
+[source,java]
+----
+String baseUrl = "http://example.com";
+DefaultUriBuilderFactory factory = new DefaultUriBuilderFactory(baseUrl);
+
+// Configure the UriBuilderFactory..
+WebClient client = WebClient.builder().uriBuilderFactory(factory).build();
+
+// Or use shortcut on builder..
+WebClient client = WebClient.builder().baseUrl(baseUrl).build();
+
+// Or use create shortcut...
+WebClient client = WebClient.create(baseUrl);
+----
+
+您也可以直接使用DefaultUriBuilderFactory，就像您使用UriComponentsBuilder一样。 主要区别在于，DefaultUriBuilderFactory是有状态的，可以重新用于构建许多URL，共享通用配置，例如基本URL，而UriComponentsBuilder是无状态的并且是按URI。
+[source,java]
+----
+String baseUrl = "http://example.com";
+DefaultUriBuilderFactory uriBuilderFactory = new DefaultUriBuilderFactory(baseUrl);
+
+URI uri = uriBuilderFactory.uriString("/hotels/{hotel}")
+        .queryParam("q", "{q}")
+        .build("Westin", "123"); // encoding strategy applied..
+----
+
+=== 1.5.3. URI Encoding
+
+在UriComponents中编码URI的默认方式如下所示：
+
+. URI变量被expanded。
+. 每个URI组件（路径，查询等）都是单独编码的。
+
+编码规则如下：在URI组件中，按照RFC3986中的定义，对所有非法字符（包括非US-ASCII字符）以及URI组件中非法的所有其他字符应用百分比编码。
+
+上述默认编码策略不会对所有具有保留含义的字符进行编码，而只会对给定URI组件中的非法字符进行编码。 如果这不符合您的期望，您可以使用下面介绍的替代策略。
+
+当使用DefaultUriBuilderFactory - 插入WebClient，RestTemplate或直接使用时，可以切换到另一种编码策略，如下所示：
+[source,java]
+----
+String baseUrl = "http://example.com";
+DefaultUriBuilderFactory factory = new DefaultUriBuilderFactory(baseUrl)
+factory.setEncodingMode(EncodingMode.VALUES_ONLY);
+----
+
+这种替代编码策略在expanded之前对每个URI变量值应用UriUtils.encode（String，Charset），(有效编码包括所有非US-ASCII字符以及在URI中具有保留含义的所有字符)，这确保扩展的URI变量 对URI的结构或含义没有任何影响。
+
+=== 1.5.4. Servlet request relative
+
+您可以使用ServletUriComponentsBuilder创建相对于当前请求的URI：
+[source,java]
+----
+HttpServletRequest request = ...
+
+// Re-uses host, scheme, port, path and query string...
+
+ServletUriComponentsBuilder ucb = ServletUriComponentsBuilder.fromRequest(request)
+        .replaceQueryParam("accountId", "{id}").build()
+        .expand("123")
+        .encode();
+----
+您可以创建相对于上下文路径的URI：
+[source,java]
+----
+ServletUriComponentsBuilder ucb = ServletUriComponentsBuilder.fromContextPath(request)
+        .path("/accounts").build()
+----
+
+您可以创建相对于Servlet的URI（例如/ main / *）：
+[source,java]
+----
+// Re-uses host, port, context path, and Servlet prefix...
+
+ServletUriComponentsBuilder ucb = ServletUriComponentsBuilder.fromServletMapping(request)
+        .path("/accounts").build()
+----
+
+NOTE: ServletUriComponentsBuilder检测并使用来自“Forwarded”，“X-Forwarded-Host”，“X-Forwarded-Port”和“X-Forwarded-Proto”头部的信息，以便生成的链接反映原始请求。 您需要确保您的应用程序位于可信代理的后面，该代理可以过滤掉来自外部的头文件。 还要考虑使用ForwardedHeaderFilter，它可以在每个请求中处理这些头文件，并且还提供了一个选项来删除和忽略这些头文件。
+
+=== 1.5.5. Links to controllers
+
+Spring MVC提供了一种机制来创建控制器方法的链接。 例如：
+
+[source,java]
+----
+@Controller
+@RequestMapping("/hotels/{hotel}")
+public class BookingController {
+
+    @GetMapping("/bookings/{booking}")
+    public String getBooking(@PathVariable Long booking) {
+        // ...
+    }
+}
+----
+
+[source,java]
+----
+UriComponents uriComponents = MvcUriComponentsBuilder
+    .fromMethodName(BookingController.class, "getBooking", 21).buildAndExpand(42);
+
+URI uri = uriComponents.encode().toUri();
+----
+
+在上面的例子中，我们提供了实际的方法参数值，在这种情况下是长整型值21，用作路径变量并插入到URL中。 此外，我们提供了值42以填充任何剩余的URI变量，例如从类型级别请求映射继承的“hotel”变量。 如果该方法有更多参数，则可以为URL不需要的参数提供空值。 通常，只有@PathVariable和@RequestParam参数与构造URL相关。
+
+还有其他方法可以使用MvcUriComponentsBuilder。 例如，您可以使用类似于通过代理进行模拟测试的技术，以避免通过名称引用控制器方法（该示例假定MvcUriComponentsBuilder.on的静态导入）：
+[source,java]
+----
+UriComponents uriComponents = MvcUriComponentsBuilder
+    .fromMethodCall(on(BookingController.class).getBooking(21)).buildAndExpand(42);
+
+URI uri = uriComponents.encode().toUri();
+----
+以上示例在MvcUriComponentsBuilder中使用静态方法。 在内部，他们依靠ServletUriComponentsBuilder从当前请求的协议，主机，端口，上下文路径和servlet路径准备基本URL。 这在大多数情况下效果很好，但有时可能不够。 例如，您可能在请求的上下文之外（例如，准备链接的批处理过程），或者您需要插入路径前缀（例如，请求路径前缀被删除但又需要重新插入链接的区域）。
+
+对于这种情况，您可以使用接受UriComponentsBuilder的静态“fromXxx”重载方法来使用基本URL。 或者，您可以使用基本URL创建MvcUriComponentsBuilder实例，然后使用基于实例的“withXxx”方法。 例如：
+[source,java]
+----
+UriComponentsBuilder base = ServletUriComponentsBuilder.fromCurrentContextPath().path("/en");
+MvcUriComponentsBuilder builder = MvcUriComponentsBuilder.relativeTo(base);
+builder.withMethodCall(on(BookingController.class).getBooking(21)).buildAndExpand(42);
+
+URI uri = uriComponents.encode().toUri();
+----
+
+=== 1.5.6. Links in views
+
+您还可以从视图（如JSP，Thymeleaf，FreeMarker）建立到注释控制器的链接。 这可以使用MvcUriComponentsBuilder中的fromMappingName方法来完成，该方法引用按名称映射。
+
+每个@RequestMapping都会根据类的大写字母和完整的方法名称分配一个默认名称。 例如，类FooController中的方法getFoo被分配名称“FC＃getFoo”。 可以通过创建HandlerMethodMappingNamingStrategy实例并将其插入到RequestMappingHandlerMapping中来替换或定制此策略。 默认策略实现还会查看@RequestMapping上的name属性，并使用它（如果存在）。 这意味着如果分配的默认映射名称与另一个映射名称冲突（例如重载方法），您可以在@RequestMapping上明确指定名称。
+
+NOTE: TRACE级别下可以看到日志中分配的请求映射。
+
+Spring JSP标记库提供了一个名为mvcUrl的函数，可用于根据此机制为控制器方法准备链接。
+[source,java]
+----
+@RequestMapping("/people/{id}/addresses")
+public class PersonAddressController {
+
+    @RequestMapping("/{country}")
+    public HttpEntity getAddress(@PathVariable String country) { ... }
+}
+----
+
+[source,jsp]
+----
+<%@ taglib uri="http://www.springframework.org/tags" prefix="s" %>
+...
+<a href="${s:mvcUrl('PAC#getAddress').arg(0,'US').buildAndExpand('123')}">Get Address</a>
+----
+
+上面的例子依赖于Spring标记库中声明的mvcUrl JSP函数（即META-INF / spring.tld）。 对于更高级的情况（例如上一节中介绍的自定义基本URL），可以很容易地定义自己的函数或使用自定义标记文件，以便使用具有自定义基本URL的特定MvcUriComponentsBuilder实例。
+
+== 1.6. Async Requests
+
+
+Spring MVC与Servlet 3.0异步请求处理进行了广泛的整合：
+
+* 控制器方法中的DeferredResult和Callable返回值为单个异步返回值提供基本支持。
+* 控制器可以传输多个值，包括SSE和原始数据。
+* 控制器可以使用reactive客户端并返回响应处理的reactive类型。
+
+=== 1.6.1. DeferredResult
+
+一旦在Servlet容器中启用了异步请求处理功能，控制器方法就可以用DeferredResult包装任何受支持的控制器方法的返回值：
+
+[source,java]
+----
+    @GetMapping("/quotes")
+    @ResponseBody
+    public DeferredResult<String> quotes() {
+        DeferredResult<String> deferredResult = new DeferredResult<String>();
+        // Save the deferredResult somewhere..
+        return deferredResult;
+    }
+
+    // From some other thread...
+    deferredResult.setResult(data);
+----
+控制器可以从不同的线程异步生成返回值，例如响应外部事件（JMS消息），计划任务或其他。
+
+=== 1.6.2. Callable
+
+控制器也可以用java.util.concurrent.Callable包装任何支持的返回值：
+[source,java]
+----
+    @PostMapping
+    public Callable<String> processUpload(final MultipartFile file) {
+
+        return new Callable<String>() {
+            public String call() throws Exception {
+                // ...
+                return "someView";
+            }
+        };
+
+    }
+----
+然后通过配置的TaskExecutor执行给定的任务来获取返回值。
+
+=== 1.6.3. Processing
+
+以下是Servlet异步请求处理的简要概述：
+
+* 通过调用request.startAsync（），可以将ServletRequest置于异步模式。这样做的主要效果是Servlet以及任何过滤器都可以退出，但响应将保持打开状态，以便稍后完成处理。
+* 对request.startAsync（）的调用返回AsyncContext，可用于进一步控制异步处理的。例如，它提供了方法dispatch，它类似于Servlet API的转发，除了允许应用恢复对Servlet容器线程的请求处理。
+* ServletRequest提供对当前DispatcherType的访问，可用于区分处理初始请求，异步调度，转发和其他调度程序类型。
+
+DeferredResult 处理过程：
+
+* 控制器返回一个DeferredResult并将其保存在某个可以访问的内存队列中。
+* Spring MVC调用request.startAsync（）。
+* 与此同时，DispatcherServlet和所有配置的Filter都退出请求处理线程，但响应保持打开状态。
+* 应用程序从某个线程设置DeferredResult，Spring MVC将请求分派回Servlet容器。
+* DispatcherServlet再次被调用，恢复异步生成的返回值。
+
+Callable处理过程：
+
+* 控制器返回一个Callable。
+* Spring MVC调用request.startAsync（）并将Callable提交给TaskExecutor以在单独的线程中处理。
+* 与此同时，DispatcherServlet和所有Filter都退出了Servlet容器线程，但响应保持打开状态。
+* 最终，Callable产生一个结果，Spring MVC将该请求分派回Servlet容器以完成处理。
+* DispatcherServlet被再次调用，并且恢复Callable异步生成的返回值。
+
+==== 异常处理
+
+当使用DeferredResult时，您可以选择是否调用setResult或setErrorResult返回异常信息。在这两种情况下，Spring MVC都会将请求分派回Servlet容器以完成处理。然后将它视为如同控制器方法返回给定值一样，或者如同它产生了给定的异常一样。然后走常规异常处理机制，例如调用@ExceptionHandler方法。
+
+使用Callable时，类似的处理逻辑。主要区别在于结果是从Callable返回的，或者是由它抛出的异常。
+
+==== Interception
+
+HandlerInterceptor可以是AsyncHandlerInterceptor，以便在请求初始化的时候接收afterConcurrentHandlingStarted回调。
+
+HandlerInterceptor's还可以注册一个CallableProcessingInterceptor或一个DeferredResultProcessingInterceptor以更深入地集成异步请求的生命周期，例如处理超时事件。
+
+DeferredResult提供了onTimeout（Runnable）和onCompletion（Runnable）回调。有关更多详细信息，请参阅DeferredResult的Javadoc。 Callable可以替代WebAsyncTask，它提供了超时和完成回调的附加方法。
+
+==== 对比 WebFlux
+
+Servlet API最初是为顺序处理而构建的，即通​​过Filter-Servlet链进行一次传递。 Servlet 3.0中添加的异步请求处理功能允许应用程序退出Filter-Servlet链，但将响应保持为打开状态，从而打破 thread-per-request模式。
+
+Spring MVC异步支持是围绕该模型构建的。当控制器返回DeferredResult时，Filter-Servlet链退出并释放Servlet容器线程。稍后当DeferredResult被设置时，ASYNC分派（到同一个URL）被调用，在此期间控制器被再次映射但未被调用。相反，DeferredResult值用于恢复处理。
+
+Spring WebFlux不知道Servlet API，也不知道这种异步请求处理特性。它分阶段处理每个请求（延续），而不是在单个线程中通过调用堆栈。这意味着所有框架协议都内置了异步处理，因此在请求处理的所有阶段都支持异步处理。
+
+基本上，Spring MVC和Spring WebFlux都支持异步和Reactive类型的控制器方法的返回值。 Spring MVC甚至支持流式处理，包括反应性背压，但是响应的单个写入仍然阻塞（在单独的线程中执行），这是与WebFlux依赖于非阻塞I/O的一个主要区别。
+
+另一个基本区别是Spring MVC不支持控制器方法参数中的异步或reactive 类型，例如@RequestBody，@RequestPart等等，也没有明确支持异步和reactive 类型作为模型属性，所有这些都是Spring WebFlux支持的。
+
+
+=== 1.6.4. HTTP Streaming
+
+
+DeferredResult和Callable可用于单个异步返回值。如果您想生成多个异步值并将其写入响应，该怎么办？
+
+==== Objects
+
+ResponseBodyEmitter返回值可用于生成对象流，其中每个发送的对象都使用HttpMessageConverter序列化并写入响应。例如：
+
+[source,java]
+----
+@GetMapping("/events")
+public ResponseBodyEmitter handle() {
+    ResponseBodyEmitter emitter = new ResponseBodyEmitter();
+    // Save the emitter somewhere..
+    return emitter;
+}
+
+// In some other thread
+emitter.send("Hello once");
+
+// and again later on
+emitter.send("Hello again");
+
+// and done at some point
+emitter.complete();
+----
+
+ResponseBodyEmitter也可以用作ResponseEntity中的body，允许您自定义响应的状态和标题。
+
+==== SSE
+
+SseEmitter是ResponseBodyEmitter的一个子类，它支持Server-Sent Events，其中根据W3C SSE规范格式化服务器发送的事件。为了从控制器产生SSE流，只需返回SseEmitter：
+[source,xml]
+----
+@GetMapping(path="/events", produces=MediaType.TEXT_EVENT_STREAM_VALUE)
+public SseEmitter handle() {
+    SseEmitter emitter = new SseEmitter();
+    // Save the emitter somewhere..
+    return emitter;
+}
+
+// In some other thread
+emitter.send("Hello once");
+
+// and again later on
+emitter.send("Hello again");
+
+// and done at some point
+emitter.complete();
+----
+
+虽然SSE是浏览器的主要选项，但请注意，Internet Explorer不支持服务器发送的事件。考虑使用Spring的WebSocket消息传递和SockJS传输（包括SSE）。
+
+==== Raw data
+
+有时忽略消息转换并直接将流传输到响应OutputStream（例如文件下载）很有用。使用StreamingResponseBody返回值来做到这一点：
+
+[source,java]
+----
+@GetMapping("/download")
+public StreamingResponseBody handle() {
+    return new StreamingResponseBody() {
+        @Override
+        public void writeTo(OutputStream outputStream) throws IOException {
+            // write...
+        }
+    };
+}
+----
+
+StreamingResponseBody可用作ResponseEntity中的主体，允许您自定义响应的状态和标题。
+
+=== 1.6.5. Reactive types
+Spring MVC支持在控制器中使用reactive 客户端库。这包括spring-webflux的WebClient和Spring Data reactive 数据存储库等其他WebClient。在这种情况下，能够从控制器方法返回reactive 类型是方便的。
+异步请求处理功能必须在Servlet容器级别启用。 MVC配置也为异步请求提供了几个选项。
+
+响应返回值的处理方式如下：
+
+* 单值适用于类似于使用DeferredResult的类。例子包括Mono（Reactor）或Single（RxJava）。
+* 具有诸如“application/ tream + json”或“text/ event-stream”的流媒体类型多值流适用于类似于使用ResponseBodyEmitter或SseEmitter。例子包括Flux（Reactor）或Observable（RxJava）。应用程序也可以返回Flux <ServerSentEvent>或Observable <ServerSentEvent>。
+* 具有任何其他媒体类型（例如“application/json”）的多值流适用于并类似于使用DeferredResult <List<?>>。
+
+=== 1.6.6. 配置
+
+异步请求处理功能必须在Servlet容器级别启用。 MVC配置也为异步请求提供了几个选项。
+
+==== Servlet container
+
+Filter和Servlet声明有一个asyncSupported，需要设置为true才能启用异步请求处理。另外，应该声明过滤器映射来处理ASYNC javax.servlet.DispatchType。
+在Java配置中，当您使用AbstractAnnotationConfigDispatcherServletInitializer初始化Servlet容器时，这是自动完成的。
+在web.xml配置中，向DispatcherServlet和Filter声明添加<async-supported> true </ async-supported>，并添加<dispatcher> ASYNC </ dispatcher>以过滤映射。
+
+==== Spring MVC
+
+MVC配置异步请求处理相关的选项：
+
+* Java配置 - 在WebMvcConfigurer上使用configureAsyncSupport回调。
+* XML名称空间 - 使用<mvc：annotation-driven>下的<async-support>元素。
+
+你可以配置如下信息：
+
+* 异步请求的默认超时值（如果未设置）取决于底层的Servlet容器（例如Tomcat上的10秒）。
+* AsyncTaskExecutor用于在使用Reactive类型进行流式传输时阻止写入操作，还用于执行从控制器方法返回的Callable's。强烈建议配置此属性，如果您使用反应类型进行流式传输或者使用返回Callable的控制器方法，因为默认情况下它是SimpleAsyncTaskExecutor
+* DeferredResultProcessingInterceptor's and CallableProcessingInterceptor's.
+
+请注意，默认超时值也可以在DeferredResult，ResponseBodyEmitter和SseEmitter上设置。对于Callable，使用WebAsyncTask来提供超时值。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+== 1.7. CORS
+
+== 1.8. Web Security
+
+== 1.9. HTTP Caching
+
+== 1.10. View Technologies
+
+== 1.11. MVC Config
+
+== 1.12. HTTP/2
+
+== 2. RestTemplate
+
+Spring REST客户端具有类似于Spring中其他模板类相同结构的API，如JdbcTemplate，JmsTemplate等。 RestTemplate具有同步API并依赖于阻止I / O，这对于低并发性的客户端方案来说是可以的。
+
+[cols="1,5a"]
+|===
+|HTTP Method| RestTemplate Method
+|DELETE|delete
+|GET|getForObject getForEntity
+|HEAD|headForHeaders(String url, String…​ uriVariables)
+|OPTIONS|optionsForAllow(String url, String…​ uriVariables)
+|POST|postForLocation(String url, Object request, String…​ uriVariables) postForObject(String url, Object request, Class<T> responseType, String…​ uriVariables)
+|PUT|put(String url, Object request, String…​uriVariables)
+|PATCH and others|exchange execute
+
+|===
+
+RestTemplate方法的名称遵循命名约定，第一部分指示正在调用哪个HTTP方法，第二部分指示返回的内容。 例如，方法getForObject（）将执行GET，将HTTP响应转换为您选择的对象类型并返回该对象。 postForLocation（）方法将执行POST，将给定对象转换为HTTP请求，并返回可以找到新创建对象的响应HTTP location标头。 如果发生处理HTTP请求的异常，则会抛出RestClientException类型的异常; 可以通过将另一个ResponseErrorHandler实现插入RestTemplate来更改此行为。
+
+exchange和execute是上面列出的更具体方法的通用版本，可以支持其他组合和方法，如HTTP PATCH。 但是请注意，底层的HTTP库也必须支持所需的组合。 JDK HttpURLConnection不支持PATCH方法，但Apache HttpComponents HttpClient版本4.2或更高版本。 它们还使RestTemplate能够使用ParameterizedTypeReference读取对通用类型（例如List <Account>）的HTTP响应，该参数化类型引用是一种可捕获和传递泛型类型信息的新类。
+
+传递给这些方法并从这些方法返回的对象通过HttpMessageConverter实例转换为HTTP消息并从HTTP消息转换成原始对象。 主流的MIME类型的转换器默认注册，但您也可以编写自己的转换器并通过messageConverters（）bean属性注册它。 使用模板注册的默认转换器实例是ByteArrayHttpMessageConverter，StringHttpMessageConverter，FormHttpMessageConverter和SourceHttpMessageConverter。 如果使用MarshallingHttpMessageConverter或MappingJackson2HttpMessageConverter，可以使用messageConverters（）bean属性覆盖这些默认值。
+
+每种方法都采用两种形式的URI模板参数，可以是String可变长度参数或Map <String，String>。 例如，
+
+使用可变长度参数:
+[source,java]
+----
+String result = restTemplate.getForObject(
+        "http://example.com/hotels/{hotel}/bookings/{booking}", String.class,"42", "21");
+----
+
+使用Map<String,String>
+[source,java]
+----
+Map<String, String> vars = Collections.singletonMap("hotel", "42");
+String result = restTemplate.getForObject(
+        "http://example.com/hotels/{hotel}/rooms/{hotel}", String.class, vars);
+----
+
+要创建RestTemplate的实例，您可以简单地调用默认的无参数构造函数。 这将使用java.net包中的标准类作为底层实现来创建HTTP请求。可以通过指定ClientHttpRequestFactory的实现来覆盖。 Spring提供了使用Apache HttpComponents HttpClient创建请求的实现HttpComponentsClientHttpRequestFactory。 HttpComponentsClientHttpRequestFactory使用org.apache.http.client.HttpClient的实例进行配置，该实例可以依次配置凭据信息或连接池功能。
+
+使用Apache HttpComponents HttpClient创建RestTemplate
+[source,java]
+----
+RestTemplate template = new RestTemplate(new HttpComponentsClientHttpRequestFactory());
+----
+
+[source,java]
+----
+HttpClient httpClient = HttpClientBuilder.create().build();
+ClientHttpRequestFactory requestFactory = new HttpComponentsClientHttpRequestFactory(httpClient);
+RestTemplate restTemplate = new RestTemplate(requestFactory);
+----
+
+通用回调接口是RequestCallback，并且在调用execute方法时被调用。
+[source,java]
+----
+public <T> T execute(String url, HttpMethod method, RequestCallback requestCallback,
+        ResponseExtractor<T> responseExtractor, String... uriVariables)
+
+// also has an overload with uriVariables as a Map<String, String>.
+----
+
+RequestCallback接口被定义为:
+[source,java]
+----
+public interface RequestCallback {
+ void doWithRequest(ClientHttpRequest request) throws IOException;
+}
+----
+
+这样，允许您操作请求标头并写入请求主体。 使用execute方法时，您不必担心任何资源管理，模板将始终关闭请求并处理任何错误。 有关使用execute方法和其他方法参数含义的更多信息，请参阅API文档。
+
+=== 使用URI
+
+对于每个主要的HTTP方法，RestTemplate提供了两个变体，它们将String URI模板或java.net.URI作为第一个参数。 使用字符串URI模板时，将自动应用编码：
+
+[source,java]
+----
+restTemplate.getForObject("http://example.com/hotel list", String.class);
+----
+
+产生的目标URI是“http://example.com/hotel%20list”。 或者，您可以提供已准备好的java.net.URI，它将按原样使用。 有关准备URI或定制RestTemplate如何扩展URI模板的更多信息，请参阅<<URI Links>>。
+
+=== 处理请求和响应头
+
+除上述方法外，RestTemplate还有exchange（）方法，该方法可用于基于HttpEntity类的任意HTTP方法。
+也许最重要的是，exchange（）方法可以用来添加请求头和读取响应头。 例如：
+
+[source,java]
+----
+HttpHeaders requestHeaders = new HttpHeaders();
+requestHeaders.set("MyRequestHeader", "MyValue");
+HttpEntity<?> requestEntity = new HttpEntity(requestHeaders);
+
+HttpEntity<String> response = template.exchange(
+        "http://example.com/hotels/{hotel}",
+        HttpMethod.GET, requestEntity, String.class, "42");
+
+String responseHeader = response.getHeaders().getFirst("MyResponseHeader");
+String body = response.getBody();
+----
+在上面的例子中，我们首先准备一个包含MyRequestHeader头的请求实体。 然后我们检索响应，并读取MyResponseHeader和body。
+
+=== Jackson JSON Views support
+
+可以指定一个Jackson JSON视图来仅序列化对象属性的一个子集。 例如：
+[source,java]
+----
+MappingJacksonValue value = new MappingJacksonValue(new User("eric", "7!jd#h23"));
+value.setSerializationView(User.WithoutPasswordView.class);
+HttpEntity<MappingJacksonValue> entity = new HttpEntity<MappingJacksonValue>(value);
+String s = template.postForObject("http://example.com/user", entity, String.class);
+----
+
+== 3.WebSocket
+
+这一部分包含对Servlet堆栈，WebSocket消息传递的支持，其中包括原始WebSocket交互，通过SockJS进行的WebSocket仿真以及通过STOMP作为WebSocket上的子协议的pub-sub消息传递。
+
+=== 3.1 概述
+
+WebSocket协议RFC 6455提供了一种标准化方法，可通过单个TCP连接在客户端和服务器之间建立全双工，双向通信通道。它是来自HTTP的一种不同的TCP协议，但被设计为通过HTTP工作，使用端口80和443并允许重用现有的防火墙规则。
+
+WebSocket交互以HTTP请求开始，HTTP请求使用HTTP“Upgrade”头进行升级，或者在此情况下切换到WebSocket协议：
+
+[source,shell]
+----
+GET /spring-websocket-portfolio/portfolio HTTP/1.1
+Host: localhost:8080
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: Uc9l9TMkWGbHFD2qnFHltg==
+Sec-WebSocket-Protocol: v10.stomp, v11.stomp
+Sec-WebSocket-Version: 13
+Origin: http://localhost:8080
+----
+
+与通常的200状态代码不同，具有WebSocket支持的服务器将返回：
+[source,shell]
+----
+HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: 1qVdfYHU9hPOl4JYYNXF623Gzn0=
+Sec-WebSocket-Protocol: v10.stomp
+----
+握手成功后，HTTP升级请求的TCP套接字将保持打开状态，以便客户端和服务器继续发送和接收消息。
+
+请注意，如果WebSocket服务器在Web服务器（例如nginx）后面运行，则可能需要对其进行配置，以将WebSocket升级请求传递到WebSocket服务器。同样，如果应用程序在云环境中运行，请检查云提供程序与WebSocket支持相关的说明。
+
+==== 3.1.1. HTTP vs WebSocket
+
+尽管WebSocket被设计为与HTTP兼容并以HTTP请求开始，但了解这两种协议不同的体系结构和应用程序编程模型是很重要的。
+
+在HTTP和REST中，应用程序被建模为URL。 要与应用程序客户端交互访问这些URL，请求 - 响应样式。 服务器根据HTTP URL，方法和标头将请求路由到适当的处理程序。
+
+相比之下，在WebSockets中，初始连接通常只有一个URL，随后所有应用程序消息都会在同一个TCP连接上流动。 这指向一个完全不同的异步，事件驱动的消息体系结构。
+
+WebSocket也是一种底层传输协议，它不像HTTP那样规定消息内容的任何语义。 这意味着除非客户端和服务器在消息语义上达成一致，否则无法路由或处理消息。
+
+WebSocket客户端和服务器可以通过HTTP握手请求中的“Sec-WebSocket-Protocol”头部来协商使用更高级别的消息传递协议（例如STOMP），或者在没有提供它们的情况下自己的约定。
+
+==== 3.1.2. When to use it?
+
+WebSockets可以使网页动态和互动。 然而，在许多情况下，Ajax、HTTP流或长轮询的组合可以提供简单而有效的解决方案。
+
+例如，新闻，邮件和社交反馈需要动态更新，但每隔几分钟就可以完成这一操作。 另一方面，协作，游戏和财务应用程序需要更接近实时。
+
+单独的延迟并不是决定性因素。 如果消息量相对较低（例如监视网络故障），则HTTP流或轮询可能会提供有效的解决方案。 它是低延迟，高频率和高音量的组合，是WebSocket使用的最佳案例。
+
+请记住，通过Internet，限制性代理不在您的控制范围内，可能会阻止WebSocket交互，因为它们未配置为传递升级标头，或者因为它们在空闲状态而关闭长连接。这意味着在防火墙内部使用WebSocket用于内部应用程序是一个比直接面向公众的应用程序更直接的决定。
+
+=== 3.2. WebSocket API
+
+Spring框架提供了一个WebSocket API，可用于编写处理WebSocket消息的客户端和服务器端应用程序。
+
+==== 3.2.1. WebSocketHandler
+
+创建WebSocket服务器只需要实现WebSocketHandler，或者扩展TextWebSocketHandler或BinaryWebSocketHandler：
+[source,java]
+----
+import org.springframework.web.socket.WebSocketHandler;
+import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.socket.TextMessage;
+
+public class MyHandler extends TextWebSocketHandler {
+
+    @Override
+    public void handleTextMessage(WebSocketSession session, TextMessage message) {
+        // ...
+    }
+
+}
+----
+有专门的WebSocket Java-config和XML命名空间支持将上述WebSocket处理程序映射到特定的URL：
+[source,java]
+----
+import org.springframework.web.socket.config.annotation.EnableWebSocket;
+import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
+import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
+
+@Configuration
+@EnableWebSocket
+public class WebSocketConfig implements WebSocketConfigurer {
+
+    @Override
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        registry.addHandler(myHandler(), "/myHandler");
+    }
+
+    @Bean
+    public WebSocketHandler myHandler() {
+        return new MyHandler();
+    }
+
+}
+----
+等价的XMl配置：
+[source,xml]
+----
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:websocket="http://www.springframework.org/schema/websocket"
+    xsi:schemaLocation="
+        http://www.springframework.org/schema/beans
+        http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/websocket
+        http://www.springframework.org/schema/websocket/spring-websocket.xsd">
+
+    <websocket:handlers>
+        <websocket:mapping path="/myHandler" handler="myHandler"/>
+    </websocket:handlers>
+
+    <bean id="myHandler" class="org.springframework.samples.MyHandler"/>
+
+</beans>
+----
+以上内容适用于Spring MVC应用程序，并应包含在DispatcherServlet的配置中。 但是，Spring的WebSocket支持不依赖于Spring MVC。 借助WebSocketHttpRequestHandler将WebSocketHandler集成到其他HTTP服务环境中相对简单。
+
+===== 3.2.2. WebSocket Handshake
+定制初始HTTP WebSocket握手请求的最简单方法是通过HandshakeInterceptor，它拦截握手方法之前“之前”和“之后”。 这样一个拦截器可以用来阻止握手或使WebSocketSession可用的任何属性。 例如，有一个将HTTP会话传递给WebSocket会话的内置拦截器：
+[source,java]
+----
+@Configuration
+@EnableWebSocket
+public class WebSocketConfig implements WebSocketConfigurer {
+
+    @Override
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        registry.addHandler(new MyHandler(), "/myHandler")
+            .addInterceptors(new HttpSessionHandshakeInterceptor());
+    }
+
+}
+----
+
+等价的XML配置
+[source,xml]
+----
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:websocket="http://www.springframework.org/schema/websocket"
+    xsi:schemaLocation="
+        http://www.springframework.org/schema/beans
+        http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/websocket
+        http://www.springframework.org/schema/websocket/spring-websocket.xsd">
+
+    <websocket:handlers>
+        <websocket:mapping path="/myHandler" handler="myHandler"/>
+        <websocket:handshake-interceptors>
+            <bean class="org.springframework.web.socket.server.support.HttpSessionHandshakeInterceptor"/>
+        </websocket:handshake-interceptors>
+    </websocket:handlers>
+
+    <bean id="myHandler" class="org.springframework.samples.MyHandler"/>
+
+</beans>
+----
+更高级的选项是扩展执行WebSocket握手步骤的DefaultHandshakeHandler，包括验证客户端来源，协商子协议等等。 如果需要配置自定义RequestUpgradeStrategy以适应WebSocket服务器引擎和尚不受支持的版本（另请参阅部署了解有关此主题的更多信息），应用程序可能还需要使用此选项。 Java-config和XML名称空间都可以配置自定义HandshakeHandler。
+
+NOTE: Spring提供了一个WebSocketHandlerDecorator基类，可以用来修饰具有其他行为的WebSocketHandler。 在使用WebSocket Java-config或XML命名空间时，默认情况下会提供并添加日志记录和异常处理实现。 ExceptionWebSocketHandlerDecorator捕获任何WebSocketHandler方法引起的所有未捕获异常，并关闭指示服务器1011错误状态的WebSocket会话。
+
+==== 4.2.3. Deployment
+
+Spring WebSocket API很容易集成到Spring MVC应用程序中，其中DispatcherServlet同时提供HTTP WebSocket握手以及其他HTTP请求。通过调用WebSocketHttpRequestHandler，也很容易将其集成到其他HTTP处理场景中。 这很方便，易于理解。 但是，JSR-356运行时需要特别注意。
+
+Java WebSocket API（JSR-356）提供了两种部署机制。 第一个涉及启动时的Servlet容器类路径扫描（Servlet 3功能）; 另一个是在Servlet容器初始化时使用的注册API。 这些机制都无法为所有HTTP处理（包括WebSocket握手和所有其他HTTP请求）（如Spring MVC的DispatcherServlet）使用单个“前端控制器”。
+
+这是JSR-356的一个重要限制，Spring的WebSocket支持即使在JSR-356下运行时也支持服务器特定的RequestUpgradeStrategy。 Tomcat，Jetty，GlassFish，WebLogic，WebSphere和Undertow（以及WildFly）目前都存在这样的策略。
+
+第二个考虑是，具有JSR-356支持的Servlet容器需要执行ServletContainerInitializer（SCI）扫描，这在某些情况下会显着降低应用程序的启动速度。 如果在升级到具有JSR-356支持的Servlet容器版本后观察到重大影响，应该可以通过使用web.xml中的<absolute-ordering />元素选择性地启用或禁用Web碎片：
+[source,xml]
+----
+<web-app xmlns="http://java.sun.com/xml/ns/javaee"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="
+        http://java.sun.com/xml/ns/javaee
+        http://java.sun.com/xml/ns/javaee/web-app_3_0.xsd"
+    version="3.0">
+
+    <absolute-ordering/>
+
+</web-app>
+----
+然后，您可以选择性地按名称启用Web片段，例如Spring自己的SpringServletContainerInitializer，如果需要，可以为Servlet 3 Java初始化API提供支持：
+[source,xml]
+----
+<web-app xmlns="http://java.sun.com/xml/ns/javaee"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="
+        http://java.sun.com/xml/ns/javaee
+        http://java.sun.com/xml/ns/javaee/web-app_3_0.xsd"
+    version="3.0">
+
+    <absolute-ordering>
+        <name>spring_web</name>
+    </absolute-ordering>
+
+</web-app>
+----
+==== 4.2.4. Server config
+每个底层WebSocket引擎都提供配置属性，例如消息缓冲区大小，空闲超时等等。
+对于Tomcat，WildFly和GlassFish，将ServletServerContainerFactoryBean添加到WebSocket Java配置中：
+[source,java]
+----
+@Configuration
+@EnableWebSocket
+public class WebSocketConfig implements WebSocketConfigurer {
+
+    @Bean
+    public ServletServerContainerFactoryBean createWebSocketContainer() {
+        ServletServerContainerFactoryBean container = new ServletServerContainerFactoryBean();
+        container.setMaxTextMessageBufferSize(8192);
+        container.setMaxBinaryMessageBufferSize(8192);
+        return container;
+    }
+
+}
+----
+
+等价的XMl配置：
+[source,xml]
+----
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:websocket="http://www.springframework.org/schema/websocket"
+    xsi:schemaLocation="
+        http://www.springframework.org/schema/beans
+        http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/websocket
+        http://www.springframework.org/schema/websocket/spring-websocket.xsd">
+
+    <bean class="org.springframework...ServletServerContainerFactoryBean">
+        <property name="maxTextMessageBufferSize" value="8192"/>
+        <property name="maxBinaryMessageBufferSize" value="8192"/>
+    </bean>
+
+</beans>
+----
+
+对于Jetty，您需要提供预配置的Jetty WebSocketServerFactory，并通过WebSocket Java配置将其插入到Spring的DefaultHandshakeHandler中：
+[source,java]
+----
+@Configuration
+@EnableWebSocket
+public class WebSocketConfig implements WebSocketConfigurer {
+
+    @Override
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        registry.addHandler(echoWebSocketHandler(),
+            "/echo").setHandshakeHandler(handshakeHandler());
+    }
+
+    @Bean
+    public DefaultHandshakeHandler handshakeHandler() {
+
+        WebSocketPolicy policy = new WebSocketPolicy(WebSocketBehavior.SERVER);
+        policy.setInputBufferSize(8192);
+        policy.setIdleTimeout(600000);
+
+        return new DefaultHandshakeHandler(
+                new JettyRequestUpgradeStrategy(new WebSocketServerFactory(policy)));
+    }
+
+}
+----
+等价XMl配置：
+[source,xml]
+----
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:websocket="http://www.springframework.org/schema/websocket"
+    xsi:schemaLocation="
+        http://www.springframework.org/schema/beans
+        http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/websocket
+        http://www.springframework.org/schema/websocket/spring-websocket.xsd">
+
+    <websocket:handlers>
+        <websocket:mapping path="/echo" handler="echoHandler"/>
+        <websocket:handshake-handler ref="handshakeHandler"/>
+    </websocket:handlers>
+
+    <bean id="handshakeHandler" class="org.springframework...DefaultHandshakeHandler">
+        <constructor-arg ref="upgradeStrategy"/>
+    </bean>
+
+    <bean id="upgradeStrategy" class="org.springframework...JettyRequestUpgradeStrategy">
+        <constructor-arg ref="serverFactory"/>
+    </bean>
+
+    <bean id="serverFactory" class="org.eclipse.jetty...WebSocketServerFactory">
+        <constructor-arg>
+            <bean class="org.eclipse.jetty...WebSocketPolicy">
+                <constructor-arg value="SERVER"/>
+                <property name="inputBufferSize" value="8092"/>
+                <property name="idleTimeout" value="600000"/>
+            </bean>
+        </constructor-arg>
+    </bean>
+
+</beans>
+----
+
+==== 3.2.5. Allowed origins
+从Spring Framework 4.1.5开始，WebSocket和SockJS的默认行为是只接受相同的原始请求。 也可以允许所有或指定的来源列表。 此检查主要是为浏览器客户端设计的。 没有什么能够阻止其他类型的客户端修改Origin头值（请参阅RFC 6454：Web Origin Concept以了解更多详细信息）。
+
+3种可能的行为是：
+
+* 仅允许相同的原始请求（默认）：在此模式下，启用SockJS时，Iframe HTTP响应标题X-Frame-Options设置为SAMEORIGIN，并禁用JSONP传输，因为它不允许检查请求的来源。 因此，启用此模式时不支持IE6和IE7。
+* 允许指定的来源列表：每个提供的允许来源必须以http：//或https：//开头。 在此模式下，启用SockJS时，禁用基于IFrame和JSONP的传输。 因此，启用此模式时，不支持IE6至IE9。
+* 允许所有来源：要启用此模式，您应该提供*作为允许的原始值。 在此模式下，所有传输都可用。
+
+WebSocket和SockJS允许的来源可以按如下所示进行配置：
+[source,java]
+----
+import org.springframework.web.socket.config.annotation.EnableWebSocket;
+import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
+import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
+
+@Configuration
+@EnableWebSocket
+public class WebSocketConfig implements WebSocketConfigurer {
+
+    @Override
+    public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        registry.addHandler(myHandler(), "/myHandler").setAllowedOrigins("http://mydomain.com");
+    }
+
+    @Bean
+    public WebSocketHandler myHandler() {
+        return new MyHandler();
+    }
+
+}
+----
+等价的XML配置：
+[source,xml]
+----
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:websocket="http://www.springframework.org/schema/websocket"
+    xsi:schemaLocation="
+        http://www.springframework.org/schema/beans
+        http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/websocket
+        http://www.springframework.org/schema/websocket/spring-websocket.xsd">
+
+    <websocket:handlers allowed-origins="http://mydomain.com">
+        <websocket:mapping path="/myHandler" handler="myHandler" />
+    </websocket:handlers>
+
+    <bean id="myHandler" class="org.springframework.samples.MyHandler"/>
+
+</beans>
+----

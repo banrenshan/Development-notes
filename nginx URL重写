@@ -1,0 +1,238 @@
+= nginx URL重写
+:icons: font
+:source-highlighter: coderay
+:toc: left
+:webfonts: Tangerine:bold,bolditalic|Inconsolata:italic|Droid+Sans
+
+== 重写类型
+
+[source,shell]
+----
+server {
+    rewrite 规则 定向路径 重写类型;
+}
+----
+
+规则：可以是字符串或者正则来表示想匹配的目标url
+定向路径：表示匹配到规则后要定向的路径，如果规则里有正则，则可以使用$index来表示正则里的捕获分组
+
+NOTE:  匹配规则才能重写，不匹配规则，继续执行后续指令
+
+flag的值枚举:last break redirect permanent
+
+=== redirect和permanent
+
+permanent和redirect都是重定向的意思，permanent是永久重定向301，redirect是临时重定向302.
+
+我们来看下面的例子
+
+[source,nginx]
+----
+        location /redirect {
+        	rewrite /redirect/(.*) /$1 redirect;
+        }
+
+        location /permanent {
+            rewrite /permanent/(.*) /$1 permanent;
+
+        }
+----
+
+当我们访问路径 /redirect/aa 时，nginx会响应302，浏览器地址栏显示并访问路径/aa。
+当我们访问路径 /permanent/aa 时，nginx会响应301，浏览器地址栏显示并访问路径/aa。
+
+NOTE: 301请求是可以缓存的， 即通过查看status code，可以发现后面写着from cache。该状态码经常用作域名跳转，比如，我们访问 http://www.baidu.com 会跳转到 https://www.baidu.com
+
+NOTE: 302经常使用的场景，比如未登陆的用户访问用户中心重定向到登录页面，访问404页面会重新定向到首页。 
+
+IMPORTANT: 302重定向只是暂时的重定向，搜索引擎会抓取新的内容而保留旧的地址，因为服务器返回302，所以，搜索搜索引擎认为新的网址是暂时的。而301重定向是永久的重定向，搜索引擎在抓取新的内容的同时也将旧的网址替换为了重定向之后的网址。
+
+=== break
+
+我们以 http://localhost:9080/redirect/feedback/hello 来分析下面的配置
+[source,nginx]
+----
+        location /redirect {
+        	rewrite /redirect/(.*) /$1 break;
+        	proxy_pass http://localhost:8080 ;
+        }
+----
+
+. 浏览器访问，进入上面的location.
+. rewrite 重写url，去除前缀redirect，生成新的URL /feedback/hello
+. nginx 拼接代理路径成新的URL http://localhost:8080/feedback/hello
+
+NOTE: 当proxy_pass指令不存在，nginx就是去root目录下面查找feedback/hello文件。也就是说，默认的拼接路径是nginx地址+nginx端口+重写路径。
+
+
+=== last
+
+我们以 http://localhost:9080/redirect/feedback/hello 来分析下面的配置
+[source,nginx]
+----
+        location /redirect {
+        	rewrite /redirect/(.*) /$1 last;
+        }
+
+        location /feedback {
+        	proxy_pass http://localhost:8080;
+        }
+----
+
+. 浏览器访问，进入上面的location（redirect）.
+. rewrite 重写url，去除前缀redirect，生成新的URL /feedback/hello
+. /feedback/hello 进入location(feedback)
+
+NOTE: url重写后，再次进入server块，重试location匹配，超过10次匹配不到报500错误，地址栏url不变
+
+== 开启rewrite日志
+
+nginx 的 rewrite log 是记录在 error log 文件中，而不是access log中。
+nginx 开启 rewrite 的方法(在server段中添加）:首先，打开 error_log 日志
+[source,nginx]
+----
+error_log logs/error.log notice;
+----
+然后打开 rewrite_log 开关
+[source,nginx]
+----
+rewrite_log on;
+----
+== location指令
+
+在server块中使用，如：
+[source,nginx]
+----
+server {
+    location 表达式 {
+    }
+}
+----
+
+*location表达式类型*
+
+* 如果直接写一个路径，则匹配该路径下的
+* ~ 表示执行一个正则匹配，区分大小写
+* ~* 表示执行一个正则匹配，不区分大小写
+* ^~ 表示普通字符匹配。使用前缀匹配。如果匹配成功，则不再匹配其他location。
+* = 进行普通字符精确匹配。也就是完全匹配。
+
+*优先级*
+
+. 等号类型（=）的优先级最高。一旦匹配成功，则不再查找其他匹配项。
+. ^~类型表达式。一旦匹配成功，则不再查找其他匹配项。
+. 正则表达式类型（~ ~*）的优先级次之。如果有多个location的正则能匹配的话，则使用正则表达式最长的那个。
+. 常规字符串匹配类型。按前缀匹配。
+
+让我们来看下面的例子
+[source,nginx]
+----
+ 
+        location /feedback {
+        	rewrite /(feedback)/(.*) /$1/hello1 break;
+        	proxy_pass http://localhost:8080;
+        }
+
+        location ^~ /feedback/name {
+        	rewrite /(feedback)/(.*) /$1/hello2 break;
+        	proxy_pass http://localhost:8080;
+        }
+
+        location ~ /feedback/nam(e)?(b)? {
+        	rewrite /(feedback)/(.*) /$1/hello3 break;
+        	proxy_pass http://localhost:8080;
+        }
+
+        location = /feedback/hello {
+        	proxy_pass http://localhost:8080;
+        }
+----
+[%header]
+.路径匹配示例
+|===
+|路径 |匹配结果
+|/feedback/hello  |location = /feedback/hello
+|/feedback/name/bb | location ^~ /feedback/name
+|/feedback/namb | location ~ /feedback/nam(e)?(b)?
+|/feedback/name  | location ^~ /feedback/name
+|/feedback/nameb |location ^~ /feedback/name
+|/feedback/dd  | location /feedback
+
+|===
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+== 参考
+
+[cols="1,3", options="header"] 
+.内置变量
+|===
+|变量|描述
+|
+$args |请求中的的参数名，即“?”后面的arg_name=arg_value形式的arg_name
+|$arg_PARAMETER |这是参数的一个匹配模式,PARAMETER为具体的参数名,$arg_PARAMETER就表示获取具体的参数值,例如上面的$arg_name就是获取url中name的值
+|$is_args |判断url是否带参数，如果带，则返回一个？,否则返回一个空字符串
+
+|$http_user_agent |获取的是客户端访问代理的类型,请求头中的信息
+|$sent_http_content_type |获取的是http响应头中content_type的值
+|$sent_http_content_length |获取的是http响应头重的content_length的值
+
+|$request_filename |该变量获取的是请求的文件在linux服务器上的完整的绝对路径
+|$request_method  |该表示获取的是http请求的方法
+|$request_uri  |该变量表示的原始请求的uri，包括参数。所谓原始请求就是即使在内部做了重定向之后也不会变化
+|$uri  |获取的是当前请求的uri，不包括参数
+|$content_length  |获取的是http请求头中Content-Length的值
+|$content_type   |获取的是http请求头中的Content-Type字段，不过这里也没显示。。。
+|$document_root   |获取的是请求url的文件所在的目录路径
+|$document_uri   |当前请求的uri，从上面的信息来看,和uri的效果是一样的
+|$remote_addr  |获取的是客户端的ip地址,这里为什么是10.0.10.11呢，因为我是在本机上用curl测试的，即使客户端也是服务器
+|$remote_port  |获取客户端的访问端口，这个端口是随机的
+|$remote_user  |获取客户端的认证用户信息，这里因为没有用认证，所谓显示为空
+|$server_protocol |表示服务器端想客户端发送响应的协议
+|$server_addr |服务器的地址
+|$server_name  |客户端访问服务端的域名，即url中的域名
+|$server_port |服务器端做出响应的端口号
+|$binary_remote_addr  |显示二进制的客户端地址
+|$host  | 和server_name一样，表示的是域名
+|$hostname  |表示服务器端的主机名
+
+|$proxy_add_x_forwarded_for |获取的是客户端的真实ip地址 
+|$proxy_host |该变量获取的是upstream的上游代理名称，例如upstream backend 
+|$proxy_port  |该变量表示的是要代理到的端口 
+|$proxy_protocol_addr  |代理头部中客户端的ip地址，或者是一个空的字符串 
+|$upstream_addr  | 代理到上游的服务器地址信息 
+|$upstream_cache_status    |proxy的缓存状态，例如这里第一次访问为MISS，第二次访问时为HIT
+|$upstream_response_length  |上游服务器响应报文的长度
+|$upstream_response_time  |上游服务器响应的时间
+|$upstream_status  |上游服务器响应的状态码
+
+|$scheme  |表示的是使用http的访问协议 http or https
+|$limit_rate  |表示当前连接的限速是多少，0表示无限制
+|$query_string  |表示的是查询字符串，也就是url中的参数，和$args一样
+|$realpath_root  |表示的是请求页面的真实所在目录的路径  和$document_root是一样的
+
+|===

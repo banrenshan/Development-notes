@@ -1,0 +1,263 @@
+= Apache OpenNLP
+:toc: left
+:icons: font
+:source-highlighter: highlightjs
+:sectanchors: 
+:toclevels: 4
+
+
+
+== 1.介绍
+=== 概述
+Apache OpenNLP开发库是一个机器学习开发库，用于自然语言处理。
+
+OpenNLP支持常见的NLP任务，比如分词、断句、词性标注、命名实体抽取、组块分析、解析和指代消解。通常这些任务用来提供高级文本处理服务。OpenNLP还支持基于机器学习的最大熵和感知器功能。
+
+OpenNLP项目的目标是为上述任务创建一个成熟的工具包。 另一个目标是为各种语言提供大量的预建模型，以及这些模型推导出的注释文本资源。
+
+=== 通用的库结构
+
+Apache OpenNLP库包含多个组件，使其能够构建完整的自然语言处理流水线。这些组件包括：分词、断句、词性标注、命名实体抽取、组块分析、解析和指代消解。组件还包含特定的自然语言处理任务，以训练模型并且评估模型。这些设施中的每一个都可以通过其应用程序接口（API）访问。此外，为了方便测试和训练，提供了命令行接口（CLI）。
+
+=== 程序JAVA-API使用
+
+OpenNLP组件具有类似的API。通常，为了执行任务，应该提供一个模型和一个输入。
+
+模型通常是通过向模型类的构造函数提供一个具有模型的文件流来加载的：
+[source,java]
+----
+try (InputStream modelIn = new FileInputStream("lang-model-name.bin")) {
+  SomeModel model = new SomeModel(modelIn);
+}
+----
+
+模型加载后，工具本身也被实例化。
+[source,java]
+----
+ToolName toolName = new ToolName(model);
+----
+
+工具实例化后，可以执行处理任务。输入和输出格式是特定于工具的，但通常输出是一个String数组，而输入是一个String或一个String数组。
+[source,java]
+----
+String output[] = toolName.executeTask("This is a sample text.");
+----
+
+=== 程序命令行使用
+
+==== 概述
+
+OpenNLP提供了一个命令行脚本，作为所有包含工具的唯一入口点。 该脚本位于OpenNLP二进制分发的bin目录中。 包括Windows版本（opennlp.bat）和Linux版本（opennlp）。
+
+==== 安装
+
+OpenNLP脚本使用JAVA_CMD和JAVA_HOME变量来确定要使用哪个命令来执行Java虚拟机。
+
+OpenNLP脚本使用OPENNLP_HOME变量来确定OpenNLP的二进制命令的位置。更新PATH变量以包含$OPENNLP_HOME/bin或％OPENNLP_HOME％\bin。
+
+这种配置可以方便地调用OpenNLP。 下面的例子假设这个配置已经完成。
+
+==== 示例
+Apache OpenNLP提供了一个通用的命令行脚本来访问它的所有工具：
+----
+opennlp
+----
+该脚本打印当前版本并列出所有可用的工具。
+
+OpenNLP工具具有类似的命令行结构和选项。 要发现工具选项，请不带参数运行它：
+----
+$ opennlp ToolName
+----
+该工具将输出两个帮助块。
+
+*第一个块描述了这个工具命令行的一般结构：*
+----
+Usage: opennlp TokenizerTrainer[.namefinder|.conllx|.pos] [-abbDict path] ...  -model modelFile ...
+----
+
+该工具命令行的一般结构包括强制工具名称（TokenizerTrainer），可选的格式参数（[.namefinder | .conllx | .pos]），可选参数（[-abbDict path] ...）和 强制参数（-model modelFile ...）。
+
+格式参数可以在不转换的情况下直接处理非本地数据。 每种格式都可能有自己的参数，如果该工具在有或没有帮助参数的情况下执行，则显示这些参数：
+----
+$ opennlp TokenizerTrainer.conllx help
+----
+
+----
+Usage: opennlp TokenizerTrainer.conllx [-abbDict path] [-alphaNumOpt isAlphaNumOpt] ...
+
+Arguments description:
+        -abbDict path
+                abbreviation dictionary in XML format.
+        ...
+
+----
+要将工具切换为特定格式，请在工具名称后添加一个点和格式名称：
+----
+$ opennlp TokenizerTrainer.conllx -model en-pos.bin ...
+----
+
+*帮助信息的第二部分描述了各个参数：*
+----
+Arguments description:
+        -type maxent|perceptron|perceptron_sequence
+                The type of the token name finder model. One of maxent|perceptron|perceptron_sequence.
+        -dict dictionaryPath
+                The XML tag dictionary file
+        ...
+
+----
+大多数用于处理的工具至少需要提供一个模型：
+----
+$ opennlp ToolName lang-model-name.bin
+----
+当以这种方式执行工具时，将加载该模型，并且该工具正在等待来自标准输入的输入。该输入被处理并打印到标准输出。
+
+或者应该说，最常用的方法是使用控制台输入和输出重定向选项来提供输入和输出文件：
+----
+opennlp ToolName lang-model-name.bin < input.txt > output.txt
+----
+
+大多数用于模型训练的工具需要首先提供模型名称，可选地提供一些训练选项（例如模型类型，迭代次数），然后是数据。模型名称只是一个文件名。
+
+训练选项通常包括迭代次数，截断次数，缩写字典或其他内容。有时可以通过训练选项文件提供这些选项。在这种情况下，这些选项将被忽略，并使用文件中的选项。
+
+对于数据，必须指定数据的位置（文件名）以及常用的语言和编码。
+
+启动工具训练的命令行的一般示例可能是：
+----
+$ opennlp ToolNameTrainer -model en-model-name.bin -lang en -data input.train -encoding UTF-8
+----
+
+带格式选项
+
+----
+$ opennlp ToolNameTrainer.conll03 -model en-model-name.bin -lang en -data input.train \
+                                  -types per -encoding UTF-8
+----
+
+大多数用于模型评估的工具类似于执行任务的工具，需要首先提供一个模型名称，可选地提供一些评估选项（如是否打印错误分类的样本），然后是测试数据。 启动评估工具的命令行的一般示例可能是：
+----
+$ opennlp ToolNameEvaluator -model en-model-name.bin -lang en -data input.test -encoding UTF-8
+----
+
+== 2.语言检测器
+
+=== 分类
+
+OpenNLP语言检测器根据模型将ISO-639-3语言中的文档分类。模型可以用Maxent，Perceptron或朴素贝叶斯算法进行训练。 默认情况下，文本标准化，并且上下文生成器提取大小为1，2和3的n-gram。可以通过扩展LanguageDetectorFactory来定制n-gram大小，文本标准化和上下文生成器。
+
+默认的标准化处理器是：
+|===
+| EmojiCharSequenceNormalizer	| 用空格替换emojis
+| UrlCharSequenceNormalizer	|用空格替换URLs 和 E-Mails 
+| TwitterCharSequenceNormalizer| 用空格替换 hashtags 和Twitter 用户名.
+| NumberCharSequenceNormalizer	| 用空格替换数字
+| ShrinkCharSequenceNormalizer	| 重复三次或更多次的字符只能重复两次。
+
+|===
+
+=== 语言探测工具
+尝试语言检测器的最简单方法是命令行工具。该工具仅用于演示和测试。以下命令显示如何使用语言检测器工具。
+----
+$ bin/opennlp LanguageDetector model
+----
+输入从标准输入读取，输出写入标准输出，除非它们被重定向或传送。
+
+=== 语言探测API
+
+要执行分类，您需要一个机器学习模型 - 这些模型被封装在OpenNLP工具的LanguageDetectorModel类中。
+首先，您需要从InputStream中的序列化模型中获取字节 ：
+[source,java]
+----
+InputStream is = ...
+LanguageDetectorModel m = new LanguageDetectorModel(is);
+----
+有了LanguageDetectorModel我们就：
+[source,java]
+----
+String inputText = ...
+LanguageDetector myCategorizer = new LanguageDetectorME(m);
+
+// Get the most probable language
+Language bestLanguage = myCategorizer.predictLanguage(inputText);
+System.out.println("Best language: " + bestLanguage.getLang());
+//置信度
+System.out.println("Best language confidence: " + bestLanguage.getConfidence());
+
+// Get an array with the most probable languages
+Language[] languages = myCategorizer.predictLanguages(null);
+----
+请注意，API或CLI都将考虑完整的文本以选择最可能的语言。要处理混合语言，可以分析较小的文本块以查找语言区域。
+
+=== 模型训练
+语言检测器通过标注的文本材料进行训练。数据可以采用OpenNLP语言检测器指定的格式。 这是每行一个文档，包含ISO-639-3语言代码和由选项卡分隔的文本。 其他格式也可用。 以下示例以所需格式显示上面的示例：
+----
+spa     A la fecha tres calles bonaerenses recuerdan su nombre (en Ituzaingó, Merlo y Campana). A la fecha, unas 50 \
+		naves y 20 aviones se han perdido en esa área particular del océano Atlántico.
+deu     Alle Jahre wieder: Millionen Spanier haben am Dienstag die Auslosung in der größten Lotterie der Welt verfolgt.\
+ 		Alle Jahre wieder: So gelingt der stressfreie Geschenke-Umtausch Artikel per E-Mail empfehlen So gelingt der \
+ 		stressfre ie Geschenke-Umtausch Nicht immer liegt am Ende das unter dem Weihnachtsbaum, was man sich gewünscht hat.
+srp     Већина становника боравила је кућама од блата или шаторима, како би радили на својим удаљеним пољима у долини \
+		Јордана и напасали своје стадо оваца и коза. Већина становника говори оба језика.
+lav     Egija Tri-Active procedūru īpaši iesaka izmantot siltākajos gadalaikos, jo ziemā aukstums var šķist arī \
+		nepatīkams. Valdība vienojās, ka izmaiņas nodokļu politikā tiek konceptuāli atbalstītas, tomēr deva \
+		nedēļu laika Ekonomikas ministrijai, Finanšu ministrijai un Labklājības ministrijai, lai ar vienotu \
+		pozīciju atgrieztos pie jautājuma izskatīšanas.
+----
+
+NOTE: 标有反斜杠的换行符仅用于格式化目的，并且不得包含在训练数据中。
+
+==== 训练工具
+
+以下命令将训练语言检测器并将模型写入langdetect.bin：
+----
+$ bin/opennlp LanguageDetectorTrainer[.leipzig] -model modelFile [-params paramsFile] [-factory factoryName] -data sampleData [-encoding charsetName]
+----
+NOTE: 要定制语言检测器，请扩展类opennlp.tools.langdetect.LanguageDetectorFactory将其添加到类路径并将其传入-factory参数中。
+
+==== Leipzig语料库训练
+Leipzig语料库包含多种语言。语料库是从网络和报纸收集的单个句子的集合。Corpora以纯文本和MySQL数据库表的形式提供。 OpenNLP集成只能使用纯文本版本。 单独的纯文本包这里 http://corpora.uni-leipzig.de/download.html[下载] 
+
+这个语料库特别适合训练语言检测器，并提供转换器。 首先，您需要将构成Leipzig Corpora集合的文件下载到文件夹中。 Apache OpenNLP语言检测器支持使用Leipzig语料库进行培训，评估和交叉验证。 例如，以下命令显示如何训练模型。
+----
+opennlp LanguageDetectorTrainer.leipzig -model modelFile [-params paramsFile] [-factory factoryName] \
+	-sentencesDir sentencesDir -sentencesPerSample sentencesPerSample -samplesPerLanguage samplesPerLanguage \
+	[-encoding charsetName]
+
+----
+* sentencesPerSample ：每篇文档的句子数
+* samplesPerLanguage：每种语言的文档数
+
+以下命令序列显示了如何将文件夹中的leipzig语料库集合转换为语言检测器的默认格式，5个句子一组作为一篇文档，每个语言种类有1000篇文档。他们对结果进行混洗，并选择前10万行作为训练语料库和最后20000作为评估语料库：
+----
+$ bin/opennlp LanguageDetectorConverter leipzig -sentencesDir leipzig-train/ -sentencesPerSample 5 -samplesPerLanguage 10000 > leipzig.txt
+$ perl -MList::Util=shuffle -e 'print shuffle(<STDIN>);' < leipzig.txt > leipzig_shuf.txt
+$ head -100000 < leipzig_shuf.txt > leipzig.train
+$ tail -20000 < leipzig_shuf.txt > leipzig.eval
+----
+
+==== 训练API
+以下示例显示如何从API训练模型:
+[source,java]
+----
+						
+InputStreamFactory inputStreamFactory = new MarkableFileInputStreamFactory(new File("corpus.txt"));
+
+ObjectStream<String> lineStream =
+  new PlainTextByLineStream(inputStreamFactory, StandardCharsets.UTF_8);
+ObjectStream<LanguageSample> sampleStream = new LanguageDetectorSampleStream(lineStream);
+
+TrainingParameters params = ModelUtil.createDefaultTrainingParameters();
+params.put(TrainingParameters.ALGORITHM_PARAM,
+  PerceptronTrainer.PERCEPTRON_VALUE);
+params.put(TrainingParameters.CUTOFF_PARAM, 0);
+
+LanguageDetectorFactory factory = new LanguageDetectorFactory();
+
+LanguageDetectorModel model = LanguageDetectorME.train(sampleStream, params, factory);
+model.serialize(new File("langdetect.bin"));
+----
+
+==== 官方模型下载
+
+http://opennlp.apache.org/models.html[这里] 提供了语言检测的模型，包括置信度和准确率的说明

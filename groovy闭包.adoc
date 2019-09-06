@@ -1,0 +1,621 @@
+= groovy闭包
+
+Groovy中的闭包是一个开放的，匿名的代码块，可以接受参数，返回值并分配给变量。闭包可以引用在其周围范围内声明的变量。与闭包的正式定义相反，Groovy语言中的Closure也可以包含在其周围范围之外定义的自由变量。 
+
+== 1. 语法
+
+=== 1.1 定义闭包
+	{ [closureParameters -> ] statements }
+
+其中[closureParameters->]是一个以逗号分隔的可选参数列表，statements是0或更多Groovy语句.参数看起来类似于方法参数列表，这些参数可以是类型化的或非类型化的。
+
+指定参数列表时， - >字符是必需的，用于将参数与闭包体分开。 语句部分由0,1或许多Groovy语句组成。
+
+[source,Groovy]
+----
+{ item++ }                           <1>               
+
+{ -> item++ }                          <2>             
+
+{ println it }                           <3>           
+
+{ it -> println it }                       <4>         
+
+{ name -> println name }                     <5>       
+
+{ String x, int y ->                           <6>     
+    println "hey ${x} the value is ${y}"
+}
+
+{ reader ->                                      <7>   
+    def line = reader.readLine()
+    line.trim()
+}
+----
+
+<1> 闭包,引用item的变量
+<2> 通过添加箭头（ - >）可以明确地将闭包参数与代码分开
+<3> 使用隐式参数的闭包（it）
+<4> it此时作为显式参数
+<5> 使用显式参数
+<6> 闭包接受两个类型参数
+<7> 闭包中包含多条语句
+
+=== 1.2 把闭包当做一个对象
+
+闭包是groovy.lang.Closure类的一个实例，它可以像任何其他变量一样分配给变量或字段，尽管它是一个代码块：
+[source,Groovy]
+----
+def listener = { e -> println "Clicked on $e.source" }      <1>
+assert listener instanceof Closure
+Closure callback = { println 'Done!' }                      <2>
+Closure<Boolean> isTextFile = {
+    File it -> it.name.endsWith('.txt')                     <3>
+}
+----
+
+<1> 您可以为变量分配闭包，它是groovy.lang.Closure的一个实例
+<2> 如果不使用def，则可以为groovy.lang.Closure类型的变量赋值
+<3> （可选）您可以使用groovy.lang.Closure的泛型类型指定闭包的返回类型
+
+=== 1.3 闭包调用
+
+
+与方法不同，闭包在调用时始终返回一个值。 下一节将讨论如何声明闭包参数，何时使用它们以及隐含的“it”参数是什么。
+
+
+每当在闭包中访问属性而不显式设置接收器对象时，就会涉及委派策略：
+
+
+
+== 1.运行时
+
+通过运行时元编程，我们可以推迟到运行时决定拦截，注入甚至合成类和接口的方法。 为了深入理解Groovy的元对象协议（MOP），我们需要了解Groovy对象和Groovy的方法处理。 在Groovy中，我们使用三种对象：POJO，POGO和Groovy Interceptor。 Groovy允许对所有类型的对象进行元编程，但方式不同。
+
+. POJO  - 一个常规Java对象，其类可以用Java或JVM的任何其他语言编写。
+. POGO  - 一个Groovy对象，其类用Groovy编写。 它扩展了java.lang.Object并默认实现了groovy.lang.GroovyObject接口。
+. Groovy Interceptor  - 一个Groovy对象，它实现了groovy.lang.GroovyInterceptable接口，并具有方法拦截功能。
+
+对于每个方法调用，Groovy都会检查对象是POJO还是POGO。 对于POJO，Groovy从groovy.lang.MetaClassRegistry获取其MetaClass并将方法调用委托给它。 对于POGO，Groovy采取了更多步骤，如下图所示：
+
+image::GroovyInterceptions.png[]
+
+=== 1.1 GroovyObject
+groovy.lang.GroovyObject是Groovy中的主要接口,正如java中的Object类。GroovyObject在groovy.lang.GroovyObjectSupport类中有一个默认实现，它负责将调用转移到groovy.lang.MetaClass对象。 GroovyObject源代码如下所示：
+
+
+[source,java]
+----
+package groovy.lang;
+
+public interface GroovyObject {
+
+    Object invokeMethod(String name, Object args);
+
+    Object getProperty(String propertyName);
+
+    void setProperty(String propertyName, Object newValue);
+
+    MetaClass getMetaClass();
+
+    void setMetaClass(MetaClass metaClass);
+}
+----
+
+==== 1.1.1 invokeMethod
+
+此方法主要用于与GroovyInterceptable接口或对象的MetaClass一起使用，它将拦截所有方法调用。当Groovy对象上不存在调用的方法时，也会调用它。 下面的示例重写invokeMethod方法：
+[source,java]
+----
+class SomeGroovyClass {
+
+    def invokeMethod(String name, Object args) {
+        return "called invokeMethod $name $args"
+    }
+
+    def test() {
+        return 'method exists'
+    }
+}
+
+def someGroovyClass = new SomeGroovyClass()
+
+assert someGroovyClass.test() == 'method exists'
+assert someGroovyClass.someMethod() == 'called invokeMethod someMethod []' <1>
+----
+
+<1> someMethod方法不存在,调用invokeMethod方法
+
+但是，不鼓励使用invokeMethod来拦截缺失的方法。 如果意图是在方法调度失败的情况下仅拦截方法调用，则使用methodMissing代替。
+
+==== 1.1.2. get/setProperty
+
+可以通过覆盖当前对象的getProperty（）方法来拦截对属性的访问权.
+[source,groovy]
+----
+class SomeGroovyClass {
+
+    def property1 = 'ha'
+    def field2 = 'ho'
+    def field4 = 'hu'
+
+    def getField1() {
+        return 'getHa'
+    }
+
+    def getProperty(String name) {
+        if (name != 'field3')
+            return metaClass.getProperty(this, name) <1>
+        else
+            return 'field3'
+    }
+}
+
+def someGroovyClass = new SomeGroovyClass()
+
+assert someGroovyClass.field1 == 'getHa'
+assert someGroovyClass.field2 == 'ho'
+assert someGroovyClass.field3 == 'field3'
+assert someGroovyClass.field4 == 'hu'
+----
+
+<1> 将请求转发给除field3之外的所有属性的getter
+
+您可以通过重写setProperty（）方法来拦截对属性的修改：
+
+[source,java]
+----
+class POGO {
+
+    String property
+
+    void setProperty(String name, Object value) {
+        this.@"$name" = 'overridden'
+    }
+}
+
+def pogo = new POGO()
+pogo.property = 'a'
+
+assert pogo.property == 'overridden'
+----
+
+
+==== 1.1.3. get/setMetaClass
+
+您可以访问对象的metaClass或设置自己的MetaClass实现来更改默认的拦截机制。 例如，您可以编写自己的MetaClass接口实现并将其分配给对象，以便更改拦截机制：
+
+[source,java]
+----
+// getMetaclass
+someObject.metaClass
+
+// setMetaClass
+someObject.metaClass = new OwnMetaClassImplementation()
+----
+
+=== 1.2. get/setAttribute
+
+此功能与MetaClass实现有关。 在默认实现中，您可以访问字段而无需调用其getter和setter。 以下示例演示了此方法：
+
+[source,groovy]
+----
+class SomeGroovyClass {
+
+    def field1 = 'ha'
+    def field2 = 'ho'
+
+    def getField1() {
+        return 'getHa'
+    }
+}
+
+def someGroovyClass = new SomeGroovyClass()
+
+assert someGroovyClass.metaClass.getAttribute(someGroovyClass, 'field1') == 'ha'
+assert someGroovyClass.metaClass.getAttribute(someGroovyClass, 'field2') == 'ho'
+----
+
+[source,groovy]
+----
+class POGO {
+
+    private String field
+    String property1
+
+    void setProperty1(String property1) {
+        this.property1 = "setProperty1"
+    }
+}
+
+def pogo = new POGO()
+pogo.metaClass.setAttribute(pogo, 'field', 'ha')
+pogo.metaClass.setAttribute(pogo, 'property1', 'ho')
+
+assert pogo.field == 'ha'
+assert pogo.property1 == 'ho'
+----
+
+=== 1.3 methodMissing
+
+Groovy支持methodMissing的概念。 此方法与invokeMethod的不同之处在于，只有在找不到给定名称或给定参数的方法时，才会调用它：
+
+[source,java]
+----
+class Foo {
+
+   def methodMissing(String name, def args) {
+        return "this is me"
+   }
+}
+
+assert new Foo().someUnknownMethod(42l) == 'this is me'
+----
+
+通常在使用methodMissing时，可以在下次调用相同方法时缓存结果。例如，考虑GORM中的动态查找器。 这些是根据methodMissing实现的。 代码类似于以下内容：
+[source,java]
+----
+class GORM {
+
+   def dynamicMethods = [...] // an array of dynamic methods that use regex
+
+   def methodMissing(String name, args) {
+       def method = dynamicMethods.find { it.match(name) }
+       if(method) {
+          GORM.metaClass."$name" = { Object[] varArgs ->
+             method.invoke(delegate, name, varArgs)
+          }
+          return method.invoke(delegate,name, args)
+       }
+       else throw new MissingMethodException(name, delegate, args)
+   }
+}
+----
+
+请注意，如果我们找到一个要调用的方法，我们将使用ExpandoMetaClass动态注册一个新方法。 这样，下次调用相同的方法时，效率会更高。 这种使用methodMissing的方式没有invokeMethod的开销，并且从第二次调用开始并不昂贵。
+
+=== 1.4. propertyMissing
+Groovy支持propertyMissing的概念，用于拦截失败的属性解析。对于getter方法，propertyMissing方法接受单个String参数：
+[source,groovy]
+----
+class Foo {
+   def propertyMissing(String name) { name }
+}
+
+assert new Foo().boo == 'boo'
+----
+
+仅当Groovy运行时找不到给定属性的getter方法时，才会调用propertyMissing（String）方法。
+
+对于setter方法，可以添加第二个propertyMissing定义，该定义带有一个额外的value参数：
+[source,groovy]
+----
+class Foo {
+   def storage = [:]
+   def propertyMissing(String name, value) { storage[name] = value }
+   def propertyMissing(String name) { storage[name] }
+}
+
+def f = new Foo()
+f.foo = "bar"
+
+assert f.foo == "bar"
+----
+
+与methodMissing一样，最佳做法是在运行时动态注册新属性以提高整体查找性能。
+
+=== 1.5. static methodMissing
+methodMissing方法的静态变体可以通过ExpandoMetaClass添加，也可以使用$static_methodMissing方法在类级别实现。
+
+[source,groovy]
+----
+class Foo {
+    static def $static_methodMissing(String name, Object args) {
+        return "Missing static method name is $name"
+    }
+}
+
+assert Foo.bar() == 'Missing static method name is bar'
+----
+
+=== 1.6. static propertyMissing
+
+propertyMissing方法的静态变体可以通过ExpandoMetaClass添加，也可以使用$static_propertyMissing方法在类级别实现。
+
+[source,groovy]
+----
+class Foo {
+    static def $static_propertyMissing(String name) {
+        return "Missing static property name is $name"
+    }
+}
+
+assert Foo.foobar == 'Missing static property name is foobar'
+----
+
+=== 1.7. GroovyInterceptable
+groovy.lang.GroovyInterceptable接口是扩展GroovyObject的标记接口，用于通知Groovy在运行时应该拦截所有方法。
+
+[source,groovy]
+----
+package groovy.lang;
+
+public interface GroovyInterceptable extends GroovyObject {
+}
+----
+
+当Groovy对象实现GroovyInterceptable接口时，将为任何方法调用调用其invokeMethod（）。 您可以在下面看到此类对象的简单示例：
+[source,groovy]
+----
+class Interception implements GroovyInterceptable {
+
+    def definedMethod() { }
+
+    def invokeMethod(String name, Object args) {
+        'invokedMethod'
+    }
+}
+----
+下一段代码是一个测试，它显示对存在和不存在的方法调用都将返回相同的值。
+[source,groovy]
+----
+class InterceptableTest extends GroovyTestCase {
+
+    void testCheckInterception() {
+        def interception = new Interception()
+
+        assert interception.definedMethod() == 'invokedMethod'
+        assert interception.someMethod() == 'invokedMethod'
+    }
+}
+----
+
+我们不能使用像println这样的默认groovy方法，因为这些方法被注入到所有Groovy对象中，因此它们也会被截获。
+
+如果我们想拦截所有方法调用但不想实现GroovyInterceptable接口，我们可以在对象的MetaClass上实现invokeMethod（）。 这种方法适用于POGO和POJO，如下例所示：
+[source,groovy]
+----
+class InterceptionThroughMetaClassTest extends GroovyTestCase {
+
+    void testPOJOMetaClassInterception() {
+        String invoking = 'ha'
+        invoking.metaClass.invokeMethod = { String name, Object args ->
+            'invoked'
+        }
+
+        assert invoking.length() == 'invoked'
+        assert invoking.someMethod() == 'invoked'
+    }
+
+    void testPOGOMetaClassInterception() {
+        Entity entity = new Entity('Hello')
+        entity.metaClass.invokeMethod = { String name, Object args ->
+            'invoked'
+        }
+
+        assert entity.build(new Object()) == 'invoked'
+        assert entity.someMethod() == 'invoked'
+    }
+}
+----
+
+=== 1.8. Categories
+在某些情况下，我们想给不是自己编写的类(比如依赖的类库,一般不能修改雨源码)添加方法。为了实现此功能，Groovy实现了一个从Objective-C借来的功能，称为Categories。
+
+系统中包含一Categories，用于向类添加功能，使其在Groovy环境中更易用：
+
+. groovy.time.TimeCategory
+. groovy.servlet.ServletCategory
+. groovy.xml.dom.DOMCategory
+
+默认情况下不启用Categories类。要使用Categories类中定义的方法，必须应用GDK提供的use方法，并且可以从每个Groovy对象实例中获取
+[source,java]
+----
+use(TimeCategory)  {
+    println 1.minute.from.now       <1>
+    println 10.hours.ago <2>
+
+    def someDate = new Date()       
+    println someDate - 3.months <3>
+}
+----
+<1> 一分钟之后
+<2> 十小时之前
+<3> 三个月前
+
+use方法将category 类作为其第一个参数，将闭包代码块作为第二个参数。 在Closure内部可以访问category类方法。从上面的例子中可以看出，甚至可以使用用户定义的方法来丰富像java.lang.Integer或java.util.Date这样的JDK类。
+
+[source,java]
+----
+class JPACategory{
+  // 不修改EntityManager方法的情况下,添加新的保存多个实体的功能
+  static void persistAll(EntityManager em , Object[] entities) { //要添加的新方法
+    entities?.each { em.persist(it) }
+  }
+}
+
+def transactionContext = {
+  EntityManager em, Closure c ->
+  def tx = em.transaction
+  try {
+    tx.begin()
+    use(JPACategory) {
+      c()
+    }
+    tx.commit()
+  } catch (e) {
+    tx.rollback()
+  } finally {
+   
+  }
+}
+
+EntityManager em; 
+transactionContext (em) {
+ em.persistAll(obj1, obj2, obj3)
+ em.persistAll(obj2, obj4, obj6)
+}
+----
+
+当我们看一下groovy.time.TimeCategory类时，我们看到扩展方法都被声明为静态方法。实际上，这category类必须满足的要求之一，才能将其方法成功添加到使用代码块中的类：
+
+[source,groovy]
+----
+public class TimeCategory {
+
+    public static Date plus(final Date date, final BaseDuration duration) {
+        return duration.plus(date);
+    }
+
+    public static Date minus(final Date date, final BaseDuration duration) {
+        final Calendar cal = Calendar.getInstance();
+
+        cal.setTime(date);
+        cal.add(Calendar.YEAR, -duration.getYears());
+        cal.add(Calendar.MONTH, -duration.getMonths());
+        cal.add(Calendar.DAY_OF_YEAR, -duration.getDays());
+        cal.add(Calendar.HOUR_OF_DAY, -duration.getHours());
+        cal.add(Calendar.MINUTE, -duration.getMinutes());
+        cal.add(Calendar.SECOND, -duration.getSeconds());
+        cal.add(Calendar.MILLISECOND, -duration.getMillis());
+
+        return cal.getTime();
+    }
+
+----
+
+另一个要求是静态方法的第一个参数必须是附加新方法的类的类型。 其他参数是方法将作为参数的正常参数。
+
+由于参数和静态方法约定，category方法定义可能比普通方法定义更不直观。 另外，Groovy附带了一个@Category注释，可以在编译时将带注释的类转换为类别类。
+
+[source,java]
+----
+class Distance {
+    def number
+    String toString() { "${number}m" }
+}
+
+@Category(Number)
+class NumberCategory {
+    Distance getMeters() {
+        new Distance(number: this)
+    }
+}
+
+use (NumberCategory)  {
+    assert 42.meters.toString() == '42m'
+}
+----
+应用@Category注释的优点是能够使用不带目标类型的实例方法作为第一个参数。 目标类型类是作为注释的参数而给出的。
+
+=== 1.9. Metaclasses
+如前所述，元类在方法调用中起着核心作用。 对于来自groovy代码的每个方法调用，Groovy将找到给定对象的MetaClass，并通过MetaClass＃invokeMethod将方法解析委托给元类，不应该与GroovyObject＃invokeMethod混淆，后者恰好是元类最终可能调用的方法。
+
+==== 1.9.1 默认的Metaclass实现MetaClassImpl
+
+默认情况下，对象获取MetaClassImpl的实例，该实例实现默认方法查找。这个方法查找包括查找对象类中的方法（“常规”方法），但是如果没有找到方法，它将采用调用methodMissing并最终调用GroovyObject＃invokeMethod
+
+[source,groovy]
+----
+class Foo {}
+
+def f = new Foo()
+
+assert f.metaClass =~ /MetaClassImpl/ //正则匹配类名
+----
+
+==== 1.9.2. Custom metaclasses
+
+您可以更改任何对象或类的元类，并替换为MetaClass接口的自定义实现。通常，您只需要扩展现有元类MetaClassImpl，DelegatingMetaClass，ExpandoMetaClass，ProxyMetaClass等,除非你要实现完整的方法查找逻辑.在使用新的元类实例之前，您应该调用groovy.lang.MetaClass #initialize（），否则元类可能不会按预期运行。
+
+===== Delegating metaclass
+
+如果您只需要装饰现有的元类，则DelegatingMetaClass简化了该用例。
+
+通过super关键字,你仍然可以使用先前的MetaClass,例如:
+[source,groovy]
+----
+class Foo { def bar() { "bar" } }
+
+class MyFooMetaClass extends DelegatingMetaClass {
+  MyFooMetaClass(MetaClass metaClass) { super(metaClass) }
+  MyFooMetaClass(Class theClass) { super(theClass) }
+
+  Object invokeMethod(Object object, String methodName, Object[] args) {
+     def result = super.invokeMethod(object,methodName.toLowerCase(), args)
+     result.toUpperCase();
+  }
+}
+
+
+def mc =  new MyFooMetaClass(Foo.metaClass)
+mc.initialize()
+
+Foo.metaClass = mc
+def f = new Foo()
+
+assert f.BAR() == "BAR" // the new metaclass routes .BAR() to .bar() and uppercases the result
+----
+
+===== Magic package
+
+通过为元类提供特制（魔术）类名称和包名称，可以在启动时更改元类。为了更改java.lang.Integer的元类，只需在类路径中放置groovy.runtime.metaclass.java.lang.IntegerMetaClass类即可。例如，如果您希望在框架执行代码之前进行元类更改，那么这很有用.魔术包的一般形式是groovy.runtime.metaclass.[package].[class]MetaClass。 在下面的示例中，[package]是java.lang，[class]是Integer：
+[source,groovy]
+----
+// file: IntegerMetaClass.groovy
+package groovy.runtime.metaclass.java.lang;
+
+class IntegerMetaClass extends DelegatingMetaClass {
+  IntegerMetaClass(MetaClass metaClass) { super(metaClass) }
+  IntegerMetaClass(Class theClass) { super(theClass) }
+  Object invokeMethod(Object object, String name, Object[] args) {
+    if (name =~ /isBiggerThan/) {
+      def other = name.split(/isBiggerThan/)[1].toInteger()
+      object > other
+    } else {
+      return super.invokeMethod(object,name, args);
+    }
+  }
+}
+----
+
+通过使用groovyc IntegerMetaClass.groovy编译上述文件，将生成./groovy/runtime/metaclass/java/lang/IntegerMetaClass.class。 下面的示例将使用此新元类：
+[source,groovy]
+----
+// File testInteger.groovy
+def i = 10
+
+assert i.isBiggerThan5()
+assert !i.isBiggerThan15()
+
+println i.isBiggerThan5()
+----
+
+==== 1.9.3. Per instance metaclass
+
+您可以更改单个对象的元类，所以同一个类的多个对象可能具有不同的元类。
+
+[source,groovy]
+----
+class Foo { def bar() { "bar" }}
+
+class FooMetaClass extends DelegatingMetaClass {
+  FooMetaClass(MetaClass metaClass) { super(metaClass) }
+  Object invokeMethod(Object object, String name, Object[] args) {
+      super.invokeMethod(object,name,args).toUpperCase()
+  }
+}
+
+def f1 = new Foo()
+def f2 = new Foo()
+f2.metaClass = new FooMetaClass(f2.metaClass)
+
+assert f1.bar() == "bar"
+assert f2.bar() == "BAR"
+assert f1.metaClass =~ /MetaClassImpl/
+assert f2.metaClass =~ /FooMetaClass/
+assert f1.class.toString() == "class Foo"
+assert f2.class.toString() == "class Foo"
+----
+
+==== 1.9.4. ExpandoMetaClass

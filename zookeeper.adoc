@@ -1,0 +1,328 @@
+---
+title: zookeeper
+---
+
+= zookeeper 
+:toc: left
+:icons: font
+:imagesdir: /blog/images
+
+== 基本操作命令
+
+
+== 概述
+
+zk从设计模式的角度来看,是一个基于观察者模式设计的分布式服务管理框架,它负责存储和管理大家都关心的数据,然后接受观察者的注册,一旦这些数据发生变化,zookeeper就会通知已注册的观察者,从而实现集群中类似的Master/Slave管理模式,下图是zk的注册监听的典型应用-动态监听应用的上下线:
+
+image::l93etsa23k.jpeg[]
+
+== 特点
+
+. 一个leader和多个follower组成的集群
+. leader负责投票的发起和决议,更新系统的状态,follower接受客户端的请求并在选举leader的过程中参与投票
+. 集群只要有半数以上的存活着就能正常工作
+. 全局数据一致,每个sever上面保存的数据都是一样的,客户端无论连上哪个server获取到的结果都是一样的.
+. 更新请求顺序进行,来自同一client的更新请求按其发送顺序依次执行.
+. 数据更新原子性,一次更新要么成功,要么失败
+. 实时性,在一定时间范围内,client能够读到最新数据
+
+== 数据结构
+
+image::akr2mkdw0y.jpeg[]
+
+zk的数据模型与unix文件系统类似,整体上可以看做一棵树,每个节点称作一个ZNode.每个Znode默认能够存储1MB的数据,每个节点可以通过路径唯一标识.
+
+== 应用场景
+
+命名服务,配置管理,集群管理,节点动态上下线,分布式锁
+
+=== 命名服务
+
+在分布式服务当中,我们的应用通常需要和多个应用进行交互,而这些应用的地址可能有多台,如果我们通过记录IP去访问就会非常难以管理.这个时候我们可以给这个应用命名,在这个命名空间下面挂载上线的服务的IP.当我们需要访问这个应用的时候,先去zookeeper获取这个命名服务的具体地址,然后调用实际接口
+
+=== 配置管理
+
+目前很多公司开发或者使用的程序都是分布式的，而程序总会或多或少的存在一些额外配置，且分散部署在多台机器上。某一条要修改配置，要逐个去修改配置就变得有些困难，特别是应用部署的点数特别大的时候，就成了不可能完成的事情了。一种方式就是把相关配置写到数据库中，每个应用去读取数据库的配置，这种方式优点就是把配置集中管理，缺点也很明显，就是不能及时获得配置的变革，要及时获得变更后的配置，就要不停的去扫描数据库，而这又会造成数据库的压力巨大。
+
+我要说的这种方式就是利用zookeeper的这种发布订阅、watch来实现。即，把相关的配置数据写到zookeeper的某个指定的节点下。应用服务监听这个节点的数据变化，一旦节点数据（配置信息）发生了变化，应用服务就会收到zookeeper的通知，然后应用服务就可以从zookeeper获得新的配置信息。
+
+
+=== 集群管理
+
+所谓集群管理无在乎两点：是否有机器退出和加入、选举master。 
+
+image::855959-20160924110008871-648317545.png[]
+
+
+对于第一点，所有机器约定在父目录GroupMembers下创建临时目录节点，然后监听父目录节点的子节点变化消息。一旦有机器挂掉，该机器与 zookeeper的连接断开，其所创建的临时目录节点被删除，所有其他机器都收到通知：某个兄弟目录被删除，于是，所有人都知道：它下船了。
+
+新机器加入也是类似，所有机器收到通知：新兄弟目录加入，highcount又有了，对于第二点，我们稍微改变一下，所有机器创建临时顺序编号目录节点，每次选取编号最小的机器作为master就好。
+
+
+=== 分布式锁
+
+有了zookeeper的一致性文件系统，锁的问题变得容易。锁服务可以分为两类，一个是保持独占，另一个是控制时序。 
+
+对于第一类，我们将zookeeper上的一个znode看作是一把锁，通过createznode的方式来实现。所有客户端都去创建 /distribute_lock 节点，最终成功创建的那个客户端也即拥有了这把锁。用完删除掉自己创建的distribute_lock 节点就释放出锁。 
+
+对于第二类， /distribute_lock 已经预先存在，所有客户端在它下面创建临时顺序编号目录节点，和选master一样，编号最小的获得锁，用完删除，依次方便。
+
+== 安装
+
+=== 本地模式windows
+
+1.修改配置文件
+
+修改zoo_sample.cfg文件的名称为zoo.cfg,指定里面dataDir属性的值 `dataDir=../data`
+
+2.启动服务端
+
+双击zkServer.cmd启动
+
+3.启动客户端
+
+双击zkCli.cmd
+
+4.退出客户端
+
+输入`quit`
+
+5.退出服务端
+
+关闭命令窗口
+
+=== 集群模式
+
+1.编辑zoo.cfg,添加内容如下:
+[source,shell]
+----
+server.1=hadoop1:2888:3888 #(主机名, 心跳端口、数据端口)
+server.2=hadoop2:2888:3888 #(都是默认端口)
+server.3=hadoop3:2888:3888 #(2888是leader和follow之间通信，3888是投票选举时用的端口)
+----
+
+2.在data目录下面创建文件myid添加服务的编号,即上面的 `server.1=...`中的1
+
+
+3.修改hosts文件
+
+4.设置机器之间SSH免密登录
+
+5.关掉机器间的防火墙
+
+6.执行 `zkServer.sh status`查看leader和follower信息
+
+== 配置详解
+
+. tickTime
+心跳基本时间单位，毫秒级，ZK基本上所有的时间都是这个时间的整数倍。
+
+. maxClientCnxns
+默认值是10，一个客户端能够连接到同一个服务器上的最大连接数，根据IP来区分。如果设置为0，表示没有任何限制。设置该值一方面是为了防止DoS攻击。
+
+. initLimit
+tickTime的个数，表示在leader选举结束后，followers与leader同步需要的时间，如果followers比较多或者说leader的数据灰常多时，同步时间相应可能会增加，那么这个值也需要相应增加。当然，这个值也是follower和observer在开始同步leader的数据时的最大等待时间(setSoTimeout)
+
+. syncLimit
+tickTime的个数，这时间容易和上面的时间混淆，它也表示follower和observer与leader交互时的最大等待时间，只不过是在与leader同步完毕之后，进入正常请求转发或ping等消息交互时的超时时间。
+
+== zk选举机制
+
+当leader崩溃或者leader失去大多数的follower，这时候zk进入恢复模式，恢复模式需要重新选举出一个新的leader，让所有的Server都恢复到一个正确的状态。Zk的选举算法有两种：一种是基于basic paxos实现的，另外一种是基于fast paxos算法实现的。系统默认的选举算法为fast paxos。下面介绍的是fast算法
+
+
+目前有5台服务器，每台服务器均没有数据，它们的编号分别是1,2,3,4,5,按编号依次启动，它们的选择举过程如下：
+
+服务器1启动，给自己投票，然后发投票信息，由于其它机器还没有启动所以它收不到反馈信息，服务器1的状态一直属于Looking。
+
+服务器2启动，给自己投票，同时与之前启动的服务器1交换结果，由于服务器2的编号大所以服务器2胜出，但此时投票数没有大于半数，所以两个服务器的状态依然是LOOKING。
+
+服务器3启动，给自己投票，同时与之前启动的服务器1,2交换信息，由于服务器3的编号最大所以服务器3胜出，此时投票数正好大于半数，所以服务器3成为领导者，服务器1,2成为小弟。
+
+服务器4启动，给自己投票，同时与之前启动的服务器1,2,3交换信息，尽管服务器4的编号大，但之前服务器3已经胜出，所以服务器4只能成为小弟。
+
+服务器5启动，后面的逻辑同服务器4成为小弟。
+
+== 节点类型
+
+1、PERSISTENT-持久化目录节点 
+
+客户端与zookeeper断开连接后，该节点依旧存在 
+
+2、PERSISTENT_SEQUENTIAL-持久化顺序编号目录节点 
+
+客户端与zookeeper断开连接后，该节点依旧存在，只是Zookeeper给该节点名称进行顺序编号 
+
+3、EPHEMERAL-临时目录节点 
+
+客户端与zookeeper断开连接后，该节点被删除 
+
+4、EPHEMERAL_SEQUENTIAL-临时顺序编号目录节点 
+
+客户端与zookeeper断开连接后，该节点被删除，只是Zookeeper给该节点名称进行顺序编号 
+
+总的来说分为两大类,持久化节点和临时节点
+
+== 命令操作
+
+. 创建节点
+
+ create /root data :创建普通节点,/root是节点标识,data是该节点保存的数据.
+ create -s /temp temp:创建顺序节点.
+ create -e /temp2 temp:创建临时节点
+
+. 获取节点信息
+
+		[zk: localhost:2181(CONNECTED) 9] get /temp2
+		temp
+		cZxid = 0x6
+		ctime = Tue Nov 20 15:29:57 CST 2018
+		mZxid = 0x6
+		mtime = Tue Nov 20 15:29:57 CST 2018
+		pZxid = 0x6
+		cversion = 0
+		dataVersion = 0
+		aclVersion = 0
+		ephemeralOwner = 0x1672f28dcd90001
+		dataLength = 4
+		numChildren = 0
+ 
+. 修改节点数据
+
+ set /temp2 newdata
+
+. 列出目录树信息
+
+	[zk: localhost:2181(CONNECTED) 13] ls /
+	[zookeeper, temp2, temp0000000001, root]
+	[zk: localhost:2181(CONNECTED) 14] ls2 /
+	[zookeeper, temp2, temp0000000001, root]
+	cZxid = 0x0
+	ctime = Thu Jan 01 08:00:00 CST 1970
+	mZxid = 0x0
+	mtime = Thu Jan 01 08:00:00 CST 1970
+	pZxid = 0x6
+	cversion = 2
+	dataVersion = 0
+	aclVersion = 0
+	ephemeralOwner = 0x0
+	dataLength = 0
+	numChildren = 4
+
+
+. 监听节点的变化
+
+ 监听节点的变化分成两种,一是节点数据的变化,另一个是节点目录的变化,即子节点的变更
+
+
+	[zk: localhost:2181(CONNECTED) 16] get /root watch
+	.....
+	WatchedEvent state:SyncConnected type:NodeDataChanged path:/root
+
+
+	[zk: localhost:2181(CONNECTED) 21] ls /root watch
+	[01, 02]
+	[zk: localhost:2181(CONNECTED) 22]
+	WATCHER::
+
+	WatchedEvent state:SyncConnected type:NodeChildrenChanged path:/root
+
+ NodeChildrenChanged:子节点变更
+ NodeDataChanged:节点数据发生改变
+
+
+ 由上面的两个例子可以看出,get监听节点的数据变化,ls监听节点的目录变化.
+ 另外事件监听只能响应一次,例如监听到root节点的数据发生变化后,
+ 再次修改root节点的数据,监听就已经失效了,需要再次注册监听.
+
+. 删除节点
+
+ delete /temp2:删除节点
+ rmr /root :递归删除节点
+
+. 查看节点的状态
+
+	[zk: localhost:2181(CONNECTED) 29] stat /root
+	cZxid = 0x14
+	ctime = Tue Nov 20 15:54:29 CST 2018
+	mZxid = 0x14
+	mtime = Tue Nov 20 15:54:29 CST 2018
+	pZxid = 0x14
+	cversion = 0
+	dataVersion = 0
+	aclVersion = 0
+	ephemeralOwner = 0x0
+	dataLength = 4
+	numChildren = 0
+
+----
+. cZxid：这是导致创建znode更改的事务ID。
+. mZxid：这是最后修改znode更改的事务ID。
+. pZxid：这是用于添加或删除子节点的znode更改的事务ID。
+
+. ctime：表示从1970-01-01T00:00:00Z开始以毫秒为单位的znode创建时间。
+. mtime：表示从1970-01-01T00:00:00Z开始以毫秒为单位的znode最近修改时间。
+
+. dataVersion：表示对该znode的数据所做的更改次数。
+. cversion：这表示对此znode的子节点进行的更改次数。
+. aclVersion：表示对此znode的ACL进行更改的次数。
+
+. ephemeralOwner：如果znode是ephemeral类型节点，则这是znode所有者的 
+  session ID。 如果znode不是ephemeral节点，则该字段设置为零。
+
+. dataLength：这是znode数据字段的长度。
+. numChildren：这表示znode的子节点的数量。
+----
+
+== 数据监听机制
+
+image::20181120161807.png[]
+
+1.客户端启动的时候在main线程创建客户端,启动两个子线程,一个负责网络连接通信(connect),一个负责监听(listener).
+2.通过connect线程将客户端监听的信息发给server.
+3.server将监听信息注册到监听列表当中
+4.当被监听的节点发生变化的时候,通过listener线程返回给客户端
+5.客户端在listen线程内调用process方法
+
+== 写数据流程
+
+image::20181120162646.png[]
+
+== JAVA操作客户端
+[source,java]
+----
+public class ZookeeperTest {
+
+    private ZooKeeper zooKeeper;
+
+    @Before
+    public void before() throws IOException {
+        zooKeeper = new ZooKeeper("localhost:2181", 2000, new Watcher() {
+            @Override
+            public void process(WatchedEvent event) {
+                System.err.println(event.getType() + ":" + event.getPath());
+            }
+        });
+    }
+
+    @Test
+    public void create() throws KeeperException, InterruptedException {
+        String path = zooKeeper.create("/java", "java".getBytes(), ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+        System.err.println(path); // /java
+    }
+
+    @Test
+    public void get() throws KeeperException, InterruptedException {
+        List<String> children = zooKeeper.getChildren("/", true);
+        System.err.println(children);
+        Thread.sleep(Integer.MAX_VALUE);
+    }
+
+    @Test
+    public void exist() throws KeeperException, InterruptedException {
+        Stat stat = zooKeeper.exists("/root", false);
+        System.err.println(stat == null);
+    }
+}
+----
+

@@ -1,0 +1,729 @@
+= fuseki
+
+== 1.数据格式
+
+首先，我们需要明确查询的数据。SPARQL查询RDF图。RDF图是一组三元组（Jena称为RDF图“模型”和三元组“语句”）。
+
+重要的是认识三元组,他不等同于序列化。 序列化只是一种编写三元组的方法. RDF/XML是W3C的推荐，但其非常难读，因为有多种方法可以对同一个图进行编码。在本教程中，我们使用更像“triple-like”的序列化，称为Turtle（另请参阅W3C语义Web入门中描述的N3语言）。
+
+我们将从vc-db-1.rdf中的简单数据开始,文件内容如下:
+[source,xml]
+----
+<rdf:RDF
+  xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'
+  xmlns:vCard='http://www.w3.org/2001/vcard-rdf/3.0#'
+   >
+
+  <rdf:Description rdf:about="http://somewhere/JohnSmith">
+    <vCard:FN>John Smith</vCard:FN>
+    <vCard:N rdf:parseType="Resource">
+	<vCard:Family>Smith</vCard:Family>
+	<vCard:Given>John</vCard:Given>
+    </vCard:N>
+  </rdf:Description>
+
+  <rdf:Description rdf:about="http://somewhere/RebeccaSmith">
+    <vCard:FN>Becky Smith</vCard:FN>
+    <vCard:N rdf:parseType="Resource">
+	<vCard:Family>Smith</vCard:Family>
+	<vCard:Given>Rebecca</vCard:Given>
+    </vCard:N>
+  </rdf:Description>
+
+  <rdf:Description rdf:about="http://somewhere/SarahJones">
+    <vCard:FN>Sarah Jones</vCard:FN>
+    <vCard:N rdf:parseType="Resource">
+	<vCard:Family>Jones</vCard:Family>
+	<vCard:Given>Sarah</vCard:Given>
+    </vCard:N>
+  </rdf:Description>
+
+  <rdf:Description rdf:about="http://somewhere/MattJones">
+    <vCard:FN>Matt Jones</vCard:FN>
+    <vCard:N
+	vCard:Family="Jones"
+	vCard:Given="Matthew"/>
+  </rdf:Description>
+
+</rdf:RDF>
+
+----
+
+关系图如下:
+
+image::../images/vc-db.png[]
+
+triples的数据表示:
+[source,shell]
+----
+@prefix vCard:   <http://www.w3.org/2001/vcard-rdf/3.0#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix :        <#> .
+
+<http://somewhere/MattJones/>
+    vCard:FN    "Matt Jones" ;
+    vCard:N     [ vCard:Family
+                              "Jones" ;
+                  vCard:Given
+                              "Matthew"
+                ] .
+
+<http://somewhere/RebeccaSmith/>
+    vCard:FN    "Becky Smith" ;
+    vCard:N     [ vCard:Family
+                              "Smith" ;
+                  vCard:Given
+                              "Rebecca"
+                ] .
+
+<http://somewhere/JohnSmith/>
+    vCard:FN    "John Smith" ;
+    vCard:N     [ vCard:Family
+                              "Smith" ;
+                  vCard:Given
+                              "John"
+                ] .
+
+<http://somewhere/SarahJones/>
+    vCard:FN    "Sarah Jones" ;
+    vCard:N     [ vCard:Family
+                              "Jones" ;
+                  vCard:Given
+                              "Sarah"
+                ] .
+----
+
+更明确的triples表示方式:
+[source,shell]
+----
+@prefix vCard:   <http://www.w3.org/2001/vcard-rdf/3.0#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+<http://somewhere/MattJones/>  vCard:FN   "Matt Jones" .
+<http://somewhere/MattJones/>  vCard:N    _:b0 .
+_:b0  vCard:Family "Jones" .
+_:b0  vCard:Given  "Matthew" .
+
+
+<http://somewhere/RebeccaSmith/> vCard:FN    "Becky Smith" .
+<http://somewhere/RebeccaSmith/> vCard:N     _:b1 .
+_:b1 vCard:Family "Smith" .
+_:b1 vCard:Given  "Rebecca" .
+
+<http://somewhere/JohnSmith/>    vCard:FN    "John Smith" .
+<http://somewhere/JohnSmith/>    vCard:N     _:b2 .
+_:b2 vCard:Family "Smith" .
+_:b2 vCard:Given  "John"  .
+
+<http://somewhere/SarahJones/>   vCard:FN    "Sarah Jones" .
+<http://somewhere/SarahJones/>   vCard:N     _:b3 .
+_:b3 vCard:Family  "Jones" .
+_:b3 vCard:Given   "Sarah" .
+----
+
+重要的是要意识到这些是相同的RDF图，并且图中的三元组没有特定的顺序。 它们只是在上面的相关组中为人类读者编写 - 机器并不关心。
+
+== 2.简单查询
+
+上传数据,请启动fesuki,然后访问http://localhost:3030,在界面上创建数据集,然后上传上面的数据文件vc-db-1.rdf.
+
+在查询界面上执行下面的查询:
+[source,shell]
+----
+SELECT ?x
+WHERE { ?x  <http://www.w3.org/2001/vcard-rdf/3.0#FN>  "John Smith" }
+----
+
+结果如下:
+[source,shell]
+----
+
+---------------------------------
+| x                             |
+=================================
+| <http://somewhere/JohnSmith/> |
+---------------------------------
+
+----
+
+这通过将WHERE子句中的三元模式与RDF图中的三元组进行匹配来实现。三元组的谓词和对象是固定值，因此模式将仅匹配具有这些值的三元组。主体是变量，变量没有其他限制。 该模式匹配具有这些谓词和对象值的任何三元组，并且它与x的解决方案匹配。
+
+<>中包含的项目是一个URI（实际上，它是一个IRI），""中的项目是一个普通的文字。 就像Turtle，N3或N-triples一样，键入的文字用\^\^编写，语言标签可以用@添加。
+
+?x是一个名为x的变量。 的?不构成名称的一部分，这就是它不出现在表格输出中的原因。
+
+== 3.基本模式
+
+本节介绍基本模式和解决方案，SPARQL查询的主要构建块。
+
+SELECT 直接暴露solutions(在order/limit/offset后面被应用)作为结果集,其他形式的查询使用solutions组成图.solution是模式匹配的方式,变量的值必须采用一种模式去匹配.
+
+之前的查询只有一个solution,我们来修改先前的查询:
+[source,shell]
+----
+SELECT ?x ?fname
+WHERE {?x  <http://www.w3.org/2001/vcard-rdf/3.0#FN>  ?fname}
+----
+
+这有4个solution，数据源中的每个三元组的VCARD名称属性
+
+[source,shell]
+----
+----------------------------------------------------
+| x                                | name          |
+====================================================
+| <http://somewhere/RebeccaSmith/> | "Becky Smith" |
+| <http://somewhere/SarahJones/>   | "Sarah Jones" |
+| <http://somewhere/JohnSmith/>    | "John Smith"  |
+| <http://somewhere/MattJones/>    | "Matt Jones"  |
+----------------------------------------------------
+----
+
+到目前为止，对于triple模式和基本模式，每个变量都将在每个解决方案中定义。查询到的solution可以被认为是一个表，但在一般情况下，它是一个表，其中并不是每一行中的列都有值。给定SPARQL查询的solution不必具有每个solution中所有变量的值，我们将在后面看到。
+
+=== 基本模式
+
+基本模式以一组三元值匹配.
+[source,shell]
+----
+SELECT ?givenName
+WHERE
+  { ?y  <http://www.w3.org/2001/vcard-rdf/3.0#Family>  "Smith" .
+    ?y  <http://www.w3.org/2001/vcard-rdf/3.0#Given>  ?givenName .
+  }
+----
+
+上面的查询有两个三元匹配,之间用 `.` 分割. y在值在每个三元组必须一样.结果如下:
+[source,shell]
+----
+
+-------------
+| givenName |
+=============
+| "John"    |
+| "Rebecca" |
+-------------
+
+----
+
+=== QNames
+
+有使用前缀编写长URI的简写机制。 上面的查询更清楚地写为：
+[source,shell]
+----
+PREFIX vcard:      <http://www.w3.org/2001/vcard-rdf/3.0#>
+
+SELECT ?givenName
+WHERE
+ { ?y vcard:Family "Smith" .
+   ?y vcard:Given  ?givenName .
+ }
+----
+
+这绝对不是XML qname，而是使用RDF规则通过连接部分将qname转换为URI。
+
+=== 空节点
+
+稍微改变一下上面的查询:
+[source,shell]
+----
+PREFIX vcard:      <http://www.w3.org/2001/vcard-rdf/3.0#>
+
+SELECT ?y ?givenName
+WHERE
+ { ?y vcard:Family "Smith" .
+   ?y vcard:Given  ?givenName .
+ }
+----
+
+空节点如下显示:
+[source,shell]
+----
+--------------------
+| y    | givenName |
+====================
+| _:b0 | "John"    |
+| _:b1 | "Rebecca" |
+--------------------
+
+----
+
+'-'开始的节点看起来很奇怪,这不是空白节点的内部标签,它是ARQ为了打印它们而分配_:b0，_:b1,以确定显示的两个空白节点是否相同。
+
+== 4.过滤
+
+图匹配允许符合模式的结果被发现,这部分讲述solution如何被限制(过滤),有很多比较值的方式,这里我们只说两种.
+
+=== 字符匹配
+
+SPARQL提供了一种基于正则表达式测试字符串的操作。这包括能够询问SQL“LIKE”样式测试，尽管正则表达式的语法与SQL不同。
+
+语法如下:
+	FILTER regex(?x, "pattern" [, "flags"])
+flag是可选的,flag=“i”表示不区分大小写的模式匹配
+
+看下面的例子:
+[source,shell]
+----
+PREFIX vcard: <http://www.w3.org/2001/vcard-rdf/3.0#>
+
+SELECT ?g
+WHERE
+{ ?y vcard:Given ?g .
+  FILTER regex(?g, "r", "i") }
+----
+
+结果如下:
+[source,shell]
+----
+-------------
+| g         |
+=============
+| "Rebecca" |
+| "Sarah"   |
+-------------
+----
+
+=== Testing Values
+
+有时候应用程序想要过滤变量的值,在数据文件vc-db-2.rdf中，我们为age添加了一个额外的字段。 年龄不是由vCard架构定义的，因此我们创建了一个新属性。RDF允许混合不同的信息定义，因为URI是唯一的。 另请注意，键入info:age属性值。
+
+.vc-db-2.rdf
+[source,shell]
+----
+<rdf:RDF
+  xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'
+  xmlns:vCard='http://www.w3.org/2001/vcard-rdf/3.0#'
+  xmlns:info='http://somewhere/peopleInfo#'
+   >
+
+  <rdf:Description rdf:about="http://somewhere/JohnSmith">
+    <vCard:FN>John Smith</vCard:FN>
+    <info:age rdf:datatype='http://www.w3.org/2001/XMLSchema#integer'>25</info:age>
+    <vCard:N rdf:parseType="Resource">
+	<vCard:Family>Smith</vCard:Family>
+	<vCard:Given>John</vCard:Given>
+    </vCard:N>
+  </rdf:Description>
+
+  <rdf:Description rdf:about="http://somewhere/RebeccaSmith">
+    <vCard:FN>Becky Smith</vCard:FN>
+    <info:age rdf:datatype='http://www.w3.org/2001/XMLSchema#integer'>23</info:age>
+    <vCard:N rdf:parseType="Resource">
+	<vCard:Family>Smith</vCard:Family>
+	<vCard:Given>Rebecca</vCard:Given>
+    </vCard:N>
+  </rdf:Description>
+
+  <rdf:Description rdf:about="http://somewhere/SarahJones">
+    <vCard:FN>Sarah Jones</vCard:FN>
+    <vCard:N rdf:parseType="Resource">
+	<vCard:Family>Jones</vCard:Family>
+	<vCard:Given>Sarah</vCard:Given>
+    </vCard:N>
+  </rdf:Description>
+
+  <rdf:Description rdf:about="http://somewhere/MattJones">
+    <vCard:FN>Matt Jones</vCard:FN>
+    <vCard:N
+	vCard:Family="Jones"
+	vCard:Given="Matthew"/>
+  </rdf:Description>
+
+</rdf:RDF>
+
+----
+
+查询语句如下:
+[source,shell]
+----
+PREFIX info: <http://somewhere/peopleInfo#>
+
+SELECT ?resource
+WHERE
+  {
+    ?resource info:age ?age .
+    FILTER (?age >= 24)
+  }
+----
+
+算术表达式必须在括号中（圆括号）。 唯一的solution是：
+
+[source,java]
+----
+---------------------------------
+| resource                      |
+=================================
+| <http://somewhere/JohnSmith/> |
+---------------------------------
+----
+
+== 5.可选信息
+
+RDF是半结构化数据，因此SPARQL具有查询数据的能力，但在数据不存在时不会使查询失败。查询使用可选部分来扩展查询解决方案中的信息，但无论如何都要返回非可选信息。
+
+下面的语句查询person的name,如果age存在的话,也返回
+[source,shell]
+----
+PREFIX info:    <http://somewhere/peopleInfo#>
+PREFIX vcard:   <http://www.w3.org/2001/vcard-rdf/3.0#>
+
+SELECT ?name ?age
+WHERE
+{
+    ?person vcard:FN  ?name .
+    OPTIONAL { ?person info:age ?age }
+}
+----
+
+结果如下:
+[source,shell]
+----
+------------------------
+| name          | age |
+=======================
+| "Becky Smith" | 23  |
+| "Sarah Jones" |     |
+| "John Smith"  | 25  |
+| "Matt Jones"  |     |
+-----------------------
+----
+
+如果没有可选子句,则不会返回age会空的数据,结果如下:
+
+[source,shell]
+----
+-----------------------
+| name          | age |
+=======================
+| "Becky Smith" | 23  |
+| "John Smith"  | 25  |
+-----------------------
+----
+
+因为info：age属性必须存在于解决方案中。
+
+=== OPTIONALs结合FILTERs
+
+OPTIONAL是一个二元运算符，它结合了两个图形模式.可选模式是组模式，可以包含多个SPARQL模式类型。如果匹配，则扩展解决方案，如果不匹配，则给出原始解决方案。
+
+[source,shell]
+----
+PREFIX info:        <http://somewhere/peopleInfo#>
+PREFIX vcard:      <http://www.w3.org/2001/vcard-rdf/3.0#>
+
+SELECT ?name ?age
+WHERE
+{
+    ?person vcard:FN  ?name .
+    OPTIONAL { ?person info:age ?age . FILTER ( ?age > 24 ) }
+}
+----
+
+因此，如果我们在可选部分中过滤了大于24的年龄，我们仍然会得到4个解决方案（来自vcard：FN模式），但只有通过测试才能获得年龄。
+
+[source,shell]
+----
+-----------------------
+| name          | age |
+=======================
+| "Becky Smith" |     |
+| "Sarah Jones" |     |
+| "John Smith"  | 25  |
+| "Matt Jones"  |     |
+-----------------------
+----
+
+如果过滤条件移出可选部分，那么它可能会影响解决方案的数量
+[source,shell]
+----
+PREFIX info:        <http://somewhere/peopleInfo#>
+PREFIX vcard:      <http://www.w3.org/2001/vcard-rdf/3.0#>
+
+SELECT ?name ?age
+WHERE
+{
+    ?person vcard:FN  ?name .
+    OPTIONAL { ?person info:age ?age . }
+    FILTER ( !bound(?age) || ?age > 24 )
+}
+----
+
+如果解决方案具有年龄变量，则它必须大于24.它也可以是未绑定的。 现在有三种解决方案：
+
+[source,shell]
+----
+-----------------------
+| name          | age |
+=======================
+| "Sarah Jones" |     |
+| "John Smith"  | 25  |
+| "Matt Jones"  |     |
+-----------------------
+----
+
+=== 可选项和顺序相关查询
+
+需要注意的一件事是在两个或多个可选子句中使用相同的变量（而不是在某些基本模式中）：
+
+[source,shell]
+----
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX vCard: <http://www.w3.org/2001/vcard-rdf/3.0#>
+
+SELECT ?name
+WHERE
+{
+  ?x a foaf:Person .
+  OPTIONAL { ?x foaf:name ?name }
+  OPTIONAL { ?x vCard:FN  ?name }
+}
+----
+
+如果第一个可选项将?name和?x绑定到某些值，则第二个OPTIONAL是尝试匹配地面三元组（？x和<kbd>？name </ kbd>具有值）,如果第一个选项与可选部分不匹配，则第二个选项是尝试将其三元组与两个变量匹配。
+
+== 6.UNION查询
+
+vCard词汇表和FOAF词汇表都具有人名的属性。在vCard中，它是vCard:FN，在FOAF中，它是foaf:name。在这个部分，我们将查看一小组数据，其中人员的姓名可以通过FOAF或vCard词汇表给出。数据表格式如下:
+[source,shell]
+----
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix vcard: <http://www.w3.org/2001/vcard-rdf/3.0#> .
+
+_:a foaf:name   "Matt Jones" .
+
+_:b foaf:name   "Sarah Jones" .
+
+_:c vcard:FN    "Becky Smith" .
+
+_:d vcard:FN    "John Smith" .
+----
+
+如果要查询上面所有的名字,可以这样写
+[source,shell]
+----
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX vCard: <http://www.w3.org/2001/vcard-rdf/3.0#>
+
+SELECT ?name
+WHERE
+{
+   { [] foaf:name ?name } UNION { [] vCard:FN ?name }
+}
+----
+查询的结果如下:
+[source,shell]
+----
+-----------------
+| name          |
+=================
+| "Matt Jones"  |
+| "Sarah Jones" |
+| "Becky Smith" |
+| "John Smith"  |
+-----------------
+----
+上面的查询也可以使用Filter来实现:
+[source,shell]
+----
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX vCard: <http://www.w3.org/2001/vcard-rdf/3.0#>
+
+SELECT ?name
+WHERE
+{
+  [] ?p ?name
+  FILTER ( ?p = foaf:name || ?p = vCard:FN )
+}
+----
+
+第一种形式可能更快，这取决于所使用的数据和存储，因为第二种形式可能必须从图中获得所有三元组以匹配每个槽中未绑定变量（或空白节点）的三重模式， 然后测试每个?p以查看它是否与其中一个值匹配.它将取决于查询优化器的复杂程度，以确定它是否能够更有效地执行查询，并且能够将约束传递到存储层。
+
+
+上面的例子在每个分支中使用相同的变量。如果使用不同的变量，应用程序可以发现哪个子模式导致匹配：
+
+[source,shell]
+----
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX vCard: <http://www.w3.org/2001/vcard-rdf/3.0#>
+
+SELECT ?name1 ?name2
+WHERE
+{
+   { [] foaf:name ?name1 } UNION { [] vCard:FN ?name2 }
+}
+
+---------------------------------
+| name1         | name2         |
+=================================
+| "Matt Jones"  |               |
+| "Sarah Jones" |               |
+|               | "Becky Smith" |
+|               | "John Smith"  |
+---------------------------------
+----
+
+第二个查询通过将名称分配给不同的变量，保留了人员姓名来源的信息。
+
+使用OPTIONAL也可以达到同样的效果:
+[source,shell]
+----
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX vCard: <http://www.w3.org/2001/vcard-rdf/3.0#>
+
+SELECT ?name1 ?name2
+WHERE
+{
+  ?x a foaf:Person
+  OPTIONAL { ?x  foaf:name  ?name1 }
+  OPTIONAL { ?x  vCard:FN   ?name2 }
+}
+
+---------------------------------
+| name1         | name2         |
+=================================
+| "Matt Jones"  |               |
+| "Sarah Jones" |               |
+|               | "Becky Smith" |
+|               | "John Smith"  |
+---------------------------------
+----
+
+== 7.数据集
+
+本节介绍RDF数据集 -  RDF数据集是SPARQL查询的单元。 它由一个默认图形和一些命名图形组成。
+
+图形匹配操作（基本模式，可选项和UNION）在一个RDF图上工作。这开始是数据集的默认图形，但可以通过GRAPH关键字进行更改。
+
+[source,shell]
+----
+GRAPH uri { ... pattern ... }
+
+GRAPH var { ... pattern ... }
+----
+
+如果给出了URI，则模式将与具有该名称的数据集中的图形匹配 - 如果没有，则GRAPH子句根本不匹配。
+
+如果给出变量，则尝试所有命名图（不是默认图）。执行期间,该变量可以在别处使用，如果其值已经为解决方案所知，则仅尝试该变量值指定的命名图。
+
+RDF数据集可以采用多种形式。 两种常见的设置是使默认图形为所有命名图形的并集（RDF合并），或者使默认图形成为命名图形的清单（它们来自何处，何时被读取等）。这没有限制,一个图表可以在不同名称下包含两次，或者某些图表可能与其他图表共享三元组。
+
+在下面的示例中，我们将使用RDF聚合器的以下书籍数据集：
+
+.默认graph(ds-dft.ttl)
+[source,shell]
+----
+@prefix dc: <http://purl.org/dc/elements/1.1/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<ds-ng-1.ttl> dc:date "2005-07-14T03:18:56+0100"^^xsd:dateTime .
+<ds-ng-2.ttl> dc:date "2005-09-22T05:53:05+0100"^^xsd:dateTime .
+----
+
+.Named graph1(ds-ng-1.ttl)
+[source,shell]
+----
+@prefix dc: <http://purl.org/dc/elements/1.1/> .
+
+[] dc:title "Harry Potter and the Philospher's Stone" .
+[] dc:title "Harry Potter and the Chamber of Secrets" .
+----
+
+.Named graph2(ds-ng-2.ttl)
+[source,shell]
+----
+@prefix dc: <http://purl.org/dc/elements/1.1/> .
+
+[] dc:title "Harry Potter and the Sorcerer's Stone" .
+[] dc:title "Harry Potter and the Chamber of Secrets" .
+----
+
+也就是说，我们有两个描述某些书籍的小图，我们有一个默认图表，用于记录上次读取这些图表的时间。
+
+执行下面的命令
+[source,shell]
+----
+java -cp ... arq.sparql
+    --graph ds-dft.ttl --namedgraph ds-ng-1.ttl --namedgraph ds-ng-2.ttl
+    --query query file
+----
+
+数据集不必仅在查询的生命周期中创建。它们可以创建并存储在数据库中，这对于聚合器应用程序来说更常见。
+
+然后查询默认数据集
+[source,shell]
+----
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX dc: <http://purl.org/dc/elements/1.1/>
+PREFIX : <.>
+
+SELECT *
+{ ?s ?p ?o }
+----
+
+`PREFIX : <.>` 格式化输出
+
+[source,shell]
+----
+----------------------------------------------------------------------
+| s            | p       | o                                         |
+======================================================================
+| :ds-ng-2.ttl | dc:date | "2005-09-22T05:53:05+01:00"^^xsd:dateTime |
+| :ds-ng-1.ttl | dc:date | "2005-07-14T03:18:56+01:00"^^xsd:dateTime |
+----------------------------------------------------------------------
+---- 
+
+这只是默认图形 - 没有来自命名图形，因为除非通过GRAPH明确指示，否则不会查询它们。
+
+我们可以通过查询默认图和命名图来查询所有三元组:
+
+[source,shell]
+----
+PREFIX  xsd:    <http://www.w3.org/2001/XMLSchema#>
+PREFIX  dc:     <http://purl.org/dc/elements/1.1/>
+PREFIX  :       <.>
+
+SELECT *
+{
+    { ?s ?p ?o } UNION { GRAPH ?g { ?s ?p ?o } }
+}
+----
+
+查询结果是:
+[source,shell]
+----
+---------------------------------------------------------------------------------------
+| s            | p        | o                                          | g            |
+=======================================================================================
+| :ds-ng-2.ttl | dc:date  | "2005-09-22T05:53:05+01:00"^^xsd:dateTime  |              |
+| :ds-ng-1.ttl | dc:date  | "2005-07-14T03:18:56+01:00"^^xsd:dateTime  |              |
+| _:b0         | dc:title | "Harry Potter and the Sorcerer's Stone"    | :ds-ng-2.ttl |
+| _:b1         | dc:title | "Harry Potter and the Chamber of Secrets"  | :ds-ng-2.ttl |
+| _:b2         | dc:title | "Harry Potter and the Chamber of Secrets"  | :ds-ng-1.ttl |
+| _:b3         | dc:title | "Harry Potter and the Philospher's Stone"  | :ds-ng-1.ttl |
+---------------------------------------------------------------------------------------
+----
+
+如果应用程序知道名称图形，它可以直接询问查询，例如查找给定图形中的所有标题:
+[source,shell]
+----
+PREFIX dc: <http://purl.org/dc/elements/1.1/>
+PREFIX : <.>
+
+SELECT ?title
+{
+  GRAPH :ds-ng-2.ttl
+    { ?b dc:title ?title }
+}
+----
+
+结果是:
+[source,shell]
+----
+---------------------------------------------
+| title                                     |
+=============================================
+| "Harry Potter and the Sorcerer's Stone"   |
+| "Harry Potter and the Chamber of Secrets" |
+---------------------------------------------
+----

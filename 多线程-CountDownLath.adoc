@@ -1,0 +1,99 @@
+= CountDownLath
+
+:imagesdir: ../images
+
+CountDownLatch这个类能够使一个线程等待其他线程完成各自的工作后再执行。例如，应用程序的主线程希望在负责启动框架服务的线程已经启动所有的框架服务之后再执行.
+
+CountDownLatch是通过一个计数器来实现的，计数器的初始值为线程的数量。每当一个线程完成了自己的任务后，计数器的值就会减1。当计数器值到达0时，它表示所有的线程已经完成了任务，然后在闭锁上等待的线程就可以恢复执行任务。
+
+image::f65cc83b7b4664916fad5d1398a36005.png[]
+
+
+=== 代码举例
+
+这个代码实例我们来模拟一下公司组织旅游等车出发的场景:
+[source,java]
+----
+
+    public static void main(String[] args) {
+
+        CountDownLatch latch = new CountDownLatch(100);
+        new Thread(() -> {
+            System.err.println("司机到达集合点");
+            latch.countDown();
+        }).start();
+
+        for (int i = 0; i < 99; i++) {
+            int num = i;
+            new Thread(() -> {
+                System.err.println("游客" + num + "到达集合点");
+                latch.countDown();
+            }).start();
+        }
+
+        try {
+            latch.await();
+            System.err.println("所有人都到了,开车出发");
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+----
+
+=== 源码解析
+
+我们先来看等待方法:
+[source,java]
+----
+    public void await() throws InterruptedException {
+        sync.acquireSharedInterruptibly(1);
+    }
+----
+
+sync属性有时什么呢?
+[source,java]
+----
+    private static final class Sync extends AbstractQueuedSynchronizer {
+        private static final long serialVersionUID = 4982264981922014374L;
+
+        Sync(int count) {
+            setState(count);
+        }
+
+        int getCount() {
+            return getState();
+        }
+
+        protected int tryAcquireShared(int acquires) {
+            return (getState() == 0) ? 1 : -1;
+        }
+
+        protected boolean tryReleaseShared(int releases) {
+            // Decrement count; signal when transition to zero
+            for (;;) {
+                int c = getState();
+                if (c == 0)
+                    return false;
+                int nextc = c-1;
+                if (compareAndSetState(c, nextc))
+                    return nextc == 0;
+            }
+        }
+    }
+
+    private final Sync sync;
+----
+
+这下我们应该明白,CountDownLatch的核心其实还是AQS.
+
+当调用await方法的时候,跟踪代码会发现核心代码是Syc的tryAcquireShared方法,此时的状态值不为0,所以无法获取锁,进入等待状态.
+
+我们再来看countDown
+[source,java]
+----
+    public void countDown() {
+        sync.releaseShared(1); <1>
+    }
+----
+
+<1> 本质上调用的是锁释放状态的方法.当state=0的时候,就会通知等待线程继续执行.详情参考AQS

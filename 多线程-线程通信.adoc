@@ -1,0 +1,340 @@
+= 线程通信
+
+== wait和notify/notifyAll
+
+在Object对象中有三个final方法wait()、notify()、notifyAll(),主要用于实现线程同步.其中wait()使线程停止运行，notify()通知停止运行的线程继续运行。
+
+
+这三个方法在synchronized方法或者代码块中才能使用,因为他们是 `依靠synchronized持有的隐式锁对象来实现线程通信的`.后面我会着重讲解这句话的意思.下面我们先来看这三个方法
+
+
+
+=== wait
+
+此方法导致当前线程（称之为T）将其自身放置在对象的等待集中，然后放弃此对象上的所有同步要求(或者可以理解为让出同步锁给其他线程),出于线程调度目的，在发生以下四种情况之一前，线程 T 被禁用，且处于休眠状态：
+
+. 其他某个线程调用此对象的 notify 方法，并且线程 T 碰巧被任选为被唤醒的线程。
+. 其他某个线程调用此对象的 notifyAll 方法。
+. 其他某个线程中断线程 T。
+. 大约已经到达指定的超市时间。但是，如果 timeout 为零，在被通知或打断之前,该线程将一直等待。
+
+然后，从对象的等待集中删除线程 T，并重新进行线程调度。然后，该线程以常规方式与其他线程竞争，以获得在该对象上同步的权利.
+
+在没有被通知、中断或超时的情况下，线程有可能被虚假唤醒 (spurious wakeup)。虽然这种情况在实际中很少发生，但是应用程序必须通过以下方式防止其发生，即对应该导致该线程被唤醒的条件进行判断，如果不满足该条件，则继续等待。换句话说，等待应总是发生在循环中，如下面的示例：
+[source,java]
+----
+synchronized (obj) {
+	while (不满足条件){
+		obj.wait(timeout);
+	}
+	... // 执行适合条件的操作
+----
+
+如果当前线程在等待之前或在等待时被任何线程中断，则会抛出 InterruptedException.但只有在持有对象锁时才会抛出此异常。也就是说异常不会被立即抛出,需要wait方法所在的synchronized代码块或者方法上的锁被获取时,异常才会被抛出.
+
+=== notify
+
+唤醒在此对象监视器上等待的单个线程。如果有多个线程都在此对象上等待，则会随机唤醒其中一个线程。
+
+直到当前线程放弃此对象上的锁定，被唤醒的线程才能继续执行 footnote:[notify/notifyAll() 的执行只是唤醒沉睡的线程，而不会立即释放锁，锁的释放要在退出synchronized代码块之后。所以在编程中，尽量在使用了notify/notifyAll() 后立即退出临界区，以唤醒其他线程]。被唤醒的线程将以常规方式与在该对象上主动同步的其他所有线程进行竞争.竞争成功之后才会继续执行. footnote:[线程被唤醒之后不会立即执行,因为是在synchronized修饰的作用域中,首先要竞争锁,锁竞争成功了,代码]
+
+此方法只能被获取到对象监视器的线程调用。通过以下三种方法之一，线程可以成为此对象监视器的所有者：
+
+. 通过执行此对象的同步实例方法。
+. 通过执行在此对象上进行同步的 synchronized 语句的正文。
+. 对于 Class 类型的对象，可以通过执行该类的同步静态方法。
+
+一次只能有一个线程拥有对象的监视器。如果当前线程不是此对象监视器的所有者,则抛出IllegalMonitorStateException
+
+
+===  notifyAll
+
+唤醒在此对象监视器上等待的所有线程。
+
+=== 简单使用
+
+[source,java]
+----
+public class NotifyTest1 {
+
+    public boolean start = false;
+
+    public static void main(String[] args) {
+        NotifyTest1 lock = new NotifyTest1();
+        new Thread(() -> {
+            synchronized (lock) { <1>
+                System.err.println("我是第一个执行的");
+                lock.notify();
+
+                new Scanner(System.in).nextLine(); <2>
+
+                lock.start = true;
+            }
+        }).start();
+
+
+        new Thread(() -> {
+            synchronized (lock) { <3>
+                while (!lock.start) {
+                    try {
+                        lock.wait();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+
+                System.err.println("我是第二个执行的");
+            }
+        }).start();
+
+    }
+}
+
+----
+
+<1>  使用wait和notify必须在同步代码块或同步方法当中,调用方法的主体必须是持锁对象(代码中的lock变量)
+<2> 控制台输入内容,这里主要用来阻塞,测试notify调用之后,wait所在方法虽然线程被激活,但是仍处于排队获取锁的状态,不能立即执行,只有获取到lock锁之后,才能继续执行.
+<3>  参考1的解说
+
+=== 生产者消费者实现1
+[source,java]
+----
+public class NotifyTest2 {
+
+    public int count = 0;
+
+    static class Producer {
+
+        private NotifyTest2 lock;
+
+        public Producer(NotifyTest2 lock) {
+            this.lock = lock;
+        }
+
+        public void add() {
+            synchronized (lock) {
+                while (lock.count >= 3) { <1>
+                    try {
+                        System.err.println("生产者等待中");
+
+                        lock.wait();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+                lock.count++;
+                System.err.println("生产第" + lock.count + "个产品");
+                lock.notifyAll(); <2>
+            }
+        }
+    }
+
+    static class Consumer {
+        private NotifyTest2 lock;
+
+        public Consumer(NotifyTest2 lock) {
+            this.lock = lock;
+        }
+
+        public void plus() {
+
+            synchronized (lock) {
+
+                while (lock.count == 0) { <3>
+                    try {
+                        System.err.println("消费者等待中");
+                        lock.wait();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+                lock.count--;
+                System.err.println("消费第" + lock.count + "个产品");
+
+                lock.notifyAll(); <4>
+            }
+            //   lock.notifyAll();
+        }
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        NotifyTest2 o = new NotifyTest2();
+        Producer producer = new Producer(o);
+        Consumer consumer = new Consumer(o);
+
+        for (int i = 0; i < 3; i++) {
+            new Thread(() -> {
+                while (true) {
+                    producer.add();
+                    try {
+                        Thread.sleep(new Random().nextInt(1000));
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }).start();
+        }
+
+        Thread.sleep(1000);
+            new Thread(() -> {
+                while (true) {
+                    consumer.plus();
+                    try {
+                        Thread.sleep(new Random().nextInt(1000));
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }).start();
+
+    }
+}
+
+----
+
+<1> 生产满了就等待
+<2> 生产了一个就通知所有等待线程,注意是所有的线程,包括生产中可能等待的线程
+<3> 消费完了就等待
+<4> 消费一个就通知所有等待所有的线程,注意是所有的线程,包括消费中可能等待的线程
+
+== Condition 
+
+上面的生产者消费者虽然实现了,但是在notifyAll的时候,我们会同时通知生产者和消费者线程.其实我们只想通知其中的一个线程,使用Condition可以帮我们实现这个目标.我们来看一个有界队列的例子:
+[source,java]
+----
+ class BoundedBuffer {
+   final Lock lock = new ReentrantLock();
+   final Condition notFull  = lock.newCondition(); 
+   final Condition notEmpty = lock.newCondition(); 
+
+   final Object[] items = new Object[100];
+   int putptr, takeptr, count;
+
+   public void put(Object x) throws InterruptedException {
+     lock.lock();
+     try {
+       while (count == items.length) 
+         notFull.await();
+       items[putptr] = x; 
+       if (++putptr == items.length) putptr = 0;
+       ++count;
+       notEmpty.signal();
+     } finally {
+       lock.unlock();
+     }
+   }
+
+   public Object take() throws InterruptedException {
+     lock.lock();
+     try {
+       while (count == 0) 
+         notEmpty.await();
+       Object x = items[takeptr]; 
+       if (++takeptr == items.length) takeptr = 0;
+       --count;
+       notFull.signal();
+       return x;
+     } finally {
+       lock.unlock();
+     }
+   } 
+ }
+----
+
+这是一个FIFO的阻塞队列,当队列长度满了的时候就会在添加的时候阻塞,当队列的长度为零时,就会在取出的时候阻塞.jdk中的ArrayBlockingQueue实现了该功能.
+
+使用方式和object中wait/notify是一样的
+[source,java]
+----
+// 造成当前线程在接到信号或被中断之前一直处于等待状态。
+void await()
+// 造成当前线程在接到信号、被中断或到达指定等待时间之前一直处于等待状态。
+boolean await(long time, TimeUnit unit)
+// 造成当前线程在接到信号、被中断或到达指定等待时间之前一直处于等待状态。
+long awaitNanos(long nanosTimeout)
+// 造成当前线程在接到信号之前一直处于等待状态。[不能被打断]
+void awaitUninterruptibly()
+// 造成当前线程在接到信号、被中断或到达指定最后期限之前一直处于等待状态。
+boolean awaitUntil(Date deadline)
+// 唤醒一个等待线程。
+void signal()
+// 唤醒所有等待线程。
+void signalAll()
+----
+
+== join线程
+
+等待调用该方法的线程终止之后才能继续执行,或者说在A线程中执行join(注意不是调用)方法的线程会挂起,等待调用join的线程执行方法,这相当于在别的线程中插队,我们来看例子:
+[source,java]
+----
+        Thread thread = new Thread(() -> {
+            System.err.println("1开始");
+
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            System.err.println("1结束");
+
+        });
+
+        thread.start();
+
+        Thread thread2 = new Thread(() -> {
+            System.err.println("2开始");
+            try {
+                thread.join(); <1>
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            System.err.println("2结束");
+        });
+
+        thread2.start();
+    }
+----
+
+结果是:
+----
+1开始
+2开始
+1结束
+2结束
+----
+
+<1> 此时2线程会挂起等待1线程执行完成.
+
+=== 源码分析
+
+[source,java]
+----
+    public final synchronized void join(long millis) <1>
+    throws InterruptedException {
+        long base = System.currentTimeMillis();
+        long now = 0;
+
+        if (millis < 0) {
+            throw new IllegalArgumentException("timeout value is negative");
+        }
+
+        if (millis == 0) {
+            while (isAlive()) {<2>
+                wait(0);
+            }
+        } else {
+            while (isAlive()) {
+                long delay = millis - now;
+                if (delay <= 0) {
+                    break;
+                }
+                wait(delay);
+                now = System.currentTimeMillis() - base;
+            }
+        } <3>
+    }
+----
+
+<1> join方法实际上调用的是join(0)
+<2> 测试线程是否处于活动状态。如果线程已经启动且尚未终止，则为活动状态。
+<3> 这里我们并不知道该线程是怎么被唤醒的,但是join线程执行完成之后,一定唤醒了该线程

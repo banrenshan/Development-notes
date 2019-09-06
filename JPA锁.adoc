@@ -1,0 +1,73 @@
+= JPA锁
+
+== JPA 各种实体锁模式的区别
+
+
+为了能够同步访问实体，JPA提供了2种锁机制。这两种机制都可以避免两个事务中的其中一个，在不知情的情况下覆盖另一个事务的数据。
+
+通过实体锁，我们通常希望避免在两个并行事务中产生如下情形：
+
+. Adam的事务读取数据 X
+. Barbara的事务读取数据 X
+. Adam的事务修改数据 X，并将其修改为 XA
+. Adam的事务写入数据 XA
+. Barbara的事务修改数据 X，并将其修改为 XB
+. Barbara的事务写入数据 XB
+
+结果是，Adam所做的修改完全被Barbara所覆盖掉了，但是Barbara对此却毫不知晓。像这样的情况通常被称为“脏读”。显然，我们希望的结果是Adam写入 XA，而Barbara需要在写入 XB之前检查对 XA 的修改。
+
+== 乐观锁的工作原理
+
+乐观锁基于的假设是实际中冲突很少发生，即使发生，抛出一个错误也比想办法避免它们更容易接受和简单。在乐观锁中，允许一个事务正确完成，但另一个事务需要抛出异常并回滚，并且必须被重新执行或者丢弃。
+
+我们还以Adam和Barbara为例，下面是一个使用乐观锁可能发生的情形：
+
+. Adam的事务读取数据 X
+. Barbara的事务读取数据 X
+. Adam的事务修改数据 X，并将其修改为 XA
+. Adam的事务写入数据 XA
+. Barbara的事务修改数据 X，并将其修改为 XB
+. Barbara的事务试图写入数据 XB，但是收到一个错误
+. Barbara需要读取数据 XA（或者重新开始一个新的事务）
+. Barbara的事务修改数据 XA，并将其修改为 XAB
+. Barbara的事务写入数据 XAB
+
+如你所见，Barbara被强制要求检查Adam的修改，并且她可以选择继续修改Adam的结果并保存（合并修改）。最后的数据将同时包括Adam和Barbara的修改。
+
+乐观锁完全由JPA控制。它需要在DB表中额外存储一个版本号列。在提交（和刷新）期间，ObjectDB会检查每个必须更新或删除的数据库对象，并将数据库中该对象的版本号与正在更新的内存中对象的版本号进行比较。如果版本号不匹配，则事务失败并抛出OptimisticLockException，表示该对象已由另一个用户（使用另一个EntityManager）修.
+
+== 悲观锁的工作原理
+
+对于某些人来说，悲观锁更容易接受。当事务需要修改一个可能被其他事务同时修改的实体时，事务会发起一个命令将实体锁住。所有的锁会持续到事务结束后再自动释放。
+
+使用悲观锁的情形可能如下所示：
+
+. Adam的事务读取数据 X
+. Adam的事务锁住 X
+. Barbara的事务希望读取数据 X，但是因为 X 已经被锁住，只好等待
+. Adam的事务修改数据 X，并将其修改为 XA
+. Adam的事务写入数据 XA
+. Barbara的事务读取数据 XA
+. Barbara的事务修改数据 XA，并将其修改为 XAB
+. Barbara的事务写入数据 XAB
+
+如你所见，Barbara又一次被强制的写入 XAB，同时也包含了Adam的修改。但是，这个方案与乐观锁完全不同——Barbara需要等待Adam的事务完成以后才能够读取数据。更甚的是，为了让该场景正确工作，我们需要在两个事务中都手动发起一个lock命令。（因为我们并不确定那个事务先运行，所以两个事务都需要在修改数据前先进行锁定）虽然乐观锁要为每个实体增加一个版本列，比悲观锁工作略多，但是之后我们不需要再在事务中发起锁操作了。JPA会自动完成所有的检查，我们只需要处理可能的异常即可。
+
+悲观锁使用底层数据库提供的锁机制来锁住表中已有的记录。JPA需要知道如何触发这些锁，并且尚不能完全支持某些数据库。
+
+即使是JPA规范中也说到，不需要提供PESSIMISTIC_READ（因为许多DB只支持WRITE锁）.
+允许JPA实现用LockModeType.PESSIMISTIC_WRITE来代替LockModeType.PESSIMISTIC_READ，但是反之不可。
+
+== JPA中可用的锁类型
+
+首先，我想说，对于实体中有添加了@Version注解的列，JPA会自动对该实体使用乐观锁。你不需要使用任何锁命令。但是，你可以在任何时候发起一个以下类型的锁：
+
+. LockModeType.Optimistic:乐观锁
+. LockModeType.OPTIMISTIC_FORCE_INCREMENT:乐观锁,提交事务时，即使实体的状态在事务中没有更改，实体的版本列也会递增。
+. LockModeType.PESSIMISTIC_READ:悲观锁,共享锁,其他事务可以同时读取实体，但不能同时更新它。
+. LockModeType.PESSIMISTIC_WRITE:悲观锁,独占锁,其他事务不能同时读取或写入实体。
+. LockModeType.PESSIMISTIC_FORCE_INCREMENT:悲观锁,其他事务不能同时读取或写入实体。 提交事务时，即使实体的状态在事务中没有更改，实体的版本列也会递增。
+. LockModeType.READ: 等同OPTIMISTIC.
+. LockModeType.WRITE:等同OPTIMISTIC_FORCE_INCREMENT.
+. LockModeType.NONE: 无锁
+	

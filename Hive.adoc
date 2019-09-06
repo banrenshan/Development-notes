@@ -1,0 +1,10 @@
+= Hive
+
+== 什么是Hive
+
+hive是facebook开源用于解决海量结构化日志的数据统计,其是基于hadoop的数据仓库,可以将结构化的数据映射成一张表,并提供类SQL的查询.本质上,HQL查询将转化成Mapreduce程序.运行大致流程如下:
+image::../images/20190423145038.png[]
+
+Hive的数据存储依赖hadoop,数据查询通过mappereduce,耗时的耗力的活都是别人做的,所以安装的时候,只需要一台机器即可.
+
+

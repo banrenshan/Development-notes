@@ -1,0 +1,133 @@
+= Ascii备忘
+
+== 文档中的源代码主题
+
+在文档头设置source-highlighter属性可以改变文档中引用源码的风格,目前有四种支持:coderay, highlightjs, prettify, 和 pygments
+
+highlightjs是系统默认的代码风格,不需要安装GEM包.
+
+=== GEM包安装
+
+有两种方式安装:在线和离线, https://rubygems.org/gems[包仓库地址]
+
+在线: `gem install coderay`
+
+离线: `gem install --local coderay`
+
+== 滑屏效果
+
+
+1. gem install bundler
+2. mkdir my-awesome-presentation
+3. cd my-awesome-presentation
+4. 创建文件Gemfile,内容如下:
+
+	source 'https://rubygems.org'
+	gem 'asciidoctor-revealjs' # latest released version
+
+5. bundle config --local github.https true
+6. bundle --path=.bundle/gems --binstubs=.bundle/.bin
+7. bundle exec asciidoctor-revealjs -a revealjsdir=https://cdnjs.cloudflare.com/ajax/libs/reveal.js/3.6.0 CONTENT_FILE.adoc
+
+== AsCii主题
+
+
+=== 安装
+
+1. gem install bundler
+2. clone https://github.com/asciidoctor/asciidoctor-stylesheet-factory[代码] 到本地
+3. 在源代码目录下执行 `bundle install` 
+4. 执行 `compass compile`,在stylesheets目录下面生成css文件.
+5. 引用,执行命令 `asciidoctor -a stylesheet=mystyles.css mysample.adoc`.
+6. 在命令行引用比较烦的话,可以adoc文件中指定,例如
+	
+	:stylesdir: mystylesheets/
+	:stylesheet: mystyles.css
+	:linkcss:
+
+== 静态站点整合
+
+许多静态站点生成器（即Jekyll，Middleman，Awestruct）依赖于添加到文档顶部的"front matter"来确定如何转换内容。 "front matter"从文件的第一行开始，并受块分隔符（例如---）的限制。例如:
+
+[source]
+----
+---  
+layout: default 
+---  
+= Document Title
+
+content
+----
+
+静态站点生成器在转化之前会移除这些分割内容,我们在转化这样的文档时,可以使用 `-a skip-front-matter` 来达到同样的效果.
+
+Awestruct定义了一组默认属性，它们在/default-site.yml文件中传递给API。该配置中的一个属性是imagesdir。 其值设置为/images。 由于优先规则，改值优先于文档中设定的imagesdir属性。我们可以通过@符号来改变两者的优先级,例如在_config/site.yml文件下这样配置:
+
+[source,yml]
+----
+asciidoctor:
+  :safe: safe
+  :attributes:
+    imagesdir: /assets/images@
+    icons: font
+    ...
+----
+
+== 命令行使用
+
+指定输出文件: `asciidoctor -o build/mydoc-$(date +%Y-%m-%d).html mydoc.adoc`
+指定输出目录: `asciidoctor -D build mydoc.adoc`
+
+== 浏览器实时预览插件
+
+https://github.com/asciidoctor/asciidoctor-chrome-extension/releases/download/v1.5.4.100/asciidoctor-chrome-extension.nex[谷歌]
+
+https://github.com/asciidoctor/asciidoctor-chrome-extension/releases/download/v1.5.4.100/asciidoctor-chrome-extension.nex[Oprea]
+
+https://github.com/asciidoctor/asciidoctor-firefox-addon/releases/download/v0.5.3/asciidoctor-firefox-addon-0.5.3-signed.xpi[火狐]
+
+如果想支持eclipse,idea等,请参考
+https://asciidoctor.org/docs/editing-asciidoc-with-live-preview/[相关文档]
+
+== ID和锚点
+
+可以在文章的任何位置定义锚点,然后再其他位置指向这个锚点
+
+.定义锚点的两种方式
+....
+[[tiger-subspecies,Tigers]]
+=== Subspecies of Tiger
+
+[#tiger-subspecies,reftext=Tigers]
+=== Subspecies of Tiger
+....
+
+.引用锚点
+....
+<<tiger-subspecies>>
+<<tiger-subspecies,显示的文本,如果锚点定义显示的文本,则会覆盖>>
+<<document-b.adoc#section-b,内部多个文档间引用>>
+....
+
+== 图的使用
+
+https://asciidoctor.org/docs/asciidoctor-diagram/[参考]
+
+1.安装 'gem install asciidoctor-diagram'
+
+2.绘图实例
+
+.....
+
+[plantuml, diagram-classes, png]     
+....
+Alice -> Bob: Authentication Request
+Bob --> Alice: Authentication Response
+
+Alice -> Bob: Another authentication Request
+Alice <-- Bob: another authentication Response
+....
+
+.....
+
+3.编译 `asciidoctor -r asciidoctor-diagram aa.adoc`

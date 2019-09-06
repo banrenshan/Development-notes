@@ -1,0 +1,137 @@
+
+
+[source,java]
+----
+        User user = new User();
+        user.setId("1");
+        user.setName("jjjj");  
+----
+
+== WRAP_ROOT_VALUE
+默认禁用
+外围包裹
+
+====
+{"User":{"id":"1","name":"jjjj"}}
+====
+
+== INDENT_OUTPUT
+默认禁用
+格式化输出
+
+====
+{
+  "id" : "1",
+  "name" : "jjjj"
+}
+==== 
+
+== FAIL_ON_EMPTY_BEANS
+
+当你要序列化输出的实例没有任何属性的时候,会抛出异常.如果禁用该功能,则输出null.
+
+== FAIL_ON_SELF_REFERENCES
+
+默认启用
+
+当bean存在循环引用的时候,控制处理结果.启用的话抛出循环引用异常,否则抛出JsonMappingException: Infinite recursion (StackOverflowError)
+
+== WRAP_EXCEPTIONS
+
+序列化的过程中是否捕获并包装所有的异常.默认启用
+
+==  FAIL_ON_UNWRAPPED_TYPE_IDENTIFIERS
+
+==  CLOSE_CLOSEABLE
+
+当实体类实现CLOSEABLE接口的时候,如果开启这个功能,会在序列化之后执行close方法,例如:
+
+[source,java]
+----
+class User implements Closeable{
+
+    private String id;
+    private String name;
+
+    private User user;
+
+    public void close(){
+        System.err.println("close");
+    }
+----
+
+====
+close
+{"id":"1","name":"jjjj","user":null}
+====
+
+== FLUSH_AFTER_WRITE_VALUE
+
+序列化之后是否调用 JsonGenerator.flush() 
+
+== WRITE_DATES_AS_TIMESTAMPS
+
+是否把日期序列化成毫秒,默认开启,如果关闭,则把日期序列化成 yyyy-MM-dd'T'HH:mm:ss.SSSZ
+
+== WRITE_DATE_KEYS_AS_TIMESTAMPS
+
+控制map的key如果是日期,是否序列化成毫秒数
+
+[source,java]
+----
+        Map<Date,String> map=new HashMap<>();
+        map.put(new Date(),"ddd");
+        //mapper.enable(SerializationFeature.WRITE_DATE_KEYS_AS_TIMESTAMPS);
+        String result = mapper.writeValueAsString(map);
+----
+
+====
+{"2018-09-07T07:36:53.388+0000":"ddd"}
+====
+
+== WRITE_DATES_WITH_ZONE_ID
+
+序列化的时候,是否包含时区信息.
+
+====
+2011-12-03T10:15:30+01:00[Europe/Paris]
+====
+
+== WRITE_DURATIONS_AS_TIMESTAMPS
+
+控制时间间隔等类型是否序列化成毫秒数
+
+== WRITE_CHAR_ARRAYS_AS_JSON_ARRAYS
+
+默认情况下char数组会序列化成字符串,例如char[]{'1','2','3'}会序列化成123,开启则序列化成数组
+
+== WRITE_ENUMS_USING_TO_STRING
+
+开启则使用Enum.toString(),禁用则使用Enum.name();默认禁用
+
+== WRITE_ENUMS_USING_INDEX
+
+序列索引的时候是否使用Enum.ordinal(),默认禁用
+
+== WRITE_SINGLE_ELEM_ARRAYS_UNWRAPPED
+
+是否将长度为1的数组序列化成单个,例如
+====
+  { "arrayProperty" : [ 1 ] }
+====
+序列化成
+====
+  { "arrayProperty" :  1 }
+====
+
+== ORDER_MAP_ENTRIES_BY_KEYS
+
+将map的key排序
+
+== EAGER_SERIALIZER_FETCH
+
+确定ObjectWriter是否应尽可能尝试急切地获取必要的JsonSerializer的功能。 在多次使用类似配置的ObjectWriter实例的情况下，这可以提高性能。
+
+== USE_EQUALITY_FOR_OBJECT_ID
+
+true使用JVM的实体比较,false使用equals方法比较,默认false.

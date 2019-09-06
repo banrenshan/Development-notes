@@ -1,0 +1,54 @@
+= idea快捷键使用
+
+Ctrl+Shift+向右箭头 :选中光标右侧的单词 
+
+Ctrl+w 选中光标所在的代码块,再按一次,选中更大一层代码块 ,Ctrl+Shift+w 执行反向操作
+
+Ctrl+/ 注释或取消注释一行代码
+
+Ctrl+y 删除一行
+
+Ctrl+d 重复一行的内容
+
+Alt+Shfit+箭头 移动一行代码
+
+Ctrl+Shift+箭头 移动代码块
+
+Ctrl + numpad -/+ 折叠和展开光标所在代码块
+
+Ctrl+Shift+ numpad -/+ 折叠和展开所有代码块
+
+Ctrl + 句号 折叠任意选中的代码
+
+Ctrl+j 提示html代码块,例如bootstrap组件代码块,会自动生成
+
+Ctrl+Shift+Enter 会自动弹出类中与当前变量匹配的类型列表,在return的时候,双击两次会提示填充信息 ,可以完成for循环剩余的代码块;写下if会成长代码块
+
+Shfit+F6 重命名文件,变量等
+
+Ctrl+Alt+v 生产表达式变量 ,例如 list.get(0) 会生产 String s=list.get(0)
+Ctrl+Alt+m 抽取成方法
+Ctrl+Alt+c 抽取变量成静态成员变量
+Ctrl+Alt+p 抽取表达式到方法入参
+Ctrl+Alt+L 格式化代码
+
+Ctrl+p 查看方法参数
+
+Ctrl+q 查看注释信息
+
+ctrl+Shfit+i 在方法调用处查看方法的详细代码
+
+F2 跳到代码的下一个错误处
+Ctrl+F1 查看代码的错误信息
+Ctrl+Alt+T 弹出if,finally等代码环绕块
+
+Ctrl+shfit+F7 高亮显示选中的变量的使用
+
+F4 跳到图源代码
+
+Ctrl+B 跳到类声明的地方
+Ctrl+Alt+B 跳到实现类
+
+Ctrl+F12 显示类的轮廓
+
+F3 处于查找模式的时候,F3是查找下一个,Shfit+F3查找上一个

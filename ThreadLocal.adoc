@@ -1,0 +1,98 @@
+= ThreadLocal
+
+ThreadLocal是一个线程局部变量，我们都知道全局变量和局部变量的区别，拿Java举例就是定义在类中的是全局的变量，各个方法中都能访问得到，而局部变量定义在方法中，只能在方法内访问。那线程局部变量（ThreadLocal）就是每个线程都会有一个局部变量，独立于变量的初始化副本，而各个副本是通过线程唯一标识相关联的。,我们看下面的例子:
+
+[source,java]
+----
+public class UniqueThreadIdGenerator {
+
+
+    private static final AtomicInteger nextId = new AtomicInteger(0);
+
+    private static final ThreadLocal<Integer> threadId =
+            ThreadLocal.withInitial(() -> nextId.getAndIncrement());
+
+    public static int get() {
+        return threadId.get();
+    }
+    
+    public static void main(String[] args) {
+        for (int i=0;i<10;i++){
+            new Thread(()-> System.err.println(UniqueThreadIdGenerator.get())).start();
+        }
+    }
+}
+----
+
+上面的get方法为每个线程生成一个线程ID,并且这些ID不会重复
+
+== 源码解析
+
+我们先来看get方法
+[source,java]
+----
+    public T get() {
+        Thread t = Thread.currentThread();
+        ThreadLocalMap map = getMap(t); <1>
+        if (map != null) {
+            ThreadLocalMap.Entry e = map.getEntry(this); <2>
+            if (e != null) { <3>
+                @SuppressWarnings("unchecked")
+                T result = (T)e.value;
+                return result;
+            }
+        }
+        return setInitialValue(); <4>
+    }
+----
+
+<1> 根据线程获取存储的本地变量信息
+<2> ThreadLocalMap底层的存储是Entry
+<3> Entry不为空,但返回值
+<4> Entry为空说明是第一次获取,直接返回初始化值
+
+[source,java]
+----
+    private T setInitialValue() {
+        T value = initialValue(); <1>
+        Thread t = Thread.currentThread();
+        ThreadLocalMap map = getMap(t);
+        if (map != null)
+            map.set(this, value);
+        else
+            createMap(t, value);
+        return value;
+    }
+
+----
+
+<1> 初始化的过程中会调用initialValue方法,该方法用户可以重写.在实际中很有用
+
+我们再来看set方法
+
+[source,java]
+----
+    public void set(T value) {
+        Thread t = Thread.currentThread();
+        ThreadLocalMap map = getMap(t);
+        if (map != null)
+            map.set(this, value); <1>
+        else
+            createMap(t, value);
+    }
+
+    void createMap(Thread t, T firstValue) {
+        t.threadLocals = new ThreadLocalMap(this, firstValue); <2>
+    }
+
+    ThreadLocalMap getMap(Thread t) {
+        return t.threadLocals;
+    }
+
+----
+
+<1> ThreadLocalMap是存储数据的主体,他是一个哈希表,这其中还设计到一个弱引用的概念
+<2> 线程做为主体关联线程存储变量,而不是ThreadLocal作为静态变量的方式关联线程
+
+
+

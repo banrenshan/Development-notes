@@ -1,0 +1,224 @@
+= grails 测试框架
+
+== 4. 单元测试
+
+=== 4.1 controller
+
+使用grails.testing.web.controllers.ControllerUnitTest trait来集成controller的单元测试.
+
+.controller
+[source,groovy]
+----
+package demo
+
+class DemoController {
+
+    def hello() {
+        render 'Hello, World!'
+    }
+
+}
+----
+
+.controller对应的测试类
+[source,groovy]
+----
+class DemoControllerSpec extends Specification implements ControllerUnitTest<DemoController> {
+
+    def setup() {
+    }
+
+    def cleanup() {
+    }
+
+    void "test index"() {
+        when:
+        controller.index()
+
+        then:
+        response.status == 200
+        response.text == 'hello world!'
+    }
+}
+----
+
+== 4.2 域类
+
+域类的单元测试需要实现grails.testing.gorm.DomainUnitTest trait
+
+.域类
+[source,groovy]
+----
+package demo
+
+class Person {
+    String firstName
+    String lastName
+}
+----
+
+.测试类
+[source,groovy]
+----
+@Stepwise <1>
+class PersonSpec extends Specification implements DomainUnitTest<Person> {
+
+    @Shared <2>
+    int id
+
+    void "test something"() {
+        setup: "创建几个实例"
+        new Person(firstName: "赵", lastName: "志强").save()
+        new Person(firstName: "黄", lastName: "文迪").save()
+
+        expect:
+        Person.count() == 2
+    }
+
+    void "test domain instance"() {
+
+        setup:
+        id = System.identityHashCode(domain) <3>
+
+        expect:
+        domain != null
+        domain.hashCode() == id
+
+        when:
+        domain.firstName = 'Robert'
+
+        then:
+        domain.firstName == 'Robert'
+    }
+
+    void "test we get a new domain"() {
+        expect:
+        domain != null
+        domain.firstName == null
+        System.identityHashCode(domain) != id <4>
+    }
+}
+
+----
+
+<1> 规定测试用例中的方法要顺序执行.如果某个方法失败,则跳过其余方法
+<2> 指定变量在所有feature方法之间共享
+<3> domian是这个测试类创建的域类实例,该实例的属性值都是null
+<4> 对于给定对象,返回与hashCode()相同的哈希码，无论给定对象的类是否覆盖hashCode()。空引用的哈希码为零。
+
+或者，可以使用grails.testing.gorm.DataTest trait。使用DataTest时，可以使用mockDomain或mockDomains方法来指定应测试模拟的域类。这在一次模拟多个Domain类以测试持久性时很有用。
+[sourcee,groovy]
+----
+package demo
+
+import grails.testing.gorm.DataTest
+import spock.lang.Specification
+
+class DataTestTraitSpec extends Specification implements DataTest {
+
+    void setupSpec() {
+        mockDomain Person
+
+        // for multiple domains, call mockDomains...
+        // mockDomains Person, Address, Company
+    }
+
+    void "test basic persistence mocking"() {
+        setup:
+        new Person(firstName: 'Robert', lastName: 'Fripp').save()
+        new Person(firstName: 'Adrian', lastName: 'Belew').save()
+
+        expect:
+        Person.count() == 2
+    }
+}
+----
+
+表示应该为此测试模拟哪些域类的另一种方法是在测试中提供Class [] getDomainClassesToMock（）方法。
+[source,groovy]
+----
+package demo
+
+import grails.testing.gorm.DataTest
+import spock.lang.Specification
+
+class GetDomainClassesToMockMethodSpec extends Specification implements DataTest {
+
+    Class[] getDomainClassesToMock() {
+        Person
+    }
+
+    void "test basic persistence mocking"() {
+        setup:
+        new Person(firstName: 'Robert', lastName: 'Fripp').save()
+        new Person(firstName: 'Adrian', lastName: 'Belew').save()
+
+        expect:
+        Person.count() == 2
+    }
+}
+----
+
+在针对另一个工件类型（例如，控制器单元测试）的测试中模拟域类时，测试必须实现DataTest特征以模拟相关的域类。
+[source,groovy]
+----
+package demo
+
+import grails.testing.gorm.DataTest
+import grails.testing.web.controllers.ControllerUnitTest
+import spock.lang.Specification
+
+class PersonControllerSpec extends Specification implements ControllerUnitTest<PersonController>, DataTest {
+
+    void setupSpec() {
+        mockDomain Person
+    }
+
+    void "test action which invokes GORM method"() {
+        setup:
+        new Person(firstName: 'Robert', lastName: 'Fripp').save()
+        new Person(firstName: 'Adrian', lastName: 'Belew').save()
+
+        when:
+        def model = controller.index()
+
+        then:
+        model.people.size() == 2
+        model.keySet().contains('people')
+    }
+}
+----
+
+=== 4.3 服务类
+
+[source,groovy]
+----
+class HelperService {
+
+    def getMagicNumber() {
+        42
+    }
+}
+----
+
+[source,groovy]
+----
+package demo
+
+import grails.testing.services.ServiceUnitTest
+import spock.lang.Specification
+
+class HelperServiceSpec extends Specification implements ServiceUnitTest<HelperService> {
+
+    void "test retrieving a property"() {
+        expect:
+        service.magicNumber == 42
+    }
+}
+----
+
+=== 4.5 拦截器
+
+
+=== 4.6 url映射
+

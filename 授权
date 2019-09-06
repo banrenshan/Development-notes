@@ -1,0 +1,491 @@
+= 授权 
+
+
+Spring Security中的高级授权功能是其受欢迎最引人注目的原因之一。 无论您选择如何进行身份验证 - 无论是使用Spring Security提供的机制和程序，还是与容器或其他非Spring Security身份验证框架集成 - 您都会发现授权服务可以在您的应用程序中以一致且简单的方式使用。
+
+在本部分中，我们将探讨第一部分中介绍的不同AbstractSecurityInterceptor实现。然后我们继续探讨如何通过使用域访问控制列表来微调授权。
+
+== 授权架构
+
+=== 权限
+
+所有Authentication实现都存储一个GrantedAuthority对象列表。 这些代表已经授予主体的权力。 GrantedAuthority对象由AuthenticationManager插入到Authentication对象中，稍后在做出授权决定时由AccessDecisionManager读取。
+
+GrantedAuthority是一个只有一个方法的接口：
+
+----
+String getAuthority();
+----
+
+此方法允许AccessDecisionManager获取权限的字符串表示形式。如果一个GrantedAuthority不能被精确地表示为一个String，那么该授予的授权被认为是“复杂的”，并且getAuthority（）必须返回null。
+
+“复杂”GrantedAuthority的一个示例是一个存储适用于不同客户帐号的操作和权限阈值列表的实现。将这个复杂的GrantedAuthority作为一个String来表示将会非常困难，因此getAuthority（）方法应该返回null。 这将向任何AccessDecisionManager表明它将需要专门支持GrantedAuthority实现以了解其内容。
+
+Spring Security包含一个具体的GrantedAuthority实现SimpleGrantedAuthority。这允许任何用户指定的字符串转换为GrantedAuthority。安全体系结构中包含的所有AuthenticationProvider都使用SimpleGrantedAuthority来填充Authentication对象。
+
+=== 预调用处理
+
+Spring Security提供了拦截器来控制对安全对象的访问，例如方法调用或Web请求。 关于是否允许继续调用的预调用决定由AccessDecisionManager完成。
+
+==== AccessDecisionManager
+
+AccessDecisionManager由AbstractSecurityInterceptor调用，负责制定最终的访问控制决策。 AccessDecisionManager接口包含三种方法：
+
+----
+void decide(Authentication authentication, Object secureObject,
+	Collection<ConfigAttribute> attrs) throws AccessDeniedException;
+
+boolean supports(ConfigAttribute attribute);
+
+boolean supports(Class clazz);
+----
+
+AccessDecisionManager的decide方法会传递所需的所有相关信息以作出授权决定。 特别是，传递安全对象可以检查实际安全对象调用中的使用那些参数。 例如，假设安全对象是一个MethodInvocation。 可以很方便的查询方法自定义的参数，然后在AccessDecisionManager中实现某种安全逻辑，以确保委托人可以在该客户上操作。 如果访问被拒绝，预计实现将抛出AccessDeniedException。
+
+在启动时由AbstractSecurityInterceptor调用supports（ConfigAttribute）方法，以确定AccessDecisionManager是否可以处理传递的ConfigAttribute。 
+
+supports（Class）方法由安全拦截器实现调用，以确保配置的AccessDecisionManager支持安全对象的类型。
+
+==== 基于投票的AccessDecisionManager实现
+
+虽然用户可以实现他们自己的AccessDecisionManager来控制授权的各个方面，但Spring Security包含了几个基于投票的AccessDecisionManager实现。 图25.1“投票决策管理器”说明了相关的类。
+
+使用这种方法，一系列AccessDecisionVoter实现将在授权决策中进行轮询。 AccessDecisionManager根据对投票的评估决定是否抛出AccessDeniedException。
+AccessDecisionVoter接口有三种方法：
+[source,java]
+----
+int vote(Authentication authentication, Object object, Collection<ConfigAttribute> attrs);
+
+boolean supports(ConfigAttribute attribute);
+
+boolean supports(Class clazz);
+----
+具体实现返回一个int，可能的值反映在AccessDecisionVoter静态字段ACCESS_ABSTAIN，ACCESS_DENIED和ACCESS_GRANTED中。 如果投票实施对授权决定没有意见，则将返回ACCESS_ABSTAIN。 如果它有意见，它必须返回ACCESS_DENIED或ACCESS_GRANTED。
+
+Spring Security提供了三个具体的AccessDecisionManager，用于投票。 
+
+. ConsensusBased实现基于少数服从多数的共识决定允许或拒绝访问。 提供属性是为了控制在票数相等的情况下的行为或者如果所有票都弃权。
+. AffirmativeBased实现如果有一个以上投票将决定允许访问。与基于ConsensusBased的实现一样，如果所有选民都弃权，则会有一个参数来控制行为。
+. UnanimousBased实现要求一致通过才可以访问。
+
+可以实现一个自定义的AccessDecisionManager，以不同的方式对投票进行计分。 例如，来自特定AccessDecisionVoter的投票可能会获得额外的权重，而来自特定选民的拒绝投票可能会产生否决效应。
+
+==== RoleVoter
+
+Spring Security提供的最常用的AccessDecisionVoter是简单的RoleVoter，它将配置属性视为简单的角色名称，如果用户已分配角色，则投票授予访问权限。
+
+它将在任何ConfigAttribute以前缀ROLE_开头时进行投票。如果有一个GrantedAuthority返回一个字符串表示，它完全等于一个或多个以前缀ROLE_开头的ConfigAttribute，它将投票授予访问权限。如果没有以ROLE_开头的任何ConfigAttribute的完全匹配，RoleVoter将投票拒绝访问。 如果没有ConfigAttribute以ROLE_开头，则投票者将弃权。
+
+==== AuthenticatedVoter
+
+它可以用来区分匿名，完全认证和记住我认证的用户。 许多网站允许在记住我身份验证的情况下进行某些有限访问，但需要用户通过登录才能确认其身份，以获得完整访问权限。
+
+当我们使用属性IS_AUTHENTICATED_ANONYMOUSLY来授予匿名访问权限时，此属性由AuthenticatedVoter处理。 有关更多信息，请参阅此类的Javadoc。
+
+==== 自定义Voter
+
+显然，你也可以实现一个自定义的AccessDecisionVoter，并且你可以放入任何你想要的访问控制逻辑。 它可能特定于您的应用程序（与业务逻辑相关），也可能实现一些安全管理逻辑。 例如，您可以在Spring网站上找到一篇博客文章，其中介绍了如何使用投票人实时拒绝其账户被暂停的用户访问。
+
+=== 后处理
+
+虽然在继续进行安全对象调用之前，由AbstractSecurityInterceptor调用AccessDecisionManager，但某些应用程序需要修改安全对象调用实际返回的对象的方法。虽然您可以轻松实现您自己的AOP关注点来实现此目的，但Spring Security提供了一个方便的钩子，它具有几个与ACL功能集成的具体实现。
+
+像Spring Security的许多其他部分一样，AfterInvocationManager有一个具体实现，AfterInvocationProviderManager，它轮询AfterInvocationProvider的列表。 每个AfterInvocationProvider被允许修改返回对象或抛出一个AccessDeniedException。 事实上，多个提供者可以修改该对象，因为前一个提供者的结果被传递给列表中的下一个。
+
+请注意，如果您使用的是AfterInvocationManager，您仍然需要允许MethodSecurityInterceptor的AccessDecisionManager允许进行操作的配置属性。 如果您使用的是典型的Spring Security包含的AccessDecisionManager实现，如果没有为特定的安全方法调用定义配置属性，则会导致每个AccessDecisionVoter放弃投票。反过来，如果AccessDecisionManager属性“allowIfAllAbstainDecisions”为false，则会引发AccessDeniedException。 （i）将“allowIfAllAbstainDecisions”设置为true（尽管通常不建议这样做），或者（ii）确保至少有一个AccessDecisionVoter将投票授予访问权限的配置属性，以避免此潜在问题。 后者（推荐）方法通常通过ROLE_USER或ROLE_AUTHENTICATED配置属性来实现。
+
+=== 角色分层
+
+这是一个常见的要求，应用程序中的特定角色应自动“包含”其他角色。 例如，在具有“管理员”和“用户”角色的应用程序中，您可能希望管理员能够完成普通用户所能做的一切。要做到这一点，你可以确保所有的管理员用户也被分配了“用户”角色。或者，您可以修改每个需要“用户”角色的访问限制，以包含“管理员”角色。 如果您的应用程序中有许多不同的角色，这可能会变得非常复杂。
+
+使用角色层次结构允许您配置哪些角色（或权限）应该包括其他角色。 Spring Security的RoleVoter，RoleHierarchyVoter的扩展版本配置了RoleHierarchy，从中获取用户分配的所有“可访问权限”。 典型的配置可能如下所示：
+[source,xml]
+----
+<bean id="roleVoter" class="org.springframework.security.access.vote.RoleHierarchyVoter">
+	<constructor-arg ref="roleHierarchy" />
+</bean>
+<bean id="roleHierarchy"
+		class="org.springframework.security.access.hierarchicalroles.RoleHierarchyImpl">
+	<property name="hierarchy">
+		<value>
+			ROLE_ADMIN > ROLE_STAFF
+			ROLE_STAFF > ROLE_USER
+			ROLE_USER > ROLE_GUEST
+		</value>
+	</property>
+</bean>
+----
+这里我们有四个角色，分层ROLE_ADMIN⇒ROLE_STAFF⇒ROLE_USER⇒ROLE_GUEST。使用ROLE_ADMIN进行身份验证的用户在针对使用上述RoleHierarchyVoter配置的AccessDecisionManager进行安全约束评估时，将表现得好像具有全部四个角色一样。 >符号可以被认为是“包含”的意思。
+
+角色层次结构为简化应用程序的访问控制配置数据或减少需要分配给用户的权限数量提供了一种便捷方式。对于更复杂的需求，您可能希望定义应用程序需要的特定访问权限与分配给用户的角色之间的逻辑映射，并在加载用户信息时在两者之间进行转换。
+
+== 安全对象
+
+=== AOP联盟（MethodInvocation）安全拦截器
+
+在Spring Security 2.0之前，确保MethodInvocation的安全需要相当多的配置。现在推荐的方法是使用名称空间配置。这样方法安全基础结构bean就会自动为您配置，因此您并不需要了解实现类。我们只是简单介绍一下这里涉及的类。
+
+使用MethodSecurityInterceptor强制执行的方法安全性，它保护了MethodInvocation。根据配置方法，拦截器可能特定于单个bean或在多个bean之间共享。拦截器使用MethodSecurityMetadataSource实例来获取适用于特定方法调用的配置属性。MapBasedMethodSecurityMetadataSource用于存储由方法名称（可以通配符）键入的配置属性，并将在内部使用<intercept-methods>或<protect-point>元素在应用程序上下文中定义属性时使用。 其他实现将用于处理基于注释的配置。
+
+您当然可以在您的应用程序上下文中直接配置MethodSecurityIterceptor以与Spring AOP的代理机制一起使用：
+[source,xml]
+----
+<bean id="bankManagerSecurity" class=
+	"org.springframework.security.access.intercept.aopalliance.MethodSecurityInterceptor">
+<property name="authenticationManager" ref="authenticationManager"/>
+<property name="accessDecisionManager" ref="accessDecisionManager"/>
+<property name="afterInvocationManager" ref="afterInvocationManager"/>
+<property name="securityMetadataSource">
+	<sec:method-security-metadata-source>
+	<sec:protect method="com.mycompany.BankManager.delete*" access="ROLE_SUPERVISOR"/>
+	<sec:protect method="com.mycompany.BankManager.getBalance" access="ROLE_TELLER,ROLE_SUPERVISOR"/>
+	</sec:method-security-metadata-source>
+</property>
+</bean>
+----
+
+=== AspectJ（JoinPoint）安全拦截器
+
+AspectJ安全拦截器与上一节讨论的AOP联盟安全拦截器非常相似。 事实上，我们只会讨论本节的不同之处。
+AspectJ拦截器被命名为AspectJSecurityInterceptor。 与依靠Spring应用程序上下文通过代理编织安全拦截器的AOP Alliance安全拦截器不同，AspectJSecurityInterceptor是通过AspectJ编译器编译的.
+在同一应用程序中使用两种类型的安全拦截器并不罕见，其中AspectJSecurityInterceptor用于域对象实例安全性，AOP Alliance MethodSecurityInterceptor用于服务层安全性。
+
+我们先来考虑如何在Spring应用程序上下文中配置AspectJSecurityInterceptor：
+[source,xml]
+----
+<bean id="bankManagerSecurity" class=
+	"org.springframework.security.access.intercept.aspectj.AspectJMethodSecurityInterceptor">
+<property name="authenticationManager" ref="authenticationManager"/>
+<property name="accessDecisionManager" ref="accessDecisionManager"/>
+<property name="afterInvocationManager" ref="afterInvocationManager"/>
+<property name="securityMetadataSource">
+	<sec:method-security-metadata-source>
+	<sec:protect method="com.mycompany.BankManager.delete*" access="ROLE_SUPERVISOR"/>
+	<sec:protect method="com.mycompany.BankManager.getBalance" access="ROLE_TELLER,ROLE_SUPERVISOR"/>
+	</sec:method-security-metadata-source>
+</property>
+</bean>
+----
+如您所见，除了类名外，AspectJSecurityInterceptor与AOP Alliance安全拦截器完全相同。实际上，两个拦截器可以共享相同的securityMetadataSource，因为SecurityMetadataSource可以与java.lang.reflect.Method一起使用，而不是AOP库特定的类.当然，您的访问决策可以访问相关的AOP库特定的调用（即MethodInvocation或JoinPoint），因此在进行访问决策时（例如方法参数）可以考虑一系列的添加条件。
+接下来你需要定义一个AspectJ方面。 例如：
+[source,java]
+----
+package org.springframework.security.samples.aspectj;
+
+import org.springframework.security.access.intercept.aspectj.AspectJSecurityInterceptor;
+import org.springframework.security.access.intercept.aspectj.AspectJCallback;
+import org.springframework.beans.factory.InitializingBean;
+
+public aspect DomainObjectInstanceSecurityAspect implements InitializingBean {
+
+	private AspectJSecurityInterceptor securityInterceptor;
+
+	pointcut domainObjectInstanceExecution(): target(PersistableEntity)
+		&& execution(public * *(..)) && !within(DomainObjectInstanceSecurityAspect);
+
+	Object around(): domainObjectInstanceExecution() {
+		if (this.securityInterceptor == null) {
+			return proceed();
+		}
+
+		AspectJCallback callback = new AspectJCallback() {
+			public Object proceedWithObject() {
+				return proceed();
+			}
+		};
+
+		return this.securityInterceptor.invoke(thisJoinPoint, callback);
+	}
+
+	public AspectJSecurityInterceptor getSecurityInterceptor() {
+		return securityInterceptor;
+	}
+
+	public void setSecurityInterceptor(AspectJSecurityInterceptor securityInterceptor) {
+		this.securityInterceptor = securityInterceptor;
+	}
+
+	public void afterPropertiesSet() throws Exception {
+		if (this.securityInterceptor == null)
+			throw new IllegalArgumentException("securityInterceptor required");
+		}
+	}
+}
+----
+在上面的示例中，安全拦截器将应用于PersistableEntity的每个实例，这是一个未显示的抽象类（您可以使用任何其他类或切入点表达式）。 对于那些好奇的人，AspectJCallback是需要的，因为proceed（）;语句仅在around（）体内具有特殊含义。 当AspectJSecurityInterceptor需要目标对象继续时，它会调用这个匿名的AspectJCallback类。
+
+您将需要配置Spring以加载该方面并将其与AspectJSecurityInterceptor连接起来。 下面显示了实现这一点的bean声明：
+[source,xml]
+----
+<bean id="domainObjectInstanceSecurityAspect"
+	class="security.samples.aspectj.DomainObjectInstanceSecurityAspect"
+	factory-method="aspectOf">
+<property name="securityInterceptor" ref="bankManagerSecurity"/>
+</bean>
+----
+而已！ 现在，您可以使用您认为合适的任何方式（例如，新的Person（）;）从应用程序中的任何位置创建bean，并且它们将应用安全拦截器。
+
+== 基于表达式的访问控制
+
+Spring Security 3.0引入了使用Spring EL表达式作为授权机制的能力，以及简单使用以前见过的配置属性和访问决策选项。基于表达式的访问控制建立在相同的体系结构上，但允许将复杂的布尔逻辑封装在单个表达式中。
+
+=== 常见的内置表达式
+
+表达式根对象的基类是SecurityExpressionRoot。 这提供了可用于Web和方法安全性的一些常用表达式。
+
+|===
+|表达式|描述
+|hasRole([role])|如果当前主体具有指定的角色，则返回true。 默认情况下，如果提供的角色不以“ROLE_”开头，它将被添加。 这可以通过修改DefaultWebSecurityExpressionHandler上的defaultRolePrefix来定制。
+|hasAnyRole([role1,role2])|如果当前主体具有任何提供的角色（以逗号分隔的字符串列表形式给出），则返回true。 默认情况下，如果提供的角色不以“ROLE_”开头，它将被添加。 这可以通过修改DefaultWebSecurityExpressionHandler上的defaultRolePrefix来定制。
+|hasAuthority([authority])|如果当前委托人具有指定的权限，则返回true。
+|hasAnyAuthority([authority1,authority2])|如果当前主体具有任何提供的角色（以逗号分隔的字符串列表的形式给出），则返回true
+|principal|允许直接访问表示当前用户的主体对象
+|authentication|允许直接访问从SecurityContext获取的当前Authentication对象
+|permitAll|总是评估为真
+|denyAll|总是评估为假
+|isAnonymous()|如果当前委托人是匿名用户，则返回true
+|isRememberMe()如果当前主体是remembre-me用户，则返回true|
+|isAuthenticated()|如果用户不是匿名的，则返回true
+|isFullyAuthenticated()|如果用户不是匿名用户或记住我用户，则返回true
+|hasPermission(Object target, Object permission)|如果用户有权访问给定权限的提供目标，则返回true。 例如，hasPermission（domainObject，'read'）
+|hasPermission(Object targetId, String targetType, Object permission)|如果用户有权访问给定权限的提供目标，则返回true。 例如，hasPermission（1，'com.example.domain.Message'，'read'）
+|===
+
+=== Web安全表达式
+要使用表达式来保护单个URL，首先需要将<http>元素中的use-expressions属性设置为true。 然后，Spring Security将期望<intercept-url>元素的访问属性包含Spring EL表达式。 表达式应评估为布尔值，定义是否允许访问。 例如：
+[source,xml]
+----
+<http>
+	<intercept-url pattern="/admin*"
+		access="hasRole('admin') and hasIpAddress('192.168.1.0/24')"/>
+	...
+</http>
+----
+在这里我们定义了应用程序的“管理”区域（由URL模式定义）应该只对拥有授权权限“admin”且IP地址与本地子网匹配的用户可用。 我们已经在前面的章节中看到了内置的hasRole表达式。 表达式hasIpAddress是特定于Web安全性的附加内置表达式。它由WebSecurityExpressionRoot类定义，在评估Web访问表达式时，该类的一个实例用作表达式根对象。 该对象还直接公开名称请求下的HttpServletRequest对象，以便您可以直接在表达式中调用请求。 如果正在使用表达式，WebExpressionVoter将被添加到名称空间使用的AccessDecisionManager中。 因此，如果您不使用名称空间并想使用表达式，则必须将其中一个添加到您的配置中。
+
+==== 在Web安全表达式中引用Beans
+如果你想扩展可用的表达式，你可以很容易地引用你公开的任何Spring Bean。 例如，假设您拥有包含以下方法签名的名为webSecurity的Bean：
+[source,java]
+----
+public class WebSecurity {
+		public boolean check(Authentication authentication, HttpServletRequest request) {
+				...
+		}
+}
+----
+你可以参考使用的方法：
+[source,xml]
+----
+<http>
+	<intercept-url pattern="/user/**"
+		access="@webSecurity.check(authentication,request)"/>
+	...
+</http>
+----
+或者在java中
+[source,java]
+----
+http
+		.authorizeRequests()
+				.antMatchers("/user/**").access("@webSecurity.check(authentication,request)")
+				...
+----
+
+==== Web安全表达式中的路径变量
+
+有时能够在URL中引用路径变量是很好的。 例如，考虑一个REST式应用程序，它以格式/ user / {userId}的URL路径通过id查找用户。
+
+通过将其放入模式中，您可以轻松地引用路径变量。 例如，如果您有一个包含以下方法签名的名为webSecurity的Bean：
+[source,java]
+----
+public class WebSecurity {
+		public boolean checkUserId(Authentication authentication, int id) {
+				...
+		}
+}
+----
+
+你可以参考使用的方法：
+[source,xml]
+----
+<http>
+	<intercept-url pattern="/user/{userId}/**"
+		access="@webSecurity.checkUserId(authentication,#userId)"/>
+	...
+</http>
+----
+或者java配置
+[source,java]
+----
+http
+		.authorizeRequests()
+				.antMatchers("/user/{userId}/**").access("@webSecurity.checkUserId(authentication,#userId)")
+				...
+----
+在两种配置中，匹配的URL都会将路径变量（并将其转换为checkUserId方法）传递给路径变量。 例如，如果URL是/ user / 123 / resource，那么传入的id将是123。
+
+=== 方法安全表达式
+
+方法安全性比简单的允许或拒绝规则稍微复杂一些。 Spring Security 3.0引入了一些新的注释，以便全面支持表达式的使用。
+
+==== @Pre and @Post
+
+有四个注释支持表达式属性以允许调用前和调用后授权检查，并支持对提交的集合参数或返回值进行过滤。 他们是@PreAuthorize，@PreFilter，@PostAuthorize和@PostFilter。 通过global-method-security命名空间元素启用它们的使用：
+
+----
+<global-method-security pre-post-annotations="enabled"/>
+----
+
+*使用@PreAuthorize和@PostAuthorize进行访问控制*
+
+最明显有用的注释是@PreAuthorize，它决定一个方法是否可以被实际调用。 例如（来自“联系人”示例应用程序）
+
+[source,java]
+----
+@PreAuthorize("hasRole('USER')")
+public void create(Contact contact);
+----
+这意味着只有具有角色“ROLE_USER”的用户才能访问。 显然，使用传统配置和简单的配置属性来实现所需角色可以轻松实现同样的事情。 但是关于：
+[source,java]
+----
+@PreAuthorize("hasPermission(#contact, 'admin')")
+public void deletePermission(Contact contact, Sid recipient, Permission permission);
+----
+这里我们实际上使用方法参数作为表达式的一部分来决定当前用户是否具有给定联系人的“管理员”权限。 我们将在下面看到，内置的hasPermission（）表达式通过应用程序上下文链接到Spring Security ACL模块中。 您可以按名称访问任何方法参数作为表达式变量。
+
+Spring Security可以通过多种方式来解决方法参数。 Spring Security使用DefaultSecurityParameterNameDiscoverer来发现参数名称。 默认情况下，对于整个方法尝试以下选项。
+
+* 如果Spring Security的@P注释出现在方法的单个参数上，则会使用该值。 这对于在JDK 8之前使用JDK编译的接口非常有用，它不包含有关参数名称的任何信息。 例如：
+[source,java]
+----
+import org.springframework.security.access.method.P;
+
+...
+
+@PreAuthorize("#c.name == authentication.name")
+public void doSomething(@P("c") Contact contact);
+----
+在幕后，使用AnnotationParameterNameDiscoverer实现了这种使用，可以对其进行定制以支持任何指定注释的value属性。
+
+* 如果Spring Data的@Param注释至少存在于该方法的一个参数上，则会使用该值。 这对于在JDK 8之前使用JDK编译的接口非常有用，它不包含有关参数名称的任何信息。 例如：
+[source,java]
+----
+import org.springframework.data.repository.query.Param;
+
+...
+
+@PreAuthorize("#n == authentication.name")
+Contact findContactByName(@Param("n") String name);
+----
+在幕后，使用AnnotationParameterNameDiscoverer实现了这种使用，可以对其进行定制以支持任何指定注释的value属性。
+
+* 如果使用JDK 8使用-parameters参数编译源代码，并且正在使用Spring 4+，则使用标准的JDK反射API来发现参数名称。 这适用于类和接口。
+
+* 最后，如果代码是使用调试符号编译的，则参数名称将使用调试符号发现。 这对接口不起作用，因为它们没有关于参数名称的调试信息。 对于接口，必须使用注释或JDK 8方法。
+
+在表达式中可以使用任何Spring-EL功能，因此您也可以访问参数的属性。 例如，如果您希望特定的方法只允许访问其用户名与联系人相匹配的用户，则可以编写
+[source,java]
+----
+@PreAuthorize("#contact.name == authentication.name")
+public void doSomething(Contact contact);
+----
+在这里，我们正在访问另一个内置表达式认证，这是存储在安全上下文中的认证。 您还可以使用表达式主体直接访问其“主体”属性。 该值通常是一个UserDetails实例，因此您可以使用像principal.username或principal.enabled这样的表达式。
+
+通常情况下，您可能希望在调用该方法后执行访问控制检查。 这可以使用@PostAuthorize注释来实现。 要从方法访问返回值，请在表达式中使用内置名称returnObject。
+
+==== 使用@PreFilter和@PostFilter进行过滤
+正如你可能已经知道的那样，Spring Security支持对集合和数组的过滤，现在可以使用表达式来实现。 这通常是对方法的返回值执行的。 例如：
+[source,java]
+----
+@PreAuthorize("hasRole('USER')")
+@PostFilter("hasPermission(filterObject, 'read') or hasPermission(filterObject, 'admin')")
+public List<Contact> getAll();
+----
+当使用@PostFilter注解时，Spring Security遍历返回的集合并删除提供的表达式为false的所有元素。 名称filterObject引用集合中的当前对象。 您也可以在方法调用之前使用@PreFilter进行过滤，尽管这是一种不常见的要求。 语法相同，但如果有多个参数是集合类型，则必须使用此批注的filterTarget属性通过名称选择一个参数。
+
+请注意，过滤显然不能替代您的数据检索查询。 如果您要过滤大量集合并删除很多条目，那么这可能效率不高。
+
+==== 内置表达式
+有一些特定于方法安全的内置表达式，我们已经在上面看到了这些内置表达式。 filterTarget和returnValue值非常简单，但是使用hasPermission（）表达式需要仔细观察。
+
+hasPermission（）表达式被委托给PermissionEvaluator的一个实例。 它旨在桥接表达式系统和Spring Security的ACL系统，允许您根据抽象权限指定域对象的授权约束。 它对ACL模块没有明确的依赖关系，所以如果需要的话，你可以将它交换出来用于替代实现。 界面有两种方法：
+[source,java]
+----
+boolean hasPermission(Authentication authentication, Object targetDomainObject,
+							Object permission);
+
+boolean hasPermission(Authentication authentication, Serializable targetId,
+							String targetType, Object permission);
+----
+它直接映射到表达式的可用版本，但不提供第一个参数（Authentication对象）。 第一种用于已经加载访问控制的域对象的情况。 然后，如果当前用户具有该对象的给定权限，表达式将返回true。 第二个版本用于未加载对象但标识符已知的情况。 还需要域对象的抽象“类型”说明符，以允许加载正确的ACL权限。 传统上，这是对象的Java类，但不一定要与加载权限的方式一致。
+要使用hasPermission（）表达式，您必须在应用程序上下文中显式配置PermissionEvaluator。 这看起来像这样：
+[source,xml]
+----
+<security:global-method-security pre-post-annotations="enabled">
+<security:expression-handler ref="expressionHandler"/>
+</security:global-method-security>
+
+<bean id="expressionHandler" class=
+"org.springframework.security.access.expression.method.DefaultMethodSecurityExpressionHandler">
+	<property name="permissionEvaluator" ref="myPermissionEvaluator"/>
+</bean>
+----
+其中myPermissionEvaluator是实现PermissionEvaluator的bean。 通常这将是来自称为AclPermissionEvaluator的ACL模块的实现。 有关更多详细信息，请参阅“Contacts”示例应用程序配置。
+
+==== 方法安全元注释
+
+您可以使用元注释来进行方法安全性，以使您的代码更具可读性。 如果您发现在整个代码库中重复相同的复杂表达式，这一点尤其方便。 例如，请考虑以下几点：
+
+----
+@PreAuthorize("#contact.name == authentication.name")
+----
+
+我们可以创建一个可用来代替的元注释，而不是随处重复。
+[source,java]
+----
+@Retention(RetentionPolicy.RUNTIME)
+@PreAuthorize("#contact.name == authentication.name")
+public @interface ContactPermission {}
+----
+元注释可用于任何Spring Security方法安全注释。 为了保持与规范兼容，JSR-250注释不支持元注释。
+
+== 域对象安全性（ACL）
+
+复杂的应用程序通常会发现需要定义访问权限，而不仅仅是在Web请求或方法调用级别。 相反，安全决策需要包括谁（认证），何处（MethodInvocation）和什么（SomeDomainObject）。 换句话说，授权决策还需要考虑方法调用的实际域对象实例主题。
+
+想象一下，你正在为宠物诊所设计一个应用程序。 您的基于Spring的应用程序将有两个主要用户组：宠物诊所的员工以及宠物诊所的客户。 员工可以访问所有数据，而客户只能看到他们自己的客户记录。 为了让它更有趣，您的客户可以允许其他用户查看他们的客户记录，例如他们的“幼崽幼儿园”导师或当地“小马俱乐部”的总裁。 使用Spring Security作为基础，您可以使用以下几种方法：
+
+* 编写您的业务方法来强化安全性。您可以咨询客户域对象实例中的集合以确定哪些用户有权访问。通过使用SecurityContextHolder.getContext（）。getAuthentication（），您将能够访问Authentication对象。
+
+* 编写一个AccessDecisionVoter来强制存储在Authentication对象中的GrantedAuthority []的安全性。 这将意味着你的AuthenticationManager需要用自定义的GrantedAuthority []来填充Authentication，代表主体有权访问的每个Customer域对象实例。
+
+* 编写AccessDecisionVoter来强制执行安全性并直接打开目标Customer域对象。 这意味着你的选民需要访问一个允许它检索Customer对象的DAO。 然后它将访问Customer对象的许可用户集合并作出适当的决定。
+
+这些方法中的每一种都是完全合法的。 但是，第一次将您的授权检查与您的业务代码耦合在一起。 其中的主要问题包括单元测试的难度增加以及在其他地方重新使用客户授权逻辑更加困难。 从认证对象获取GrantedAuthority [] s也很好，但不会扩展到大量客户.如果一个用户可以访问5,000个客户（在这种情况下不太可能，但想象一下，如果这是一个大型Pony俱乐部的受欢迎兽医！）构建身份验证对象所需的内存消耗量和时间将不受欢迎。 最后的方法，直接从外部代码中打开客户，可能是三者中最好的。它实现了关注点的分离，并且不会滥用内存或CPU周期，但它仍然效率低下，因为AccessDecisionVoter和最终的业务方法本身都会对负责检索Customer对象的DAO执行调用。每个方法调用两次访问显然是不可取的。 另外，列出的每种方法都需要从头开始编写自己的访问控制列表（ACL）持久性和业务逻辑。
+
+幸运的是，还有另一种选择，我们将在下面讨论.
+
+=== 核心概念
+
+Spring Security的域对象实例安全功能以访问控制列表（ACL）的概念为中心。 系统中的每个域对象实例都有自己的ACL，ACL记录了谁可以使用该域对象的详细信息。 考虑到这一点，Spring Security为您的应用程序提供了三个与ACL相关的主要功能：
+* 一种有效检索所有域对象的ACL条目的方法（并修改这些ACL）
+* 在调用方法之前，确保给定主体的方法可以与您的对象一起工作
+* 在调用方法之后，确保给定委托人的方法可以用于处理对象（或返回的东西）
+
+正如第一个要点所指出的，Spring Security ACL模块的主要功能之一是提供了一种检索ACL的高性能方法。 此ACL存储库功能非常重要，因为系统中的每个域对象实例都可能有多个访问控制条目，并且每个ACL可能以树状结构从其他ACL继承（这由Spring支持的开箱即用 安全性，并且非常常用）。Spring Security的ACL功能经过精心设计，可提供ACL的高性能检索，以及可插拔缓存，死锁最小化数据库更新，独立于ORM框架（我们直接使用JDBC），适当的封装和透明的数据库更新。
+
+鉴于数据库是ACL模块操作的核心，我们来研究实现中默认使用的四个主表。 下表按照典型的Spring Security ACL部署中的大小顺序列出，其中最后一行列出的表格最多：
+
+* ACL_SID允许我们唯一标识系统中的任何主体或权限（“SID”代表“安全标识”）。 唯一的列是ID，SID的文本表示以及用于指示文本表示是指主体名称还是授予授权的标志。 因此，每个唯一主体或授予权威机构都有一行。 当在接收许可的情况下使用时，SID通常称为“收件人”。
+
+* ACL_CLASS允许我们唯一标识系统中的任何域对象类。 唯一的列是ID和Java类名。 因此，对于我们希望存储ACL权限的每个唯一类，都有一行。
+
+* ACL_OBJECT_IDENTITY存储系统中每个唯一域对象实例的信息。 列包括ID，ACL_CLASS表的外键，唯一标识符，因此我们知道哪些ACL_CLASS实例正在提供信息，父项，ACL_SID表的外键以表示域对象实例的所有者，以及 我们是否允许ACL条目从任何父级ACL继承。 对于我们存储ACL权限的每个域对象实例，我们都有一行。
+
+* 最后，ACL_ENTRY存储分配给每个收件人的个人权限。 列包括ACL_OBJECT_IDENTITY的外键，收件人（即ACL_SID的外键），是否将进行审计以及表示实际权限被授予或拒绝的整数位掩码。 对于每个收到与域对象一起使用权限的收件人，我们都有一行。
+
+如最后一段所述，ACL系统使用整数位掩码。 不用担心，您不需要意识到使用ACL系统时移位的更多细节，但足以说我们有32位可以打开或关闭。 这些位中的每一个都表示权限，默认情况下会读取（位0），写入（位1），创建（位2），删除（位3）和管理（位4）权限。 如果您希望使用其他权限，那么实现您自己的Permission实例很容易，并且ACL框架的其余部分将在不知道您的扩展的情况下运行。
+
+理解系统中域对象的数量与我们选择使用整数位掩码的事实完全没有关系。 虽然您有32位可用于权限，但您可能拥有数十亿个域对象实例（这将意味着ACL_OBJECT_IDENTITY中的数十亿行，而很可能是ACL_ENTRY）。 我们提出这一点是因为我们发现，有时候人们错误地认为他们需要一点点为每个潜在的领域对象，情况并非如此。
+
+现在我们已经提供了ACL系统的基本概述，以及它在表结构中的外观，让我们来探索关键接口。 关键接口是：

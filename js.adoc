@@ -1,0 +1,608 @@
+= JS新语法
+:toc: left
+:icons: font
+:sectanchors: 
+:toclevels: 4
+:source-highlighter: pygments
+:pygments-style: manni
+:source-linenums-option: 
+
+== 严格模式
+
+严格模式通过在脚本或函数的头部添加  #"use strict";#  表达式来声明。
+
+* 必须声明变量
+
+[source,JavaScript]
+----
+name=123  //编译报错，需要用var声明变量
+console.log(name)
+----
+
+* 修改只读属性的值
+
+[source,javascript]
+----
+"use strict";
+var testObj = Object.defineProperties({}, {
+    prop1: {
+        value: 10,
+        writable: false // 一个只读的属性
+    },
+    prop2: {
+        get: function () {
+        }
+    }
+});
+testObj.prop1 = 20; //尝试改变prop1的值,出错
+testObj.prop2 = 30;//尝试改变prop2的值
+----
+错误信息如下：
+====
+demo1.js:15 Uncaught TypeError: Cannot assign to read only property 'prop1' of object '#<Object>'
+    at demo1.js:15
+(anonymous) @ demo1.js:15
+====
+
+* 修改不可扩展的属性
+
+[source,javascript]
+----
+"use strict";
+var testObj = new Object();
+Object.preventExtensions(testObj);//经过这个方法处理过的对象,不影响原有对象的删除,修改.但是无法添加新的属性成员了.
+testObj.name = "reeoo";
+----
+错误信息如下：
+====
+demo1.js:7 Uncaught TypeError: Cannot add property name, object is not extensible
+    at demo1.js:7
+====
+
+* 删除变量、函数或参数。
+
+[source,javascript]
+----
+"use strict";
+var testvar = 15,testObj={};
+function testFunc() {};
+delete testvar; //报错
+delete testFunc; //报错
+ 
+Object.defineProperty(testObj, "testvar", {
+    value: 10,
+    configurable: false
+    });
+delete testObj.testvar; //报错
+----
+
+* 在一个对象文本中多次定义某个属性。严格模式下不允许一个属性有多个定义
+
+[source,javascript]
+----
+"use strict";
+var testObj = {
+    prop1: 10,
+    prop2: 15,
+    prop1: 20
+};
+
+----
+
+* 严格模式下不允许形参参数名称重复
+
+[source,javascript]
+----
+"use strict";
+function testFunc(param1, param1) {
+    return 1;
+};
+
+----
+
+* 当 this 的值为 null 或 undefined 时，该值不会转换为全局对象。
+
+[source,javascript]
+----
+"use strict";
+function testFunc() {
+    return this;
+}
+var testvar = testFunc();
+----
+
+在非严格模式下， testvar 的值为全局对象 window ，但在严格模式下，该值为 undefined。
+
+* 在严格模式下，函数声明无法嵌套在语句或块中。它们只能显示在顶级或直接显示在函数体中。
+
+[source,javascript]
+----
+"use strict";
+var arr = [1, 2, 3, 4, 5];
+var index = null;
+for (index in arr) {
+    function myFunc() {};
+}
+
+----
+
+* 严格模式下 eval 用法无效
+
+[source,javascript]
+----
+"use strict";
+eval("var testvar = 10");
+console.log(testvars);
+----
+====
+Uncaught ReferenceError: testvar is not defined
+====
+
+* 不允许使用 arguments.callee
+
+[source,javascript]
+----
+"use strict";
+function my(testInt) {
+    if (testInt-- == 0)
+        return;
+    arguments.callee(testInt--);
+}
+my(100);
+----
+
+====
+Uncaught TypeError: 'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them
+====
+
+== json对象扩展
+
+[source,javascript]
+----
+let obj = {
+    name: '赵志强',
+    age: 27
+};
+
+let str = JSON.stringify(obj); //把对象转化成字符串
+console.log(str);
+
+let o = JSON.parse(str);//把字符串转化成对象
+console.log(o);
+----
+
+== object对象扩展
+
+=== Object.create创建对象
+
+创建一个具有指定原型且可选择性地包含指定属性的对象。
+
+[source,javascript]
+----
+let obj = {
+    name: '赵志强',
+    age: 27
+};
+
+var new_obj = Object.create(obj, {
+    addr: { 
+        value: '上海',
+        writable: false, //修改
+        configurable: false, //删除
+        enumerable: false //枚举
+    }
+});
+
+console.log(new_obj.addr);  //上海
+
+new_obj.addr = '北京';
+console.log(new_obj.addr); //上海
+
+delete  new_obj.addr;
+console.log(new_obj.addr); //上海
+
+for (let i in  new_obj) {
+    console.log(i, new_obj[i]); //name和age
+}
+----
+new_obj的结构：
+
+```
+addr: "上海" 
+__proto__:  
+	age: 27 
+	name: "赵志强" 
+	__proto__: Object 
+
+```
+
+可以看出obj作为new_obj的原型，addr作为new_obj的属性被添加。
+
+=== Object.defineProperties扩展属性
+
+将一个或多个属性添加到对象，并/或修改现有属性的特性。
+
+[source,java]
+----
+let obj = {
+    name: '赵志强',
+    age: 27
+};
+
+Object.defineProperties(obj, {
+    addr: {
+        value: '上海',
+        writable: false, //修改
+        configurable: false, //删除
+        enumerable: false //枚举
+    },
+    cp_name: {
+        get: function () {
+            console.log("get" + this.name);
+            return "CP " + this.name;
+        },
+        set: function (value) {
+            console.log("set" + value);
+            let names = value.split(' ');
+            this.name = names[1];
+        }
+
+    }
+});
+
+console.log(obj.cp_name);
+obj.cp_name = 'CP 张三';
+console.log(obj.cp_name);
+console.log(obj.name);
+obj.name = '李四';
+console.log(obj.cp_name);
+----
+```
+demo1.js:15 get赵志强
+demo1.js:27 CP 赵志强
+demo1.js:19 setCP 张三
+demo1.js:15 get张三
+demo1.js:29 CP 张三
+demo1.js:30 张三
+demo1.js:15 get李四
+demo1.js:32 CP 李四
+```
+每次调用new_obj.cp_name读取值的时候调用get,设置值的时候调用set.
+
+== 数组对象扩展
+[source,javascript]
+----
+let array = [
+    "张三", "李四", "王五", "张三", "慕容复"
+];
+let index = array.indexOf("张三"); //0
+let lastIndex = array.lastIndexOf("张三"); //3
+let result = array.filter(item => {
+    return item.length > 2;
+});
+let map = array.map((item, index) => item + index);
+alert(index);
+alert(lastIndex);
+alert(result);
+alert(map);
+----
+indexOf对Object类的数组不起作用，这是因为数组内部采用 #===# 比较对象。
+
+== call apply bind 
+
+[source,javascript]
+----
+let name = '我是全局名字';
+function getName(age) {
+    alert(this.name + " " + age);
+}
+
+var obj = {
+    name: '我是局部对象的名字'
+};
+getName(11);
+getName.apply(obj, [15]);
+getName.call(obj, 16);
+
+let newGetNameFun = getName.bind(obj, 17);
+newGetNameFun();
+----
+apply和call函数主要作用是绑定对象的作用域，例如getName调用时作用域是Window,通过apply和call作用于变成了obj,两者的区别是传参的不同，apply传入的参数要求是数组，call是可变长参数。
+
+bind也可以绑定对象的作用域，但是返回对象是一个新的函数。
+
+== let const var
+
+const用于定义常量，赋值后不可变更
+
+[source,javascript]
+----
+const name = '赵志强';
+name = 'ddd' //报错
+----
+
+====
+demo1.js:2 Uncaught TypeError: Assignment to constant variable.
+    at demo1.js:2
+====
+
+let用来定义块级作用域
+[source,javascript]
+----
+for (var i = 0; i < 10; i++) {
+
+}
+alert(i) //10
+----
+将var换成let,i的值不能被访问，抛出下面的异常
+====
+demo1.js:4 Uncaught ReferenceError: i is not defined
+    at demo1.js:4
+====
+
+== 解构赋值
+
+[source,javascript]
+----
+let obj = {
+    name: "赵志强",
+    age: 23
+};
+
+let {name, age} = obj;
+alert(name)
+alert(age)
+//使用在函数形参上
+function getname({name,age}) {
+    alert(name);
+}
+getname(obj);
+----
+
+== 模板字符串
+
+[source,javascript]
+----
+let obj = {
+    name: "赵志强",
+    age: 23
+};
+
+let str = `我的名字是：${obj.name}`;
+alert(str)
+----
+
+== 对象简写
+
+[source,javascript]
+----
+let name = '赵志强';
+
+let obj = {
+    name, //属性的名称是定义的变量的名称
+    age: 23,
+    get(){
+        return this.name;
+    }
+};
+
+alert(obj.name);
+alert(obj.get())
+----
+
+== 箭头(匿名)函数
+[source,javascript]
+----
+let fun1 = () => console.log(1); //空参数的匿名函数
+let fun2 = index => console.log(index);//一个参数匿名函数
+let fun3 = (item, index) => console.log(index, item); //两个或两个以上参数需要用括号
+let fun4 = () => 1 + 3; //有返回值，表达式可以省略return
+let fun5 = array => {
+    array.forEach(item => console.log(item))
+}; //多行函数需要用{}包裹
+----
+
+=== 普通函数和箭头函数
+
+在箭头函数出现之前，每个新定义的函数都有其自己的this值（例如，构造函数的 this 指向了一个新的对象；严格模式下的函数的 this 值为 undefined；如果函数是作为对象的方法被调用的，则其 this 指向了那个调用它的对象）。在面向对象风格的编程中，这被证明是非常恼人的事情。
+
+[source,javascript]
+----
+function Person() {
+  // 构造函数 Person() 定义的 `this` 就是新实例对象自己
+  this.age = 0;
+  setInterval(function growUp() {
+    // 在非严格模式下，growUp() 函数定义了其内部的 `this`为全局对象, 不同于构造函数Person()的定义的 `this`
+    this.age++; 
+  }, 1000);
+}
+ 
+var p = new Person();
+----
+
+在 ECMAScript 3/5 中，这个问题可以通过新增一个变量来指向期望的 this 对象，然后将该变量放到闭包中来解决。
+
+[source,javascript]
+----
+function Person() {
+  var self = this; // 也有人选择使用 `that` 而非 `self`. 只要保证一致就好.
+  self.age = 0;
+ 
+  setInterval(function growUp() {
+    // 回调里面的 `self` 变量就指向了期望的那个对象了
+    self.age++;
+  }, 1000);
+}
+
+----
+
+除此之外，还可以使用bind函数，把期望的 this 值传递给 growUp() 函数。
+
+箭头函数则会捕获其所在上下文的  this 值，作为自己的 this 值，因此下面的代码将如期运行。
+
+[source,javascript]
+----
+function Person(){
+  this.age = 0;
+ 
+  setInterval(() => {
+    this.age++; // |this| 正确地指向了 person 对象
+  }, 1000);
+}
+ 
+var p = new Person();
+
+----
+
+箭头函数中的 this 和调用时的上下文无关，而是取决于定义时的上下文
+
+
+由于this已经在词法层面完成了绑定，通过call()或apply()方法调用一个函数时，只是传入了参数而已，对this并没有什么影响：
+
+[source,javascript]
+----
+var adder = {
+  base : 1,
+    
+  add : function(a) {
+    var f = v => v + this.base;
+    return f(a);
+  },
+ 
+  addThruCall: function(a) {
+    var f = v => v + this.base;
+    var b = {
+      base : 2
+    };
+            
+    return f.call(b, a);
+  }
+};
+ 
+console.log(adder.add(1));         // 输出 2
+console.log(adder.addThruCall(1)); // 仍然输出 2（而不是3 ——译者注）
+
+----
+
+箭头函数不会在其内部暴露出arguments对象： arguments.length, arguments[0], arguments[1] 等等，都不会指向箭头函数的 arguments，而是指向了箭头函数所在作用域的一个名为 arguments 的值(如果有的话，否则，就是 undefined)。
+
+[source,javascript]
+----
+var arguments = 42;
+var arr = () => arguments;
+ 
+arr(); // 42
+ 
+function foo() {
+  var f = () => arguments[0]; // foo's implicit arguments binding
+  return f(2);
+}
+ 
+foo(1); // 1
+
+----
+
+箭头函数没有自己的 arguments 对象，不过在大多数情形下，rest参数可以给出一个解决方案：
+
+[source,javascript]
+----
+function foo() { 
+  var f = (...args) => args[0]; 
+  return f(2); 
+}
+ 
+foo(1); // 2
+
+----
+如上所述, 箭头函数表达式对没有方法名的函数是最合适的.让我们看看当我们试着把它们作为方法时发生了什么.
+
+[source,javascript]
+----
+'use strict';
+var obj = {
+  i: 10,
+  b: () => console.log(this.i, this),
+  c: function() {
+    console.log( this.i, this)
+  }
+}
+obj.b(); // prints undefined, Window
+obj.c(); // prints 10, Object {...}
+
+----
+
+箭头函数没有定义this绑定。
+[source,javascript]
+----
+'use strict';
+var obj = {
+  a: 10
+};
+ 
+Object.defineProperty(obj, "b", {
+  get: () => {
+    console.log(this.a, typeof this.a, this);
+    return this.a+10; // represents global object 'Window', therefore 'this.a' returns 'undefined'
+  }
+});
+
+----
+
+== 三点运算符
+[source,javascript]
+----
+function add(...value) {
+    console.log(value);
+    console.log(arguments);
+}
+
+add(1, 2, 3, 4)
+----
+
+====
+(4) [1, 2, 3, 4]
+demo1.js:3 Arguments(4) [1, 2, 3, 4, callee: (...), Symbol(Symbol.iterator): ƒ]
+====
+value是一个数组，arguments是一个伪数组。
+
+== 形参默认值
+
+[source,javascript]
+----
+function add(a=1,b=2) {
+    return a+b;
+}
+console.log(add());
+----
+
+== Promise
+
+Promise是异步编程的一种解决方案，它有三种状态，分别是pending-进行中、resolved-已完成、rejected-已失败.
+
+当Promise的状态又pending转变为resolved或rejected时，会执行相应的方法，并且状态一旦改变，就无法再次改变状态，这也是它名字promise-承诺的由来
+
+[source,javascript]
+----
+let success = true;
+new Promise((resolve, reject) => {
+    if (success) {
+        resolve("成功了");
+    }
+    reject("出错了");
+}).then(
+    data => {
+        console.log(data);
+        return data;
+    },
+    error => console.log(error)
+).then(
+    data => console.log(data),
+    error => console.log(error)
+)
+----
+
+打印结果是：
+====
+demo1.js:9 成功了 +
+demo1.js:14 成功了
+====

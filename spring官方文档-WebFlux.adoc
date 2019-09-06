@@ -1,0 +1,432 @@
+= spring webflux
+:toc: left
+:toclevels: 4
+
+== spring webflux
+
+Spring Framework中包含的原始Web框架Spring Web MVC是专为Servlet API和Servlet容器构建的.reactive-stack web框架-spring webflux在5.0版本后被添加.它完全无阻塞，支持 Reactive Streams背压，并在Netty，Undertow和Servlet 3.1+容器等服务器上运行。
+
+=== 概述
+
+为什么Spring WebFlux被创建？
+
+我们需要使用少量的线程处理非阻塞Web stack的并发,并使用较少的硬件资源进行扩展.Servlet 3.1为非阻塞I/O提供了API。但是，使用它会背离Servlet API的其余部分，例如同步(Filter，Servlet)和阻塞(getParameter， getPart)的API.这是新的通用API作为跨任何非阻塞运行时的基础动机。这很重要，因为在异步-非阻塞体系中已经建立了良好的服务器（如Netty）。
+
+另外一个原因就是函数式编程了.Java 8中添加的lambda表达式可以让我们开发函数式API,这是非阻塞应用和continuation-style APIs(例如CompletableFuture和ReactiveX)的福音,他允许以声明的方式构建异步逻辑.在编程模型级别,java8 允许spring webflux以注解controller的方式提供函数式web端点.
+
+==== Reactive的含义
+
+`reactive` 是围绕变化做出反应的编程模型,例如网络组件响应I/O事件,UI控制器会响应鼠标事件.从这个意义上说，非阻塞是被动的,因为我们现在处于一种模式，即在操作完成或数据可用时对通知作出反应。
+
+在spring团队中,还赋予了`reactive` 另外一种机制,即非阻塞背压.在同步的命令式代码中，阻塞调用是一种自然形式的背压，迫使调用者等待。在非阻塞代码中，控制事件的速率变得很重要，这样快速的生产者就不会压倒其destination。
+
+Reactive Streams是一个 小规范 （在Java 9中也采用），用于定义具有背压的异步组件之间的交互。例如，数据存储库（充当 发布者）可以产生数据,然后,HTTP服务器（充当 订阅服务器）写出响应的数据。Reactive Streams的主要目的是让订阅者控制发布者生成数据的速度。
+
+NOTE: Reactive Streams的目的仅仅是建立一个机制和边界。如果发布者不能减速，它必须决定是缓冲、删除还是失败。
+
+==== Reactive API
+
+Reactive Streams在互操作性方面发挥着重要作用。它对类库和基础架构组件很有用，但作为应用程序API不太有用，因为它太底层了。应用程序需要更高级别和更丰富的功能API来组成异步逻辑 - 类似于Java 8 StreamAPI，但不仅适用于集合。这是reactive 类库所扮演的角色。
+
+Reactor是Spring WebFlux的首选Reactive库.它通过与ReactiveX vocabulary of operators一致的操作,提供了 Mono和 Flux API类型来处理0..1（Mono）和0..N（Flux）的数据序列，Reactor是Reactive Streams规范的实现，因此，它的所有操作都支持非阻塞背压。Reactor非常关注服务器端Java。它是与Spring密切合作开发的。
+
+WebFlux要求Reactor作为核心依赖,但它可以通过Reactive Streams集成其他Reactive库.一般情况下, WebFlux API 使用plain Publisher 作为输入,在内部使其适配成Reactor类型，使用它，并返回a Flux或a Mono作为输出。因此，您可以传递任何Publisher输入，并且可以在输出上应用操作,但是您需要调整输出以与另一个反应库一起使用。只要可行（例如，带注释的控制器），WebFlux就会透明地集成RxJava或其他reactive库。
+
+==== 编程模型
+
+spring-web模块引入了reactive基本代码,包括HTTP 抽象,Reactive Streams支持的服务器的适配器,编码器,以及与Servlet API相当但具有非阻塞特性的核心WebHandlerAPI。
+
+在此基础上，Spring WebFlux提供了两种编程模型供您选择：
+
+. 带注释的控制器：与Spring MVC一致，并基于spring-web模块的相同注解。Spring MVC和WebFlux控制器都支持（Reactor和RxJava）reactive 返回类型，因此，要区分它们并不容易。一个值得注意的区别是WebFlux也支持reactive @RequestBody参数。
+. 函数式端点: 基于Lambda，轻量级,函数式编程模型。您可以将其视为一个小型库或一组应用程序可用于路由和处理请求的实用程序。与带注释的控制器的最大区别在于，应用程序负责从开始到结束的请求处理，而不是通过注解声明意图并被回调。
+
+==== 适用性
+
+Spring MVC还是WebFlux？
+
+实际上，两者共同努力扩大可用选项的范围。两者的设计是为了保持连续性和一致性，它们可以并排使用，每一方的反馈都有利于双方。下图显示了两者之间的关系，它们的共同点以及各自的唯一支持：
+
+image::images\Spring-WebFlux-dd7fd.png[]
+
+我们建议您考虑以下具体要点：
+
+. 如果您的Spring MVC应用程序运行正常，则无需更改。命令式编程是编写，理解和调试代码的最简单方法。您有更多的类库选择，因为从历史上看，大多数库都是阻塞的。
+. 如果您已经使用其他的非阻塞web stack,可以考虑下Spring WebFlux,他提供了与其他非阻塞web stack相同的执行模型，并且还提供服务器选择（Netty，Tomcat，Jetty，Undertow和Servlet 3.1+容器），选择编程模型（带注释的控制器和功能Web端点），以及选择reactive库（Reactor，RxJava或其他）。
+. 如果您对与Java 8 lambdas或Kotlin一起使用的轻量级，函数式Web框架感兴趣，则可以使用Spring WebFlux函数式Web端点。对于较小的应用程序或具有较低复杂要求的微服务而言，这也是一个不错的选择，可以从更高的透明度和控制中受益。
+. 在微服务架构中，您可以将应用程序与Spring MVC或Spring WebFlux控制器或Spring WebFlux函数式端点混合使用。在两个框架中支持相同的基于注解的编程模型，可以更轻松地重用知识，同时为正确的工作选择合适的工具。
+. 评估应用程序的一种简单方法是检查其依赖性。如果您要使用阻塞持久性API（JPA，JDBC）或网络API，则Spring MVC至少是常见体系结构的最佳选择。从技术上讲，Reactor和RxJava都可以在单独的线程上执行阻塞调用，但是你不会充分利用非阻塞的Web stack。
+. 其他几项省略,不重要,参考官方文档.
+
+==== 服务器
+
+Spring WebFlux支持tomcat,jetty,Servlet 3.1+容器以及其他 non-Servlet运行时(Netty和Undertow).所有服务器都适用于低级别的 通用API，因此可以跨服务器支持更高级别的 编程模型。
+
+Spring WebFlux没有内置支持来启动或停止服务器。但是，可以通过配置文件和 WebFlux infrastructure ,并运行少量代码来实现.
+
+Spring Boot有一个WebFlux启动器，可以自动执行这些步骤。默认情况下，启动程序使用Netty，但通过更改Maven或Gradle依赖项可以轻松切换到Tomcat，Jetty或Undertow。Spring Boot默认为Netty，因为它在异步，非阻塞空间中使用得更广泛，并允许客户端和服务器共享资源。
+
+Tomcat和Jetty可以与Spring MVC和WebFlux一起使用。但请记住，它们的使用方式非常不同。Spring MVC依赖于Servlet阻塞I / O，并允许应用程序在需要时直接使用Servlet API。Spring WebFlux依赖于Servlet 3.1非阻塞I / O，并在低级适配器后面使用Servlet API，而不是直接使用。
+
+对于Undertow，Spring WebFlux直接使用Undertow API而不使用Servlet API。
+
+==== 性能
+
+性能有许多特征和含义。reactive和非阻塞性通常不会使应用程序运行得更快。在某些情况下，它们可以（例如，如果使用 WebClient并行执行远程调用）。总的来说，它需要更多的工作来以非阻塞的方式做事，并且可能略微增加所需的处理时间。
+
+反应和非阻塞的关键好处是能够使用少量固定数量的线程和更少的内存进行扩展。这使得应用程序在负载下更具弹性，因为它们以更可预测的方式扩展。但是，为了观察这些好处，您需要有一些延迟（例如,网络比较慢,IO操作多,这些都会造成延迟,如果程序中,这种任务特别多,你就会发现reactive的好处）。这就是反应堆栈开始显示其优势的地方，差异可能是戏剧性的。
+
+==== 并发模型
+
+Spring MVC和Spring WebFlux都支持带注解的控制器,但有一个关键的差异在并发模型和 ``阻塞和线程的`` 默认假设。
+
+在Spring MVC（以及一般的servlet应用程序）中，假设应用程序可以阻塞当前线程（例如，用于远程调用），并且由于这个原因，servlet容器使用大型线程池来吸收请求期间的潜在阻塞处理。
+
+在Spring WebFlux（以及一般的非阻塞服务器）中，假设应用程序不会阻塞，因此，非阻塞服务器使用小的固定大小的线程池（事件循环工作程序）来处理请求。
+
+TIP: “扩展性”和“少量线程”可能听起来矛盾，但永远不会阻塞当前线程（并依赖于回调）意味着您不需要额外的线程，因为没有阻塞调用吸收。
+
+**调用阻塞API**
+如果您确实需要使用阻塞库，该怎么办？Reactor和RxJava都提供了publishOn操作继续在不同的线程上进行处理。这意味着有一个简单的逃生舱口。但请记住，阻塞API不适合这种并发模型。
+
+**可变状态**
+在Reactor和RxJava中，您通过操作声明逻辑，并且在运行时，形成一个reactive 管道，其中数据在不同的阶段按顺序处理。这样做的一个主要好处是它可以使应用程序免于必须保护可变状态，因为该管道中的应用程序代码永远不会同时被调用。
+
+**线程模型**
+
+您希望在运行Spring WebFlux的服务器上看到哪些线程？
+
+. 在“vanilla”Spring WebFlux服务器上（例如，没有数据访问或其他可选依赖项），您可以期望服务器有一个线程，而其他几个用于请求处理（通常与CPU核心数一样多）。但是，Servlet容器在启动时候合可以有更多线程（例如，在Tomcat上为10），以支持servlet（阻塞）I/O和servlet 3.1（非阻塞）I / O使用。
+. reactive WebClient以事件循环方式运行。因此，您可以看到与此相关的少量固定数量的处理线程（例如，reactor-http-nio-Reactor Netty connector）。但是，如果Reactor Netty同时用于客户端和服务器，则默认情况下两者共享事件循环资源。
+. Reactor和RxJava提供称了线程池抽象，叫Schedulers,以与publishOn操作一起使用,用于将处理切换到不同线程池。Schedulers具有名称,建议指定为特定并发策略的名称 - 例如，“parallel”（对于CPU密集型的工作）或“elastic”（I/O密集型工作）。如果您看到这样的线程，则意味着某些代码正在使用特定的线程池Scheduler策略.
+. 数据访问库和其他第三方依赖项也可以创建和使用自己的线程。
+
+**配置**
+
+Spring Framework不支持启动和停止 服务器。要为服务器配置线程模型，需要使用特定于服务器的配置API，或者，如果使用Spring Boot，请检查特定于服务器的Spring Boot配置选项。你可以直接配置WebClient
+
+
+=== Reactive 核心
+
+该spring-web模块包含以下对reactive Web应用程序的基础支持：
+
+. 服务端请求处理,有两个级别支持:
+  . HttpHandler: 具有非阻塞I/O和Reactive Streams背压的http请求的基本合约，以及Reactor Netty，Undertow，Tomcat，Jetty和任何Servlet 3.1+容器的适配器。
+  . WebHandler API:用于请求处理的更高级别的通用Web API，在此基础上构建具体的编程模型，例如带注释的控制器和函数式端点。
+. 对于客户端，有一个基本ClientHttpConnector合约来执行具有非阻塞I/O和Reactive Streams背压的HTTP请求，以及Reactor Netty和reactive Jetty HttpClient的适配器 。应用程序中使用的更高级别的WebClient构建在此基本合约上。
+. 对于客户端和服务器，用于序列化和反序列化HTTP请求和响应内容的编解码器。
+
+==== HttpHandler
+HttpHandler 是一个简单的契约，只有一个方法来处理请求和响应。它是故意最小的，它的主要目的是成为不同HTTP服务器API的最小抽象。下表描述了支持的服务器API：
+
+|===
+|服务器名称|使用的服务器API|Reactive Streams支持
+
+|Netty|Netty API|Reactor Netty
+|Undertow|Undertow API|spring-web：Undertow的Reactive Streams桥接器
+|Tomcat|Servlet 3.1非阻塞IO,tomcat api读取写入ByteBuffers vs byte[] |spring-web: Servlet 3.1 非阻塞IOReactive Streams桥接器
+|Jetty|Servlet 3.1非阻塞IO,jetty api读取写入ByteBuffers vs byte[]|spring-web: Servlet 3.1 非阻塞IOReactive
+|Servlet 3.1 container|Servlet 3.1非阻塞IO|spring-web: Servlet 3.1 非阻塞IOReactive
+|===
+
+下表描述了服务器的依赖（另请参阅 支持的 https://github.com/spring-projects/spring-framework/wiki/What%27s-New-in-the-Spring-Framework[版本] ）：
+|===
+|Server name|	Group id|	Artifact name
+|Reactor Netty|io.projectreactor.netty|reactor-netty
+|Undertow|io.undertow|undertow-core
+|Tomcat|org.apache.tomcat.embed|tomcat-embed-core
+|Jetty|org.eclipse.jetty|jetty-server, jetty-servlet
+|===
+
+下面的代码片段显示如何使用特定服务器的HttpHandler适配器
+
+.Reactor Netty
+[source,java]
+----
+HttpHandler handler = ...
+ReactorHttpHandlerAdapter adapter = new ReactorHttpHandlerAdapter(handler);
+HttpServer.create(host, port).newHandler(adapter).block();
+----
+
+.Undertow
+[source,java]
+----
+HttpHandler handler = ...
+UndertowHttpHandlerAdapter adapter = new UndertowHttpHandlerAdapter(handler);
+Undertow server = Undertow.builder().addHttpListener(port, host).setHandler(adapter).build();
+server.start();
+----
+
+.Tomcat
+[source,java]
+----
+HttpHandler handler = ...
+Servlet servlet = new TomcatHttpHandlerAdapter(handler);
+
+Tomcat server = new Tomcat();
+File base = new File(System.getProperty("java.io.tmpdir"));
+Context rootContext = server.addContext("", base.getAbsolutePath());
+Tomcat.addServlet(rootContext, "main", servlet);
+rootContext.addServletMappingDecoded("/", "main");
+server.setHost(host);
+server.setPort(port);
+server.start();
+----
+
+.Jetty
+[source,java]
+----
+HttpHandler handler = ...
+Servlet servlet = new JettyHttpHandlerAdapter(handler);
+
+Server server = new Server();
+ServletContextHandler contextHandler = new ServletContextHandler(server, "");
+contextHandler.addServlet(new ServletHolder(servlet), "/");
+contextHandler.start();
+
+ServerConnector connector = new ServerConnector(server);
+connector.setHost(host);
+connector.setPort(port);
+server.addConnector(connector);
+server.start();
+----
+
+Servlet 3.1+ Container
+
+要将其作为WAR部署到任何servlet 3.1+容器，可以在WAR中扩展并包含abstractReactiveWebInitializer。该类用servlethtpHandleradapter包装httphandler，并将其注册为servlet。
+
+==== WebHandler
+该org.springframework.web.server软件包以HttpHandler合同为基础，提供通用Web API，用于通过多个WebExceptionHandler，多个 WebFilter和单个 WebHandler组成一个链来处理请求.这些处理链可以使用WebHttpHandlerBuilder 组合在一起,前提是这些组件必须在相同的ApplicationContext .
+
+HttpHandler的目的是抽象集成不同的HTTP服务器,WebHandler则是提供web应用中常用的一些特性:
+. 具有属性的用户会话。
+. 请求属性。
+. 处理Locale or Principal请求
+. 访问已分析和缓存的表单数据
+. multipart 数据的抽象
+
+===== 特殊的bean类型
+
+下表列出了WebHttpHandlerBuilder可以在Spring ApplicationContext中自动检测的组件，或者可以直接在其中注册的组件：
+
+|===
+|bean名称|bean类型|数量|描述
+
+|any|WebExceptionHandler|0..N|处理WebFilter链和目标WebHandler的异常
+|any|WebFilter|0..N|拦截器,在请求到达目标WebHandler之前和目标WebHandler返回之后
+|webHandler|WebHandler|1|处理请求
+|webSessionManager|WebSessionManager|0..1|会话管理器,通过ServerWebExchange上的方法暴露,默认实例是DefaultWebSessionManager
+|serverCodecConfigurer|ServerCodecConfigurer|0..1|用于访问HttpMessageReader实例以解析表单数据和多部分数据，通过ServerWebExchange上的方法暴露,默认实例ServerCodecConfigurer.create()。
+|localeContextResolver|LocaleContextResolver|0..1|默认实例AcceptHeaderLocaleContextResolver
+|forwardedHeaderTransformer|ForwardedHeaderTransformer|0..1|处理forwarded 请求头,默认不开启
+|===
+
+===== 表单数据
+
+ServerWebExchange 公开下面的方法获取表单数据:
+[source,java]
+----
+Mono<MultiValueMap<String, String>> getFormData();
+----
+
+DefaultServerWebExchange 使用配置的HttpMessageReader 解析数据(application/x-www-form-urlencoded)成MultiValueMap,默认
+ServerCodecConfigurer 配置FormHttpMessageReader 解析表单数据
+
+===== Multipart Data
+
+ServerWebExchange 公开下面的方法获取Multipart数据
+
+[source,java]
+----
+Mono<MultiValueMap<String, Part>> getMultipartData();
+----
+
+DefaultServerWebExchange 使用配置的HttpMessageReader<MultiValueMap<String, Part>>解析数据(multipart/form-data)到MultiValueMap.目前， Synchronoss NIO Multipart是唯一受支持的第三方库，也是我们唯一知道的用于对多部分请求进行非阻塞解析的库。它是通过ServerCodecConfigurerbean 启用的（请参阅Web Handler API）。
+
+要以流方式解析多部分数据，您可以使用HttpMessageReader<Part>返回Flux<Part>格式的数据 。例如，在带注释的控制器中，按名称使用 @RequestPart隐含Map式访问各个部分，因此需要完整地解析多部分数据。相比之下，您可以使用@RequestBody解码内容Flux<Part>而不收集到MultiValueMap。例如,@RequestPart注解类map类型的参数,如果要按照名称访问其值,需要完全解析multipart 数据之后才可以,相比之下，您可以使用@RequestBody解码内容到Flux<Part>而不收集到MultiValueMap。
+
+===== 转发头
+
+当请求通过代理（例如负载平衡器）时，主机，端口和协议可能会发生变化，从客户的角度来看，这会产生一个挑战，即创建指向正确主机，端口和协议的链接。
+
+RFC 7239提供了Forwarded HTTP请求头转发有关原始请求的信息,还有一些非标准头,X-Forwarded-Host, X-Forwarded-Port, X-Forwarded-Proto, X-Forwarded-Ssl, 和 X-Forwarded-Prefix.
+
+ForwardedHeaderTransformer 组件根据forwarded 请求头可以修改主机,端口,协议等信息,然后再删除这些标头.你可以将其声明为名称为forwardedHeaderTransformer的bean,会被spring自动探测和使用.
+
+转发标头存在安全注意事项，因为应用程序无法知道标头是由代理按预期添加还是由恶意客户端添加。这就是为什么应该配置信任边界的代理来删除来自外部的不受信任的转发流量。您还可以配置ForwardedHeaderTransformerwith的属性removeOnly=true，在这种情况下，它会删除但不使用标头。
+
+NOTE: 在5.1中ForwardedHeaderFilter被弃用和取代， ForwardedHeaderTransformer因此在创建交换之前可以更早地处理转发的头。如果仍然配置了过滤器，不会将其添加到过滤器列表中。
+
+==== 过滤器
+
+在WebHandlerAPI中，你可以使用WebFilter在拦截器链和目标WebHandler执行拦截逻辑.可以通过声明的方式配置,使用@Order注解设置优先级.
+
+**CORS**
+Spring WebFlux通过控制器上的注释为CORS配置提供细粒度的支持。但是，当您将其与Spring Security一起使用时，我们建议依赖内置 CorsFilter，必须在Spring Security的过滤器链之前进行排序。
+
+==== 异常
+
+在WebHandlerAPI中，您可以使用WebExceptionHandler来处理WebFilter实例链和目标WebHandler中的异常。使用 WebFlux配置时，注册WebExceptionHandler就像将它声明为Spring bean一样简单，并且（可选）通过使用@Orderbean声明或实现来Ordered接口来定义优先级。下表描述了可用的WebExceptionHandler实现：
+
+|===
+|异常处理程序|描述
+
+|ResponseStatusExceptionHandler|ResponseStatusException 设置异常的HTTP状态代码,提供对类型异常的处理 。
+|WebFluxResponseStatusExceptionHandler|其扩展ResponseStatusExceptionHandler,还可以使用@ResponseStatus指定异常对应的HTTP状态代码
+|===
+
+==== 编解码器
+这些spring-web和spring-core模块提供了更高级别对象序列化和反序列化支持.以下描述了这种支持：
+. Encoder和Decoder是独立于HTTP编码和解码内容的低级合同。
+. HttpMessageReader和HttpMessageWriter是编码和解码HTTP消息内容的合同。
+. Encoder 可以被包装成EncoderHttpMessageWriter 以使用web应用,同理Decoder 被包装成DecoderHttpMessageReader
+. DataBuffer抽象不同的byte buffer表示(例如 Netty ByteBuf, java.nio.ByteBuffer),所有的codecs 需要依赖其工作.
+
+该spring-core模块提供byte[]，ByteBuffer，DataBuffer，Resource，和 String编码器和解码器实现。该spring-web模块提供了Jackson JSON，Jackson Smile，JAXB2，Protocol Buffers和其他编码器和解码器，以及用于表单数据，多部分内容，服务器发送事件等的WebHTTP消息读取器和写入器实现。
+
+ClientCodecConfigurer和ServerCodecConfigurer通常用于配置和自定义要在应用程序中使用的编解码器。
+
+**jackson JSON**
+当Jackson库存在时，JSON和二进制JSON（Smile）都受支持。
+该Jackson2Decoder如下工作：
+
+. Jackson的异步非阻塞解析器用于将字节块流聚合成TokenBuffer,各自表示JSON对象。
+. 每一个TokenBuffer都传递给ObjectMapper，创造一个更高层次的对象。
+. 当解码单值发布者（例如Mono）时，存在一个TokenBuffer。
+. 当解码多值发布者（例如Flux）时，只要为完全形成的对象接收到足够的字节，就将每个TokenBuffer者传递给ObjectMapper。输入内容可以是JSON数组，如果内容类型是“application/stream+json” ，则可以是行分隔的JSON。
+
+该Jackson2Encoder如下工作：
+
+. 对于单值发布者（例如Mono），只需ObjectMapper将其序列化即可
+. 对于具有“application/json”的多值发布者，默认情况下使用 Flux#collectToList()，然后序列化生成的集合。
+. 对于具有流媒体类型（如application/stream+jsonor）的多值发布者， application/stream+x-jackson-smile使用行分隔的JSON格式单独编码，写入和刷新每个值 。
+. 对于SSE，Jackson2Encoder每个事件都会调用，并刷新输出以确保无延迟地传递。
+
+**Form data**
+FormHttpMessageReader和FormHttpMessageWriter支持解码和编码application/x-www-form-urlencoded格式的内容.
+
+在服务器端，通常需要从多个位置访问表单内容， ServerWebExchange提供一种专用getFormData()方法，通过FormHttpMessageReader解析内容，然后缓存结果以便重复访问。
+
+使用一次getFormData()后，无法再从请求正文中读取原始原始内容。出于这个原因，应用程序通过ServerWebExchange 始终一致地访问缓存的表单数据，而不是从原始请求正文中读取。
+
+**Multipart**
+
+MultipartHttpMessageReader和MultipartHttpMessageWriter支持解码和编码“multipart/form-data”内容。然后MultipartHttpMessageReader委托给另一个HttpMessageReader解析为Flux<Part>，然后简单地将parts收集到一个MultiValueMap。目前， Synchronoss NIO Multipart用于实际解析。
+
+在服务器端，可能需要从多个位置访问多部分表单内容，ServerWebExchange提供一种专用getMultipartData()方法，通过MultipartHttpMessageReader解析内容，然后缓存结果以便重复访问。
+
+使用一次getMultipartData()后，无法再从请求正文中读取原始原始内容。出于这个原因，应用程序必须始终使用getMultipartData()重复访问数据或者类似map的访问，或者依赖于 SynchronossPartHttpMessageReader一次性访问Flux<Part>。
+
+**Streaming**
+
+当流传输到HTTP响应（例如，text/event-stream， application/stream+json），它周期性地发送的数据，一边快速检测客户端是都断开。这样的发送可以是 comment-only，空SSE事件或任何其他“无操作”数据，其将有效地用作心跳。
+
+**DataBuffer**
+
+DataBuffer是WebFlux中字节缓冲区的表示。参考文献的Spring Core部分在Data Buffers和Codecs一节中有更多内容 。要理解的关键点是在某些服务器（如Netty）上，字节缓冲区被池化并引用计数，并且必须在使用时释放以避免内存泄漏。
+
+WebFlux应用程序通常不需要关心这些问题，除非它们直接使用或生成数据缓冲区，而不是依赖于编解码器与更高级别的对象进行转换。或者除非他们选择创建自定义编解码器。对于此类情况，请查看数据缓冲区和编解码器中的信息，尤其是有关使用DataBuffer的部分。
+
+==== 日志
+
+Spring WebFlux中的DEBUG级别日志记录旨在实现紧凑，简约和人性化。它侧重于高价值的信息，这些信息对于仅在调试特定问题时有用.
+
+TRACE级别日志记录通常遵循与DEBUG相同的原则（例如也不应该是一个firehose），但可以用于调试任何问题。此外，一些日志消息可能在TRACE vs DEBUG中显示不同的详细程度。
+
+良好的日志记录来自使用日志的经验。如果您发现任何不符合既定目标的事件，请告诉我们。
+
+**记录ID**
+
+在WebFlux中，可以在多个线程上执行单个请求，并且线程ID对于关联属于特定请求的日志消息没有用。这就是默认情况下WebFlux日志消息以特定于请求的ID为前缀的原因。
+
+在服务器端，日志ID存储在ServerWebExchangeattribute（LOG_ID_ATTRIBUTE）中，而基于该ID的完全格式化的前缀可通过 ServerWebExchange#getLogPrefix()获取。另一方面WebClient，日志ID存储在 ClientRequestattribute（LOG_ID_ATTRIBUTE）中，而完整格式化的前缀可通过ClientRequest#logPrefix()获取。
+
+**敏感数据**
+DEBUG和TRACE日志记录可以记录敏感信息。这就是默认情况下屏蔽表单参数和标头的原因，您必须明确启用,允许它们记录完整的日志。
+
+以下示例显示了如何对服务器端请求执行此操作：
+[source,java]
+----
+@Configuration
+@EnableWebFlux
+class MyConfig implements WebFluxConfigurer {
+
+    @Override
+    public void configureHttpMessageCodecs(ServerCodecConfigurer configurer) {
+        configurer.defaultCodecs().enableLoggingRequestDetails(true);
+    }
+}
+----
+
+以下示例显示了如何对客户端请求执行此操作：
+
+[source,java]
+----
+Consumer<ClientCodecConfigurer> consumer = configurer ->
+        configurer.defaultCodecs().enableLoggingRequestDetails(true);
+
+WebClient webClient = WebClient.builder()
+        .exchangeStrategies(ExchangeStrategies.builder().codecs(consumer).build())
+        .build();
+----
+
+=== DispatcherHandler
+
+类似于springmvc,webflux也有一个中心的DispatcherHandler.提供了一种用于请求处理的共享算法，而实际的工作是由可配置的，委托组件来执行。该模型非常灵活，支持多种工作流程。
+
+DispatcherHandler从Spring配置中发现它需要的委托组件。它本身也被设计为一个Spring bean，ApplicationContextAware 用于访问它运行的上下文。如果DispatcherHandler声明的bean名称为webHandler，则他被WebHttpHandlerBuilder发现，然后组合成请求处理链，如WebHandlerAPI中所述。
+
+WebFlux应用程序中的Spring配置通常包含：
+
+. DispatcherHandler bean,name是webHandler
+. WebFilter和WebExceptionHandler bean
+. DispatcherHandler 特殊的bean
+配置WebHttpHandlerBuilder用于构建处理链，如以下示例所示：
+[source,java]
+----
+ApplicationContext context = ...
+HttpHandler handler = WebHttpHandlerBuilder.applicationContext(context);
+----
+
+返回的handler被server适配器使用
+
+==== 特殊bean
+
+DispatcherHandler 委托特殊的bean处理请求和渲染响应.你可以自定这些bean的属性,扩展甚至替换他们.
+
+下表列出了DispatcherHandler需要的特殊bean.
+
+|===
+|类型|说明
+
+|HandlerMapping|将请求映射到处理程序。映射基于某些标准，其细节因HandlerMapping实现而异- 带注释的控制器，简单的URL模式映射等。 主要HandlerMapping实现RequestMappingHandlerMapping用于 @RequestMapping注释方法，RouterFunctionMapping函数式端点路由以及SimpleUrlHandlerMappingURI路径模式和WebHandler实例的显式注册。
+|HandlerAdapter|DispatcherHandler无论实际调用处理程序如何，都可以帮助调用映射到请求的处理程序。例如，调用带注释的控制器需要解析注释
+|HandlerResultHandler|处理程序调用的结果并完成响应
+|===
+
+==== webflux配置
+
+==== 处理过程
+
+DispatcherHandler处理请求过程如下:
+. HandlerMapping要求每个请求找到匹配的处理程序，并使用第一个匹配
+. 如果找到一个处理程序，并执行，它将执行HandlerAdapter的返回值公开为HandlerResult。
+. HandlerResult被提供给一个适当的HandlerResultHandler,直接写入响应或者交由视图渲染。
+
+==== 结果处理
+
+调用HandlerAdapter的返回值被包装成HandlerResult,并传递给第一个支持的HandlerResultHandler ,下表列出了所有可用的HandlerResultHandler :
+
+|===
+|类型|返回值|顺序
+
+|ResponseEntityResultHandler|ResponseEntity,通常来自@Controller实例。|0
+|ServerResponseResultHandler|ServerResponse，通常来自函数式端点。|0
+|ResponseBodyResultHandler|处理@ResponseBody方法或@RestController类的返回值。|100
+|ViewResolutionResultHandler|CharSequence, View, Model, Map, Rendering,或任何被当做model的对象|Integer.MAX_VALUE
+|===
+==== 异常
+
+
+
+==== 视图方案

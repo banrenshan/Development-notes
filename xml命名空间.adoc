@@ -1,0 +1,99 @@
+= xml命名空间
+
+一个 xml 文档中如果包含如下两种定义不同， 但是名称相同的元素， xml 解析器是无法解析的， 因为它不能确定当你调用 document.getElementsByTagName("book") 时应该返回哪个元素。
+[source,xml]
+----
+<!-- 这里的 table 元素描述的是一个表格-->
+<table>
+   <tr>
+   <td>Apples</td>
+   <td>Bananas</td>
+   </tr>
+</table>
+<!-- 这里的 table 元素描述的是一个家居桌子-->
+<table>
+   <name>African Coffee Table</name>
+   <width>80</width>
+   <length>120</length>
+</table>
+----
+
+如果给他们的名字添加一个前缀， 则命名冲突的问题就可以解决。
+
+[source,xml]
+----
+<!-- 这里的 table 元素描述的是一个表格-->
+<h:table>  <!--添加了前缀 h -->
+   <h:tr>
+   <h:td>Apples</h:td>
+   <h:td>Bananas</h:td>
+   </h:tr>
+</h:table>
+<!-- 这里的 table 元素描述的是一个表格-->
+<f:table> <!--添加了前缀 f -->
+   <f:name>African Coffee Table</f:name>
+   <f:width>80</f:width>
+   <f:length>120</f:length>
+</f:table>
+----
+
+但是， 在一个拥有众多元素的文档中， 仅仅拥有前缀， 也不能完全避免命名冲突的问题。
+
+此时， 命名空间就诞生了， 我们可以为元素定义一个命名空间， 将一个很长的， 可以保证全局唯一性的字符串与该元素关联起来。这样就可以避免命名冲突了。
+
+但是如何保证那个较长的字符串全局唯一呢， 最好的方式莫过于使用 统一资源标识符（Uniform Resource Identifier，URI) 了， 而我们最常见的 URI 就是平时经常访问的网址 URL 了。
+
+[source,xml]
+----
+xmlns:namespace-prefix="namespaceURI"
+----
+
+[source,java]
+----
+<!-- 这里的 table 元素描述的是一个表格-->
+<h:table xmlns:h="http://www.w3.org/TR/html4/">
+   <h:tr>
+   <h:td>Apples</h:td>
+   <h:td>Bananas</h:td>
+   </h:tr>
+</h:table>
+<!-- 这里的 table 元素描述的是一个表格-->
+<f:table xmlns:f="http://www.w3school.com.cn/furniture">
+   <f:name>African Coffee Table</f:name>
+   <f:width>80</f:width>
+   <f:length>120</f:length>
+</f:table>
+----
+
+NOTE: 对于命名空间的标识符, URI 的作用仅仅是保证唯一性， 它并不需要对应一个可以访问的资源或文件 ！ 但是， 有很多公司都会让 namespace 的 URI 指向一个包含该命名空间信息的网页
+
+我们来看一下maven定义的xml文件的头部
+
+[source,xml]
+----
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://maven.apache.org/POM/4.0.0"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+----
+
+xmlns:xsi , xmlns, xsi:schmeLocation 这些看上去相近的属性是什么含义?
+
+细心的童鞋会注意到， project 元素前面并没有前缀。 这里实际上使用的是默认命名空间（default naming space）。 它的语法如下：
+
+[source,xml]
+----
+<elementName xmlns="namespaceURI">
+----
+
+使用默认命名空间的作用是， 该元素内部的子元素都会默认属于该命名空间下， 我们不需要为他们一一添加命名空间前缀。
+
+
+xmlns:xsi 定义了一个命名空间前缀 xsi 对应的唯一字符串 http://www.w3.org/2001/XMLSchema-instance。 但是读者会发现， 这个 xmlns:xsi 在不同的 xml 文档中似乎都会出现。 这是因为， xsi 已经成为了一个业界默认的用于 XSD(（XML Schema Definition) 文件的命名空间。 而 XSD 文件（也常常称为 Schema 文件）是用来定义 xml 文档结构的。
+
+NOTE: XML 解析器可以根据 一个 XSD 文件的内容来解析另一个 XML 文件， 判断该文件的结构是否和 XSD 文件中定义的一致。 XSD 文件 可以理解为 XML 文档可以自定义的语法或格式检查器。
+
+有了上述的理解， 再来看xsi:schemaLocation,他的语法格式其实是 ** xsi:schemaLocation = "键" “值” **
+
+. 前一个“键” http://maven.apache.org/POM/4.0.0 指代 【命名空间】， 只是一个全局唯一字符串而已
+
+. 后一个值指代 【XSD location URI】 , 这个值指示了前一个命名空间所对应的 XSD 文件的位置， xml parser 可以利用这个信息获取到 XSD 文件， 从而通过 XSD 文件对 
+所有属于 命名空间 http://maven.apache.org/POM/4.0.0 的元素结构进行校验， 因此这个值必然是可以访问的， 且访问到的内容是一个 XSD 文件的内容

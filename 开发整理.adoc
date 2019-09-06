@@ -1,0 +1,183 @@
+---
+title: 开发笔记
+---
+
+
+= 开发笔记
+:toc: left
+:icons: font
+:imagesdir: /blog/images
+
+
+== logback格式化输出
+
+logback使用{}做占位符,例如
+
+[source,java]
+----
+logger.info("我的名字是:{}","banrenshan");
+----
+
+== java时间和mysql时间时区不一致问题
+
+Java中属性是util.date，表中对应的字段类型是datetime，然后Java代码插入到MySQL数据库中后，发现时间相差13个小时.在jdbc驱动代码中,我发现,当JDBC和mysql建立连接时候会获取mysql的time_zone变量的值,如果time_zone是SYSTEM,会获取mysql的system_time_zone的值作为协调时区.我们查看一下MYSQL上这个变量的值:
+
+[source,shell]
+----
+mysql> show variables like '%time_zone%';
++------------------+--------+
+| Variable_name    | Value  |
++------------------+--------+
+| system_time_zone | CST    |
+| time_zone        | SYSTEM |
++------------------+--------+
+----
+
+由此得知JAVA JDBC获取的时间CST,而CST有多重含义:
+
+. 美国中部时间 Central Standard Time (USA) UTC-06:00
+. 澳大利亚中部时间 Central Standard Time (Australia) UTC+09:30
+. 中国标准时 China Standard Time UTC+08:00
+. 古巴标准时 Cuba Standard Time UTC-04:00
+
+JDBC把CST识别成了美国时间.虽然new Date()是自己服务区的时间(东8区),但是在转化成mysql datetime的时候,时区变成CST,造成了时间存储的错误.原因就很清楚了,JDBC 误认为会话时区在 CST-5
+JBDC 把 Timestamp+0 转为 CST-5 的 String-5
+MySQL 认为会话时区在 CST+8，将 String-5 转为 Timestamp-13
+
+解决方案一:
+
+[source,shell]
+----
+mysql> set global time_zone = '+08:00';
+Query OK, 0 rows affected (0.00 sec)
+
+mysql> set time_zone = '+08:00';
+Query OK, 0 rows affected (0.00 sec)
+----
+
+或者修改 my.cnf 文件，在 [mysqld] 节下增加 default-time-zone = '+08:00'。
+修改时区操作影响深远，需要重启 MySQL 服务器，建议在维护时间进行。
+
+解决方案二:
+
+[source,shell]
+----
+jdbc:mysql://172.xx.xx.xx:3306/test?serverTimezone=CTT
+----
+CTT:是中国台湾时间
+
+== StopWatch测试代码运行时间
+
+
+
+== HttpRequest在代理的情况下获取IP
+
+应用经过ngnix等代理之后,request.getRemoteAddr默认获取的是代理机器的IP,而不是客户端的真实IP,spring boot中的`server.tomcat.remote-ip-header`允许指定某个请求头,从这个请求头获取真实的IP
+
+== java程序调用浏览器打开网页
+
+. 打开特定的浏览器
+[source,java]
+----
+public static void main(String args[]) {
+		try {
+			ProcessBuilder proc = new ProcessBuilder(
+					"C:\\Program Files\\Internet Explorer\\iexplore.exe",
+					"http://blog.csdn.net/");
+			proc.start();
+		} catch (Exception e) {
+			System.out.println("Error executing progarm.");
+		}
+	}
+
+----
+
+.打开系统默认浏览器
+[source,java]
+----
+		if (java.awt.Desktop.isDesktopSupported()) {
+			try {
+				// 创建一个URI实例
+				java.net.URI uri = java.net.URI.create("http://www.cnblogs.com/lsgwr/");
+				// 获取当前系统桌面扩展
+				java.awt.Desktop dp = java.awt.Desktop.getDesktop();
+				// 判断系统桌面是否支持要执行的功能
+				if (dp.isSupported(java.awt.Desktop.Action.BROWSE)) {
+					// 获取系统默认浏览器打开链接
+					dp.browse(uri);
+				}
+
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+----
+
+.打开系统默认浏览器
+[source,java]
+----
+try {
+			 Runtime.getRuntime().exec(
+			 "cmd   /c   start   http://bbs.csdn.net/topics/390157559 ");
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+
+----
+
+.打开系统默认浏览器
+[source,java]
+----
+String osName = System.getProperty("os.name", "");
+		if (osName.startsWith("Mac OS")) {
+			// 苹果的打开方式
+			Class fileMgr = Class.forName("com.apple.eio.FileManager");
+			Method openURL = fileMgr.getDeclaredMethod("openURL",
+					new Class[] { String.class });
+			openURL.invoke(null, new Object[] { url });
+		} else if (osName.startsWith("Windows")) {
+			// windows的打开方式。
+			Runtime.getRuntime().exec(
+					"rundll32 url.dll,FileProtocolHandler " + url);
+		} else {
+			// Unix or Linux的打开方式
+			String[] browsers = { "firefox", "opera", "konqueror", "epiphany",
+					"mozilla", "netscape" };
+			String browser = null;
+			for (int count = 0; count < browsers.length && browser == null; count++)
+				// 执行代码，在brower有值后跳出，
+				// 这里是如果进程创建成功了，==0是表示正常结束。
+				if (Runtime.getRuntime()
+						.exec(new String[] { "which", browsers[count] })
+						.waitFor() == 0)
+					browser = browsers[count];
+			if (browser == null)
+				throw new Exception("Could not find web browser");
+			else
+				// 这个值在上面已经成功的得到了一个进程。
+				Runtime.getRuntime().exec(new String[] { browser, url });
+		}
+
+----
+
+https://blog.csdn.net/zp357252539/article/details/77896257[参考]
+
+== mysql utf8和utf8mb4编码格式
+
+MySQL在5.5.3之后增加了这个utf8mb4的编码，mb4就是most bytes 4的意思，专门用来兼容四字节的unicode。好在utf8mb4是utf8的超集，除了将编码改为utf8mb4外不需要做其他转换。当然，为了节省空间，一般情况下使用utf8也就够了。
+
+既然utf8能够存下大部分中文汉字,那为什么还要使用utf8mb4呢? 原来mysql支持的 utf8 编码最大字符长度为 3 字节，如果遇到 4 字节的宽字符就会插入异常了。三个字节的 UTF-8 最大能编码的 Unicode 字符是 0xffff，也就是 Unicode 中的基本多文种平面(BMP)。也就是说，任何不在基本多文本平面的 Unicode字符，都无法使用 Mysql 的 utf8 字符集存储。包括 Emoji 表情(Emoji 是一种特殊的 Unicode 编码，常见于 ios 和 android 手机上)，和很多不常用的汉字，以及任何新增的 Unicode 字符等等。
+
+
+== spring boot 属性文件server.session.cookie.http-only不起作用
+
+当spring boot使用tomcat作为嵌入容器时，该属性不起作用.如果是jetty则可以正常使用。解决方案是在项目中自定义tomcat的配置，例如：
+
+[source,java]
+----
+@Bean
+public WebServerFactoryCustomizer<TomcatServletWebServerFactory> tomcatCustomizer() {
+    return (tomcat) -> tomcat
+            .addContextCustomizers((context) -> context.setUseHttpOnly(false));
+}
+----

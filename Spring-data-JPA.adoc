@@ -1,0 +1,117 @@
+= Spring-data-JPA
+
+== 2. 使用Spring Data repository 
+
+Spring Data repository 抽象的目标是减少数据访问层的样板代码数量。
+
+=== 2.1. 核心概念
+
+Spring Data repository 抽象中的中心接口是Repository（该接口没有任何方法）.它需要管理域类以及域类的ID类型作为泛型参数。该接口主要作为标记接口来捕获要使用的类型，并帮助您发现扩展该接口的接口。CrudRepository为正在管理的实体类提供了复杂的CRUD功能。
+[source,java]
+----
+public interface CrudRepository<T, ID extends Serializable>
+  extends Repository<T, ID> {
+
+  <S extends T> S save(S entity);      <1>
+
+  Optional<T> findById(ID primaryKey);  <2>
+
+  Iterable<T> findAll();               <3>
+
+  long count();                        <4>
+
+  void delete(T entity);               <5>
+
+  boolean existsById(ID primaryKey);   <6>
+
+  // … more functionality omitted.
+}
+----
+
+<1> 保存给定的实体
+<2> 返回由给定ID标识的实体。
+<3> f返回所有的实体
+<4> 返回实体的数量
+<5> 删除给定的实体
+<6> 指示是否存在给定ID的实体。
+
+在CrudRepository之上，有一个PagingAndSortingRepository抽象，它增加了额外的方法来简化对实体的分页访问：
+[source,java]
+----
+public interface PagingAndSortingRepository<T, ID extends Serializable>
+  extends CrudRepository<T, ID> {
+
+  Iterable<T> findAll(Sort sort);
+
+  Page<T> findAll(Pageable pageable);
+}
+----
+要以20的页面大小访问用户的第二页，您可以执行以下操作：
+[source,java]
+----
+PagingAndSortingRepository<User, Long> repository = // … get access to a bean
+Page<User> users = repository.findAll(new PageRequest(1, 20));
+----
+
+此处未翻译
+
+=== 2.2. 查询方法
+
+标准CRUD功能的repository通常会在底层数据存储上进行查询。 使用Spring Data，声明这些查询变成了一个四步过程：
+
+1.声明一个扩展Repository或其子接口的接口，并指定它应该处理的域类和ID类型，如以下示例所示：
+----
+interface PersonRepository extends Repository<Person, Long> { … }
+----
+2.在接口上声明查询方法
+[source,java]
+----
+interface PersonRepository extends Repository<Person, Long> {
+  List<Person> findByLastname(String lastname);
+}
+----
+3.设置Spring以使用JavaConfig或XML配置为这些接口创建代理实例。
+	a.使用java配置
+	[source,java]
+	----
+	import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+
+	@EnableJpaRepositories
+	class Config {}
+	----
+	b.使用XML配置
+	[source,xml]
+	----
+	<?xml version="1.0" encoding="UTF-8"?>
+	<beans xmlns="http://www.springframework.org/schema/beans"
+	   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	   xmlns:jpa="http://www.springframework.org/schema/data/jpa"
+	   xsi:schemaLocation="http://www.springframework.org/schema/beans
+	     http://www.springframework.org/schema/beans/spring-beans.xsd
+	     http://www.springframework.org/schema/data/jpa
+	     http://www.springframework.org/schema/data/jpa/spring-jpa.xsd">
+
+	   <jpa:repositories base-package="com.acme.repositories"/>
+
+	</beans>
+	----
+NOTE: Java配置没有显式的配置扫描包，因为缺省情况下会使用注释类的包。 要定制要扫描的软件包，请使用数据存储库特定的存储库@EnableJpaRepositories注解的basePackage属性。
+
+4. 注入repository实例并使用它，如以下示例所示：
+[source,java]
+----
+class SomeClient {
+
+  private final PersonRepository repository;
+
+  SomeClient(PersonRepository repository) {
+    this.repository = repository;
+  }
+
+  void doSomething() {
+    List<Person> persons = repository.findByLastname("Matthews");
+  }
+}
+----
+
+=== 2.3. 定义Repository接口

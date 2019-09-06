@@ -1,0 +1,15 @@
+---
+title: JHipster 
+---
+
+= JHipster 
+:toc: left
+:icons: font
+:imagesdir: /blog/images
+
+== 环境搭建
+
+1.安装jdk
+2.安装nodejs
+3.安装yo:npm install -g yo
+4.安装JHipster: npm install -g generator-jhipster

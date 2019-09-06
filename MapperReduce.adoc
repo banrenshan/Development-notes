@@ -1,0 +1,32 @@
+---
+title: MapReduce
+---
+
+= MapReduce 
+:toc: left
+:icons: font
+:imagesdir: /blog/images
+
+== 优缺点
+
+=== 优点
+. 易于编程
+ 简单的实现一个接口,就可以实现分布式程序
+
+. 良好的扩展性
+
+. 高容错性
+
+. 适合PB级以上的数据处理
+
+=== 缺点
+
+. 不擅长实时计算
+
+. 不擅长流式计算
+
+. 不擅长有向图计算
+
+ == MapReduce原理
+
+ 

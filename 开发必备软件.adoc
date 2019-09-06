@@ -1,0 +1,53 @@
+---
+title: 开发必备
+---
+
+== 装机软件
+
+. 谷歌浏览器
+    . FE助手
+    . Restlet client
+. JDK
+. IDEA
+    . request mapper<<aa>>
+    . RESTfulToolkits
+    . IDE Features Trainer
+    . Translator
+    . AsciiDoc
+    . Lombok
+    . GenerateAllSeeter
+    . Maven Helper
+    . GsonFormat
+    . p3c
+    . ignore
+. sdk
+. Andriod studio
+. nodejs
+. git
+. ruby
+. asciidoc
+. Sublime Text3
+. Fiddler
+. Navicat Premium
+. Oracle VM virtualBox
+    . linux
+    . docker
+    . mysql
+    . redis
+    . MQ
+. Redis Desktop Manager
+. PostMan
+. XShell
+. XFTP
+. Maven
+. Tomcat
+
+
+== 技术文档
+
+. https://www.objectdb.com/java/jpa[最好,最详细的JPA文档]
+. https://www.oracle.com/technetwork/cn/middleware/ias/toplink-jpa-annotations-100895-zhs.html[JPA官方中文文档]
+. https://code.makery.ch/zh-cn/library/javafx-tutorial/part1/[javafx快速入门]
+. https://gradle-ssh-plugin.github.io/docs/[Gradle打包上传到服务器插件]
+. https://legacy.gitbook.com/book/docshome/springboot/details[SpringBoot 2.x 中文文档]
+. https://github.com/muyinchen/Spring-Framework-5.0.0.M3-CN/blob/master/SUMMARY.md[spring3中文文档]

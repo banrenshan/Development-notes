@@ -1,0 +1,60 @@
+= 内部类
+
+:toc: left
+:icons: font
+:sectanchors: 
+:toclevels: 4
+:source-highlighter: pygments
+:pygments-style: manni
+:source-linenums-option: 
+
+内部类是指在一个外部类的内部再定义一个类。内部类作为外部类的一个成员，并且依附于外部类而存在的。内部类可为静态，可用protected和private修饰（而外部类只能使用public和缺省的包访问权限）。
+
+== 内部类分类
+
+=== 静态内部类
+
+[source,java]
+----
+public class A {
+
+    private int n = 20;
+
+    static int NUM = 10;
+
+    static void say() {
+        System.err.println("静态方法");
+    }
+
+    private void eat() {
+        System.err.println("成员方法");
+    }
+
+    static class InA {
+        public void inner() {
+            System.err.println(NUM); 
+            say(); 
+            A a = new A(); 
+            System.err.println(a.n);
+            a.eat();
+        }
+    }
+
+    public static void main(String[] args) {
+        InA inA = new InA();
+        inA.inner();
+    }
+}
+
+----
+
+NOTE:  静态内部类可以直接访问外部类的静态成员变量和方法，但是不成直接方法非静态的成员变量和方法
+
+=== 成员内部类
+
+=== 局部内部类
+
+=== 成员内部类
+
+
+== 内部类的作用

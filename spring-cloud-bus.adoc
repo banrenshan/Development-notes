@@ -1,0 +1,163 @@
+= spring-cloud-bus
+
+Spring Cloud Bus使用轻量级消息代理链接分布式系统的节点。 然后，此代理可用于广播状态更改（例如配置更改）或其他管理指令。一个核心用法是Bus就像一个分布式执行器，用于扩展的Spring Boot应用程序。 但是，它也可以用作应用程序之间的通信通道。 该项目为AMQP或Kafka提供启动器支持。
+
+== 1.快速开始
+
+Spring Cloud Bus的工作原理是，如果它在类路径上检测到自身，则添加Spring Boot自动配置。 要启用Bus，请将spring-cloud-starter-bus-amqp或spring-cloud-starter-bus-kafka添加到依赖关系管理中,Spring Cloud负责其余部分。确保代理（RabbitMQ或Kafka）可用并配置。在localhost上运行时，您无需执行任何操作。 如果您远程运行，请使用Spring Cloud Connectors或Spring Boot约定来定义代理凭据，如以下Rabbit示例所示：
+[source,yml]
+----
+spring:
+  rabbitmq:
+    host: mybroker.com
+    port: 5672
+    username: user
+    password: secret
+----
+
+Bus当前支持向所有监听节点或特定服务的所有节点发送消息（由Eureka定义）。/ bus/* actuator命名空间有一些HTTP端点。 目前，有两个已经实现。 第一个/ bus/env发送键/值对来更新每个节点的Spring环境。第二个/bus/refresh重新加载每个应用程序的配置，就好像它们都已在其/refresh端点上进行了ping操作一样。
+
+== 2.Bus端点
+
+Spring Cloud Bus提供两个端点，/actuator/bus-refresh 和 /actuator/bus-env，分别对应Spring Cloud Commons定义的/actuator/refresh和/actuator/env端点。
+
+=== 2.1 Refresh 端点
+
+清空RefreshScope缓存,重新绑定@ConfigurationProperties,参考spring-cloud-common中的refresh scope.
+
+如果要暴露该端点,需要设定下面的配置:
+----
+management.endpoints.web.exposure.include=bus-refresh
+----
+
+=== 2.2 env 端点
+
+更新多个实例中到环境变量,如果要暴露该端点,需要设定下面的配置:
+----
+management.endpoints.web.exposure.include=bus-env
+----
+该端点支持post请求:
+[source,json]
+----
+{
+	"name": "key1",
+	"value": "value1"
+}
+----
+
+== 3.定位实例
+
+每个应用的实例都有serviceId,可以通过spring.cloud.bus.id设置,其值应该是以冒号分隔的标识符列表,默认值是从环境构造的，它是spring.application.name和server.port（或spring.application.index，如果设置）的组合。ID的默认值以app：index：id的形式构造，其中：
+
+. app:vcap.application.name的值如果存在的话,否则是spring.application.name的值
+. index:vcap.application.instance_index的值,如果存在的话,否则spring.application.index, local.server.port, server.port, or 0(按照这个顺序)
+
+. id:vcap.application.instance_id的值,如果存在,否则随机
+
+HTTP端点接受“destination”路径参数，例如/bus-refresh/customers：9000，其中destination是服务ID。
+
+如果ID由bus上的实例拥有，它将处理该消息，并且所有其他实例都会忽略它。
+
+== 4.定位服务的所有实例
+
+“destination”参数用于Spring PathMatcher（路径分隔符为冒号:)，用于确定实例是否处理该消息。使用前面的示例，/bus-env /customers：**定位“customers”服务的所有实例，而不管其余的服务ID。
+
+== 5.服务ID必须唯一
+
+Bus尝试两次来处理事件 - 一次来自原始ApplicationEvent，一次来自队列。为此，它会根据当前服务ID检查发送服务ID。如果服务的多个实例具有相同的ID，则不会处理事件。在本地计算机上运行时，每个服务都位于不同的端口上，该端口是ID的一部分。
+
+== 6.自定义消息代理
+
+spring  cloud bus使用Spring Cloud Stream传递消息.因此，要使消息流动，您只需要在类路径中包含您选择的绑定器实现。有AMQP（RabbitMQ）和Kafka（spring-cloud-starter-bus- [amqp | kafka]）两种绑定器。 一般来说，Spring Cloud Stream依赖于Spring Boot自动配置约定来配置中间件。例如，可以使用spring.rabbitmq。*配置属性更改AMQP代理地址。Spring Cloud bus在spring.cloud.bus.*中有一些原生配置属性（例如，spring.cloud.bus.destination是用作外部中间件的主题的名称）。 通常，默认值就足够了。
+
+要了解有关如何自定义消息代理设置的更多信息，请参阅Spring Cloud Stream文档。
+
+== 7.跟踪bus事件
+
+可以通过设置spring.cloud.bus.trace.enabled = true来跟踪Bus事件（RemoteApplicationEvent的子类）。 如果这样做，Spring Boot TraceRepository（如果存在）会显示发送的每个事件以及每个服务实例的所有ack。下面是/trace端点的数据:
+[source,json]
+----
+{
+  "timestamp": "2015-11-26T10:24:44.411+0000",
+  "info": {
+    "signal": "spring.cloud.bus.ack",
+    "type": "RefreshRemoteApplicationEvent",
+    "id": "c4d374b7-58ea-4928-a312-31984def293b",
+    "origin": "stores:8081",
+    "destination": "*:**"
+  }
+  },
+  {
+  "timestamp": "2015-11-26T10:24:41.864+0000",
+  "info": {
+    "signal": "spring.cloud.bus.sent",
+    "type": "RefreshRemoteApplicationEvent",
+    "id": "c4d374b7-58ea-4928-a312-31984def293b",
+    "origin": "customers:9000",
+    "destination": "*:**"
+  }
+  },
+  {
+  "timestamp": "2015-11-26T10:24:41.862+0000",
+  "info": {
+    "signal": "spring.cloud.bus.ack",
+    "type": "RefreshRemoteApplicationEvent",
+    "id": "c4d374b7-58ea-4928-a312-31984def293b",
+    "origin": "customers:9000",
+    "destination": "*:**"
+  }
+}
+----
+
+RefreshRemoteApplicationEvent来自customers:9000,然后广播给所有服务,customers:9000和stores:8081响应了该事件.
+
+要自己处理ack信号，可以为应用程序添加AckRemoteApplicationEvent和SentApplicationEvent类型的@EventListener（并启用跟踪）。或者，您可以使用TraceRepository并从那里挖掘数据。
+
+== 8.广播自己的事件
+
+bus可以承载RemoteApplicationEvent类型的任何事件。默认传输是JSON，反序列化器需要知道将提前使用哪些类型。要注册新类型，必须将其放在org.springframework.cloud.bus.event的子包中。
+
+要自定义事件名称，可以在自定义类上使用@JsonTypeName，也可以依赖默认策略，即使用类的简单名称。
+
+=== 8.1在自定义包上注册事件
+如果您不能或不想为自定义事件使用org.springframework.cloud.bus.event的子包，则必须使用@RemoteApplicationEventScan批注指定要扫描RemoteApplicationEvent类型的事件的包。 使用@RemoteApplicationEventScan指定的包包括子包。
+
+例如,下面的自定义事件MyEvent:
+[source,java]
+----
+package com.acme;
+
+public class MyEvent extends RemoteApplicationEvent {
+    ...
+}
+----
+
+您可以通过以下方式使用反序列化器注册该事件：
+[source,java]
+----
+package com.acme;
+
+@Configuration
+@RemoteApplicationEventScan
+public class BusConfiguration {
+    ...
+}
+----
+
+如果不指定值，则会注册使用@RemoteApplicationEventScan的类所在的包。 在此示例中，使用BusConfiguration包注册com.acme。
+
+您还可以使用@RemoteApplicationEventScan上的value，basePackages或basePackageClasses属性显式指定要扫描的包，如以下示例所示：
+[source,java]
+----
+package com.acme;
+
+@Configuration
+//@RemoteApplicationEventScan({"com.acme", "foo.bar"})
+//@RemoteApplicationEventScan(basePackages = {"com.acme", "foo.bar", "fizz.buzz"})
+@RemoteApplicationEventScan(basePackageClasses = BusConfiguration.class)
+public class BusConfiguration {
+    ...
+}
+----
+
+上面所有的@RemoteApplicationEventScan示例都是等效的，因为com.acme包是通过在@RemoteApplicationEventScan上显式指定包来注册的。

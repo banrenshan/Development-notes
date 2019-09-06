@@ -1,0 +1,2056 @@
+= Elaticsearch
+
+== 索引API
+
+=== 创建索引
+
+基本命令如下:
+[source,shell]
+----
+PUT twitter
+----
+创建名称为twitter的索引(使用默认设置)
+
+[NOTE]
+====
+索引名称的限制
+
+. 索引的名称只能是字母小写
+. 不能包含 `\, /, *, ?, ", <, >, |, ` `(空格),逗号, # , :`
+. 不能以 `- , _ ,+`开头
+. 不能是 `.`或者 `..`
+. 不能超过225个字节
+====
+
+**索引设置**
+创建的每个索引都可以具有与其关联的特定设置，在正文中定义：
+[source,shell]
+----
+PUT twitter
+{
+    "settings" : {
+        "index" : {
+            "number_of_shards" : 3, <1>
+            "number_of_replicas" : 2  <2>
+        }
+    }
+}
+----
+
+<1> number_of_shards默认值是5
+<2> number_of_replicas默认值是1(即每主分片有一个副本)
+
+上面的例子可以简化:
+[source,shell]
+----
+PUT twitter
+{
+    "settings" : {
+        "number_of_shards" : 3,
+        "number_of_replicas" : 2
+    }
+}
+----
+
+索引设置的更多属性信息,请参考链接[索引模块].
+
+**别名**
+
+创建索引的时候允许创建多个别名:
+[source,shell]
+----
+PUT test
+{
+    "aliases" : {
+        "alias_1" : {},
+        "alias_2" : {
+            "filter" : {
+                "term" : {"user" : "kimchy" }
+            },
+            "routing" : "kimchy"
+        }
+    }
+}
+----
+
+**等待活动分片**
+
+默认情况下,只有超时或者每个分片的主副本启动的时候才会返回给客户端响应.响应的数据格式如下:
+[source,shell]
+----
+{
+    "acknowledged": true,
+    "shards_acknowledged": true,
+    "index": "test"
+}
+----
+. acknowledged用来指示索引是否在集群中创建成功
+. shards_acknowledged指示在超时之前是否为索引中的每个分片启动了必需数量的分片副本。
+
+NOTE: 即使acknowledged或者shards_acknowledged返回的是false,索引仍有可能被创建成功.这些值仅仅表明了超时之前索引是否创建成功.具体来说,创建索引时候比较慢,但是已经超出了响应时间,此时会返回acknowledged为false,但是后台仍然会创建该索引.同样的shards_acknowledged的值为false,也有可能是在限定时间内,分片没有启动导致响应失败结果.
+
+我们可以通过index.write.wait_for_active_shards更改默认设置的等待启动分片的数量:
+[source,shell]
+----
+PUT test
+{
+    "settings": {
+        "index.write.wait_for_active_shards": "2"
+    }
+}
+----
+
+也可以通过请求参数来设置:
+[source,shell]
+----
+PUT test?wait_for_active_shards=2
+----
+
+wait_for_active_shards的详细说明请参考链接[这里]
+
+=== 删除索引
+
+[source,shell]
+----
+DELETE /twitter
+----
+
+上面的例子删除名为twitter的索引.需要指定索引或通配符表达式。别名也可以用来删除索引.通配符表达式解析为匹配的具体索引。
+
+也可以同时删除多个索引,中间用逗号分隔,删除所有索引(_all或者*)需要谨慎.
+
+NOTE: 要禁用通过通配符或_all删除索引，请将config中的action.destructive_requires_name设置为true。也可以通过集群更新设置api更改此设置。
+
+=== 查看索引信息
+
+[source,shell]
+----
+GET /twitter
+----
+上面的代码可以查看名为twitter的索引信息,也可以使别名或者通配符.
+
+上面的例子也可以应用多个索引,查询所有可以使用_all或者*作为索引名称.
+
+=== 检测索引是否存在
+[source,shell]
+----
+HEAD twitter
+----
+
+http状态表现索引是否存在:200存在,404不存在.
+
+=== 开/关索引
+开放和关闭索引API允许关闭索引，然后打开它。关闭的索引在集群上的几乎没有开销（除了维护其元数据），并且不允许进行读/写操作。关闭的索引可以被重新打开.
+API如下:
+[source,shell]
+----
+POST /my_index/_close
+
+POST /my_index/_open
+----
+
+可以打开和关闭多个索引。 如果请求中缺少的该索引，则会引发错误。 可以使用ignore_unavailable = true参数禁用此行为。
+
+使用_all作为索引名称或指定标识所有索引的模式（例如*），可以打开或关闭所有索引。
+
+NOTE: 通过将配置文件中的action.destructive_requires_name标志设置为true，可以禁用通过通配符或_all标识索引。 也可以通过群集更新设置api更改此设置。
+
+关闭的索引仍然占用大量磁盘空间，这可能会导致托管环境出现问题。通过将cluster.indices.close.enable设置为false，也可以通过群集设置API禁用关闭索引。 默认值为true。
+
+因为打开索引会分配其分片，所以索引创建的wait_for_active_shards设置也适用于索引打开操作.open index API上的wait_for_active_shards设置的默认值为0，这意味着该命令不会等待分配分片。
+
+=== 收缩索引
+
+收缩索引API允许您将现有索引缩减为具有较少主分片的新索引。收缩后的索引中主分片数必须是源索引中分片数的一个因子。例如，具有8个主分片的索引可以缩小为4个，2个或1个主分片，或者具有15个主分片的索引可以缩小为5个，3个或1个。如果索引中的分片数是素数，则只能缩小为单个主分片。在收缩之前，索引中每个分片的（主要或副本）副本必须存在于同一节点上。收缩的流程如下:
+
+. 首先,它创建一个新的目标索引，其定义与源索引相同，但主分片数量较少。
+. 然后，它将源索引中的段硬链接到目标索引.如果文件系统不支持硬链接，则会将所有段复制到新索引中，这是一个更耗时的过程
+. 最后，它恢复目标索引，好像它是一个刚重新打开的封闭索引。
+
+**准备收缩索引**
+
+为了收缩索引，必须将索引标记为只读，并且索引中每个分片的（主要或副本）副本必须重定位到同一节点并且运行状况为green。可以通过以下请求实现这两个条件：
+[source,shell]
+----
+PUT /my_source_index/_settings
+{
+  "settings": {
+    "index.routing.allocation.require._name": "shrink_node_name",  <1>
+    "index.blocks.write": true  <2>
+  }
+}
+----
+
+<1> 强制将每个分片的副本重定位到名为shrink_node_name的节点,参考链接[Shard Allocation Filtering ]
+<2> 阻止对此索引的写入操作，同时仍允许更改元数据，如删除索引。
+
+
+
+**收缩索引**
+
+收缩my_source_index成新的my_target_index,发出以下请求：
+[source,shell]
+----
+POST my_source_index/_shrink/my_target_index?copy_settings=true
+{
+  "settings": {
+    "index.routing.allocation.require._name": null, <1> 
+    "index.blocks.write": null  <2>
+  }
+}
+----
+
+<1> 清除从源索引复制的分配要求。
+<2> 清除从源索引复制的索引写入块。
+
+一旦将目标索引添加到集群状态，上述请求就会立即返回 - 它不会等待收缩操作开始。
+
+[IMPORTANT]
+====
+指数只有满足以下要求才能缩小：
+
+. 目标索引不存在
+. 索引的分片数必须大于目标索引
+. 目标索引的分片数必须是源索引分片数的因子
+. 索引中的每个分片的文档数不能超过 2,147,483,519 ,分片的时候要注意这个.
+. 处理收缩过程的节点必须具有足够的可用磁盘空间，以容纳现有索引的第二个副本。
+
+====
+
+_shrink API类似于索引创建API,因此接受settings和aliases参数:
+[source,shell]
+----
+POST my_source_index/_shrink/my_target_index?copy_settings=true
+{
+  "settings": {
+    "index.number_of_replicas": 1,
+    "index.number_of_shards": 1,  <1>
+    "index.codec": "best_compression" <2> 
+  },
+  "aliases": {
+    "my_search_indices": {}
+  }
+}
+----
+
+<1> 目标索引中的分片数。这必须是源索引中分片数量的一个因子。
+<2> 最佳压缩仅在对索引进行新写入时生效，例如将分片强制合并到单个段时。
+
+**监控收缩过程**
+
+重新定位源索引可能需要一段时间,可以_cat recovery API跟踪进度,或者集群health API(该API携带wait_for_no_relocating_shards参数,当定位源索引完成后,该API响应结果)
+
+在分配任何分片之前，只要目标索引已添加到群集状态，_shrink API就会返回。 此时，所有分片都处于未分配状态.如果由于任何原因无法在收缩节点上分配目标索引，则其主分片将保持未分配状态，直到可以在该节点上分配为止。
+
+分配主分片后，它将进入状态初始化，并开始收缩过程。 收缩操作完成后，分片将变为活动状态。 此时，Elasticsearch将尝试分配任何副本，并可能决定将主分片重定位到另一个节点。
+
+=== 拆分索引
+拆分索引API允许您将现有索引拆分为新索引，其中每个原始主分片在新索引中被拆分为两个或多个主分片。
+
+可以拆分索引的次数（以及每个原始分片可以拆分成的分片数）由index.number_of_routing_shards设置确定。路由分片的数量指定内部使用的散列空间，以便在具有一致散列的分片中分发文档。例如，number_of_routing_shards设置为30（5 x 2 x 3）的5个分片索引可以按因子2或3分割。换句话说，它可以按如下方式拆分：
+. 5 → 10 → 30 (split by 2, then by 3)
+. 5 → 15 → 30 (split by 3, then by 2)
+. 5 → 30 (split by 6)
+
+**索引拆分如何工作**
+. 首先，它创建一个新的目标索引，其定义与源索引相同，但主分片数量较多。
+. 然后，它将源索引中的段硬链接到目标索引。 （如果文件系统不支持硬链接，则会将所有段复制到新索引中，这是一个更耗时的过程。）
+. 创建低级文件后，将再次对所有文档进行哈希处理，以删除不属于该分片的文档。
+. 最后，它恢复了目标索引，好像它是一个刚重新打开的封闭索引。
+
+**为什么Elasticsearch不支持增量重新分片**
+从N分片到N+1分片，又名增量重新分片，确实是许多键值存储支持的功能.添加新分片并仅将新数据推送到此新分片不是一种选择:这可能是一个索引瓶颈，并且在给定其_id（这是获取，删除和更新请求所必需的）时，确定文档属于哪个分片会变得非常复杂。这意味着我们需要使用不同的散列方案重新平衡现有数据。
+
+键值存储最有效地实现此目的的方法是使用一致的散列。当从N增加到N + 1的分片数量时，一致散列仅需要重新定位1/N-th的key。然而，Elasticsearch的存储单元，分片是Lucene索引。由于它们采用面向搜索的数据结构，Lucene索引占了很大一部分，文档只有5％，删除它们并在另一个分片上索引它们通常会比使用键值存储的成本高得多。当通过乘法因子增加分片数量时，该成本保持合理，如上一节所述.这允许Elasticsearch在本地执行拆分，这反过来允许在索引级别执行拆分，而不是重新索引需要移动的文档，以及使用硬链接进行有效的文件复制。
+
+在仅附加数据的情况下，可以通过创建新索引并向其推送新数据来获得更大的灵活性，同时添加覆盖读取操作的旧索引和新索引的别名。假设旧索引和新索引分别具有M和N分片，与搜索具有M + N个分片的索引相比，这没有开销。
+
+**索引拆分准备**
+[source,shell]
+----
+PUT my_source_index
+{
+    "settings": {
+        "index.number_of_shards" : 1,
+        "index.number_of_routing_shards" : 2  <1>
+    }
+}
+----
+<1> 允许将索引拆分为两个分片，换句话说，它允许单个分割操作。
+
+为了拆分索引，索引必须标记为只读，并且健康状态为green。操作如下:
+[source,shell]
+----
+PUT /my_source_index/_settings
+{
+  "settings": {
+    "index.blocks.write": true  <1>
+  }
+}
+----
+
+<1> 阻止对此索引的写入操作，同时仍允许更改元数据，如删除索引。
+
+**索引拆分**
+
+拆分my_source_index成新索引my_target_index,请求如下:
+[source,shell]
+----
+POST my_source_index/_split/my_target_index?copy_settings=true
+{
+  "settings": {
+    "index.number_of_shards": 2
+  }
+}
+----
+
+将目标索引添加到群集状态后，上述请求会立即返回 - 它不会等待分割操作开始。
+
+[IMPORANT]
+====
+ 索引拆分的要求
+
+ . 目标索引必须为空
+ . 索引必须具有比目标索引更少的主分片。
+ . 目标索引中的主分片数必须是源索引中主分片数的倍数。
+ . 处理拆分进程的节点必须具有足够的可用磁盘空间，以容纳现有索引的第二个副本。
+====
+
+_split API类似于索引创建API,因此接受settings和aliases参数:
+[source,shell]
+----
+POST my_source_index/_split/my_target_index?copy_settings=true
+{
+  "settings": {
+    "index.number_of_shards": 5 
+  },
+  "aliases": {
+    "my_search_indices": {}
+  }
+}
+----
+
+**监控索引拆分过程**
+
+参考索引合并的过程.
+
+=== 翻转索引
+
+当现有索引被认为太大或太旧时，翻转索引API将别名转移到新索引。
+
+API接受单个别名和条件列表。别名必须指向Rollover请求的写入索引才有效。有两种方法可以实现，并且根据配置，别名元数据将以不同方式更新。 这两种情况如下：
+
+. 别名仅指向未配置is_write_index的单个索引（默认为null）。
+
+	在这种情况下，原始索引将其翻转别名添加到新创建的索引中，并从原始（翻转）索引中删除。
+
+. 别名指向一个或多个索引，其中is_write_index在要翻转的索引（写入索引）上设置为true。
+	
+	在这种情况下，写入索引将其翻转别名'is_write_index设置为false，而新创建的索引现在将指向它的翻转别名作为写入索引，并将is_write_index设置为true。
+
+**conditions 参数**
+[source,shell]
+----
+PUT /logs-000001  <1>
+{
+  "aliases": {
+    "logs_write": {}
+  }
+}
+
+# Add > 1000 documents to logs-000001
+
+POST /logs_write/_rollover  <2>
+{
+  "conditions": {
+    "max_age":   "7d",
+    "max_docs":  1000,
+    "max_size":  "5gb"
+  }
+}
+----
+
+<1> 创建索引logs-0000001,别名为logs_write
+<2> 如果logs_write指向的索引是在7天或更长时间之前创建的，或者包含1,000个或更多文档，或索引大小至少约为5GB，则会创建logs-000002索引并更新logs_write别名以指向日志-000002。
+
+上面的请求可能会返回下面的响应数据:
+[source,json]
+----
+{
+  "acknowledged": true,
+  "shards_acknowledged": true,
+  "old_index": "logs-000001",
+  "new_index": "logs-000002",
+  "rolled_over": true,  <1>
+  "dry_run": false, <2>
+  "conditions": {  <3>
+    "[max_age: 7d]": false,
+    "[max_docs: 1000]": true,
+    "[max_size: 5gb]": false,
+  }
+}
+----
+
+<1> 索引是否翻转
+<2> 翻滚是否是dry运行。
+<3> 每个条件的结果。
+
+**命名新索引**
+如果现有索引的名称以 - 和数字结尾 - 例如 logs-000001  - 然后新索引的名称将遵循相同的模式，递增数字（logs-000002）。 无论旧索引名称如何，该数字长度为6,前以零填充。
+
+如果旧名称与此模式不匹配，则必须为新索引指定名称，如下所示：
+[source,shell]
+----
+POST /my_alias/_rollover/my_new_index_name
+{
+  "conditions": {
+    "max_age":   "7d",
+    "max_docs":  1000,
+    "max_size": "5gb"
+  }
+}
+----
+
+**将日期与翻转API一起使用**
+
+根据索引滚动的日期来命名翻转索引是有用的，例如，logstash - logstash-2016.02.03。rollover API支持日期数学，但要求索引名称以短划线后跟数字结尾，例如logstash-2016.02.03-1，每次滚动索引时都会递增。 例如：
+[source,shell]
+----
+PUT /%3Clogs-%7Bnow%2Fd%7D-1%3E  <1>
+{
+  "aliases": {
+    "logs_write": {}
+  }
+}
+
+PUT logs_write/_doc/1
+{
+  "message": "a dummy log"
+}
+
+POST logs_write/_refresh
+
+# Wait for a day to pass
+
+POST /logs_write/_rollover  <2>
+{
+  "conditions": {
+    "max_docs":   "1"
+  }
+}
+----
+<1> 创建索引,名称是今天的日期,例如logs-2016.10.31-1
+<2> 翻滚索引例如,如果立即运行,名为logs-2016.10.31-000002，或者如果在24小时后运行则记录为2016.11.01-000002
+
+**定义新索引**
+
+新索引的设置，映射和别名取自任何匹配的索引模板。此外，您可以在请求正文中指定设置，映射和别名，就像创建索引API一样。 请求中指定的值将覆盖匹配索引模板中设置的任何值。例如，以下翻转请求会覆盖index.number_of_shards设置：
+[source,shell]
+----
+PUT /logs-000001
+{
+  "aliases": {
+    "logs_write": {}
+  }
+}
+
+POST /logs_write/_rollover
+{
+  "conditions" : {
+    "max_age": "7d",
+    "max_docs": 1000,
+    "max_size": "5gb"
+  },
+  "settings": {
+    "index.number_of_shards": 2
+  }
+}
+----
+
+**dry_run **
+rollover API支持dry_run模式，可以在不执行实际翻转的情况下检查请求条件：
+[source,shell]
+----
+PUT /logs-000001
+{
+  "aliases": {
+    "logs_write": {}
+  }
+}
+
+POST /logs_write/_rollover?dry_run
+{
+  "conditions" : {
+    "max_age": "7d",
+    "max_docs": 1000,
+    "max_size": "5gb"
+  }
+}
+----
+
+在翻转操作写索引(is_write_index 显示设置为true)期间不会交换翻转别名。。 由于多个具有相同别名的索引在区分哪个是正确的翻转写入索引时是不明确的，因此翻转指向多个索引的别名是无效的。因此，默认行为是交换面向写入别名指向的索引。在上面的一些例子中，这是logs_write。由于设置is_write_index使别名能够指向多个索引，同时还明确指出rollover应该针对哪个写入索引，因此不需要从滚动索引中删除别名.这通过允许一个别名表现为使用Rollover管理的索引的写入和读取别名来简化事情。
+
+查看以下示例中别名的行为，其中在翻转索引上设置了is_write_index。
+[source,shell]
+----
+PUT my_logs_index-000001
+{
+  "aliases": {
+    "logs": { "is_write_index": true } <1>
+  }
+}
+
+PUT logs/_doc/1
+{
+  "message": "a dummy log"
+}
+
+POST logs/_refresh
+
+POST /logs/_rollover
+{
+  "conditions": {
+    "max_docs":   "1"
+  }
+}
+
+PUT logs/_doc/2  <2>
+{
+  "message": "a newer log"
+}
+----
+
+<1> 将my_logs_index配置为写入索引,别名是logs
+<2> 针对日志别名的新索引文档将写入新索引
+[source,json]
+----
+{
+  "_index" : "my_logs_index-000002",
+  "_type" : "_doc",
+  "_id" : "2",
+  "_version" : 1,
+  "result" : "created",
+  "_shards" : {
+    "total" : 2,
+    "successful" : 1,
+    "failed" : 0
+  },
+  "_seq_no" : 0,
+  "_primary_term" : 1
+}
+----
+
+在翻转之后，两个索引的别名元数据将使is_write_index设置反映每个索引的角色，新创建的索引作为写入索引。
+[source,json]
+----
+{
+  "my_logs_index-000002": {
+    "aliases": {
+      "logs": { "is_write_index": true }
+    }
+  },
+  "my_logs_index-000001": {
+    "aliases": {
+      "logs": { "is_write_index" : false }
+    }
+  }
+}
+----
+
+=== Put Mapping
+该API允许你给存在的索引添加字段或者更改字段的搜索设置信息:
+[source,shell]
+----
+PUT twitter <1>
+{}
+
+PUT twitter/_mapping/_doc  <2>
+{
+  "properties": {
+    "email": {
+      "type": "keyword"
+    }
+  }
+}
+----
+
+<1> 创建没有mapping的索引
+<2> 添加email字段和_doc mapping
+
+**Multi-index**
+PUT映射API可以通过单个请求应用于多个索引。例如，我们可以同时更新twitter-1和twitter-2映射：
+[source,java]
+----
+# Create the two indices
+PUT twitter-1
+PUT twitter-2
+
+# Update both mappings
+PUT /twitter-1,twitter-2/_mapping/_doc 
+{
+  "properties": {
+    "user_name": {
+      "type": "text"
+    }
+  }
+}
+----
+
+**更新 field mapping**
+通常，无法更新现有字段的映射。 这条规则有一些例外。 例如：
+
+. 可以将新属性添加到Object数据类型字段。
+. 可以将新的多字段添加到现有字段中。
+. ignore_above参数可以更新。
+
+[source,shell]
+----
+PUT my_index <1>
+{
+  "mappings": {
+    "_doc": {
+      "properties": {
+        "name": {
+          "properties": {
+            "first": {
+              "type": "text"
+            }
+          }
+        },
+        "user_id": {
+          "type": "keyword"
+        }
+      }
+    }
+  }
+}
+
+PUT my_index/_mapping/_doc
+{
+  "properties": {
+    "name": {
+      "properties": {
+        "last": {  <2>
+          "type": "text"
+        }
+      }
+    },
+    "user_id": {
+      "type": "keyword",
+      "ignore_above": 100  <3>
+    }
+  }
+}
+----
+
+<1> 创建索引,name(Object数据类型)下面包含first字段
+<2> 在name下面添加last字段
+<3> 更新ignore_above,默认是0
+
+=== GET Mapping
+
+get mapping API允许检索索引或索引/类型的映射定义。
+[source,shell]
+----
+GET /twitter/_mapping/_doc
+
+----
+
+**多索引和多类型**
+get mapping API可用于通过单个调用获取多个索引或类型映射。遵循下面的句法: `host:port/{index}/_mapping/{type}`,{index}和{type}接受逗号分隔的多个值,如果你要获取所有的索引的mappings值,可以使用_all替代{index},列子如下:
+[source,shell]
+----
+GET /_mapping/_doc
+
+GET /_all/_mapping/_doc
+----
+
+如果要获取所有索引和类型的映射，则以下两个示例是等效的：
+[source,shell]
+----
+GET /_all/_mapping
+
+GET /_mapping
+----
+
+=== GET字段Mapping
+
+get字段映射API允许您检索一个或多个字段的映射定义。当您不需要Get Mapping API返回的完整类型映射时，这非常有用。例如有下面Mapping:
+[source,shell]
+----
+PUT publications
+{
+    "mappings": {
+        "_doc": {
+            "properties": {
+                "id": { "type": "text" },
+                "title":  { "type": "text"},
+                "abstract": { "type": "text"},
+                "author": {
+                    "properties": {
+                        "id": { "type": "text" },
+                        "name": { "type": "text" }
+                    }
+                }
+            }
+        }
+    }
+}
+----
+下面的例子返回title属性的映射:
+[source,shell]
+----
+GET publications/_mapping/_doc/field/title
+----
+结果如下:
+[source,json]
+----
+{
+   "publications": {
+      "mappings": {
+         "_doc": {
+            "title": {
+               "full_name": "title",
+               "mapping": {
+                  "title": {
+                     "type": "text"
+                  }
+               }
+            }
+         }
+      }
+   }
+}
+----
+
+**多索引,多类型和多字段**
+
+get字段映射API可用于通过单个调用从多个索引或类型获取多个字段的映射。句法如下: `host:port/{index}/{type}/_mapping/field/{field}`,其中{index},{type},{field}可以使逗号分隔的多个值,查询所有索引使用_all替代{index}:
+[source,shell]
+----
+GET /twitter,kimchy/_mapping/field/message
+
+GET /_all/_mapping/_doc/field/message,user.id
+
+GET /_all/_mapping/_doc/field/*.id
+----
+
+**指定字段**
+get mapping api允许您指定以逗号分隔的字段列表。例如，要选择author字段的id，必须使用其全名author.id。
+[source,shell]
+----
+GET publications/_mapping/_doc/field/author.id,abstract,name
+----
+返回结果:
+[source,json]
+----
+{
+   "publications": {
+      "mappings": {
+         "_doc": {
+            "author.id": {
+               "full_name": "author.id",
+               "mapping": {
+                  "id": {
+                     "type": "text"
+                  }
+               }
+            },
+            "abstract": {
+               "full_name": "abstract",
+               "mapping": {
+                  "abstract": {
+                     "type": "text"
+                  }
+               }
+            }
+         }
+      }
+   }
+}
+
+----
+该API允许通配符:
+[source,shell]
+----
+GET publications/_mapping/_doc/field/a*
+----
+返回结果:
+[source,json]
+----
+{
+   "publications": {
+      "mappings": {
+         "_doc": {
+            "author.name": {
+               "full_name": "author.name",
+               "mapping": {
+                  "name": {
+                     "type": "text"
+                  }
+               }
+            },
+            "abstract": {
+               "full_name": "abstract",
+               "mapping": {
+                  "abstract": {
+                     "type": "text"
+                  }
+               }
+            },
+            "author.id": {
+               "full_name": "author.id",
+               "mapping": {
+                  "id": {
+                     "type": "text"
+                  }
+               }
+            }
+         }
+      }
+   }
+}
+----
+
+将include_defaults = true添加到查询字符串将导致响应包含通常被抑制的默认值。
+
+=== 类型存在判断
+[source,shell]
+----
+HEAD twitter/_mapping/tweet
+----
+
+http状态码代表查询结果,200存在,404不存在.
+
+=== 索引别名
+
+Elasticsearch中的API在针对特定索引时接受索引名称，并在适当时接受多个索引。索引别名API允许使用名称别名化索引，所有API都自动将别名转换为实际索引名称。别名也可以映射到多个索引，并且在指定别名时，别名将自动扩展为别名索引。别名还可以与在搜索和路由值时自动应用的过滤器相关联。 别名不能与索引同名。
+
+以下是将别名alias1 与索引test1相关联的示例：
+[source,shell]
+----
+POST /_aliases
+{
+    "actions" : [
+        { "add" : { "index" : "test1", "alias" : "alias1" } }
+    ]
+}
+----
+下面是移除关联的例子:
+[source,shell]
+----
+POST /_aliases
+{
+    "actions" : [
+        { "remove" : { "index" : "test1", "alias" : "alias1" } }
+    ]
+}
+----
+重命名别名是一个简单的删除然后在同一API中添加操作。此操作是原子操作，无需担心别名未指向索引的短时间段：
+[source,shell]
+----
+POST /_aliases
+{
+    "actions" : [
+        { "remove" : { "index" : "test1", "alias" : "alias1" } },
+        { "add" : { "index" : "test2", "alias" : "alias1" } }
+    ]
+}
+----
+
+将别名与多个索引相关联只需几个add操作：
+[source,shell]
+----
+POST /_aliases
+{
+    "actions" : [
+        { "add" : { "index" : "test1", "alias" : "alias1" } },
+        { "add" : { "index" : "test2", "alias" : "alias1" } }
+    ]
+}
+----
+
+可以使用索引数组语法为操作指定多个索引：
+[source,shell]
+----
+POST /_aliases
+{
+    "actions" : [
+        { "add" : { "indices" : ["test1", "test2"], "alias" : "alias1" } }
+    ]
+}
+----
+
+要在一个操作中指定多个别名，也存在相应的别名数组语法。
+对于上面的示例，glob模式也可用于将别名与多个共享公共名称的索引相关联：
+[source,shell]
+----
+POST /_aliases
+{
+    "actions" : [
+        { "add" : { "index" : "test*", "alias" : "all_test_indices" } }
+    ]
+}
+----
+
+在这种情况下，别名是一个时间点别名，它将对匹配的所有当前索引进行分组，他不会自动更新,因为匹配该模式的新索引被添加/删除
+
+索引到指向多个索引的别名是错误的。
+
+也可以在一个操作中使用别名交换索引：
+[source,shell]
+----
+PUT test     <1>
+PUT test_2   <2>
+POST /_aliases
+{
+    "actions" : [
+        { "add":  { "index": "test_2", "alias": "test" } },
+        { "remove_index": { "index": "test" } }  
+    ]
+}
+----
+
+<1> 我们错误添加的索引
+<2> 我们应该添加的索引
+<3> remove_index等同于删除索引API
+
+**过滤的别名**
+
+带有过滤器的别名提供了一种对同一索引创建不同“视图”的简便方法。可以使用Query DSL定义过滤器，并使用此别名将其应用于所有“搜索”，“计数”，“按查询删除”和“更多此类操作”。
+
+要创建过滤后的别名，首先我们需要确保映射中已存在这些字段：
+[source,shell]
+----
+PUT /test1
+{
+  "mappings": {
+    "_doc": {
+      "properties": {
+        "user" : {
+          "type": "keyword"
+        }
+      }
+    }
+  }
+}
+----
+现在我们可以创建一个在字段user上使用过滤器的别名：
+[source,shell]
+----
+POST /_aliases
+{
+    "actions" : [
+        {
+            "add" : {
+                 "index" : "test1",
+                 "alias" : "alias2",
+                 "filter" : { "term" : { "user" : "kimchy" } }
+            }
+        }
+    ]
+}
+----
+
+**路由**
+
+可以将路由值与别名相关联。此功能可与过滤别名一起使用，以避免不必要的分片操作。
+
+以下命令创建一个指向索引test的新别名alias1。 创建alias1后，具有此别名的所有操作将自动修改为使用1进行路由：
+[source,shell]
+----
+POST /_aliases
+{
+    "actions" : [
+        {
+            "add" : {
+                 "index" : "test",
+                 "alias" : "alias1",
+                 "routing" : "1"
+            }
+        }
+    ]
+}
+----
+
+也可以为搜索和索引操作指定不同的路由值：
+[source,shell]
+----
+POST /_aliases
+{
+    "actions" : [
+        {
+            "add" : {
+                 "index" : "test",
+                 "alias" : "alias2",
+                 "search_routing" : "1,2",
+                 "index_routing" : "2"
+            }
+        }
+    ]
+}
+----
+如上例所示，搜索路由可能包含以逗号分隔的多个值。索引路由只能包含单个值。
+
+如果使用路由别名的搜索操作也具有路由参数，则使用参数中指定的搜索别名路由和路由的交集。例如，以下命令将使用“2”作为路由值：
+[source,shell]
+----
+GET /alias2/_search?q=user:kimchy&routing=2,3
+----
+
+**写索引**
+可以将别名指向的索引关联为写入索引。 指定后，针对指向多个索引的别名的所有索引和更新请求将尝试解析为写索引的一个索引。每个别名只能将一个索引分配为一次写入索引。 如果未指定写入索引且别名引用了多个索引，则不允许写入。
+
+可以使用别名API和索引创建API将与别名关联的索引指定为写入索引。
+
+将索引设置为带别名的写入索引也会影响在Rollover期间操作别名的方式:
+[source,shell]
+----
+POST /_aliases
+{
+    "actions" : [
+        {
+            "add" : {
+                 "index" : "test",
+                 "alias" : "alias1",
+                 "is_write_index" : true
+            }
+        },
+        {
+            "add" : {
+                 "index" : "test2",
+                 "alias" : "alias1"
+            }
+        }
+    ]
+}
+----
+我们指定别名alias1关联索引test和test2,其中test被指定为写索引:
+[source,shell]
+----
+PUT /alias1/_doc/1
+{
+    "foo": "bar"
+}
+----
+
+索引到/alias1/_doc/1的新文档将被编入索引，就像它是/ test/_doc/1一样。
+[source,shell]
+----
+GET /test/_doc/1
+----
+
+要修改哪个索引是别名的写入索引，可以利用别名API进行原子修改。 修改不依赖于操作的顺序。
+[source,shell]
+----
+POST /_aliases
+{
+    "actions" : [
+        {
+            "add" : {
+                 "index" : "test",
+                 "alias" : "alias1",
+                 "is_write_index" : false
+            }
+        }, {
+            "add" : {
+                 "index" : "test2",
+                 "alias" : "alias1",
+                 "is_write_index" : true
+            }
+        }
+    ]
+}
+----
+
+IMPORTANT: 没有为索引显式设置is_write_index：true并且仅引用一个索引的别名将使引用的索引的行为就像它是写索引一样，直到引用添加了另一个索引。此时，将没有写入索引，写入将被拒绝。
+
+**添加单独别名**
+索引别名也可以通过下面的端点添加:
+[source,shell]
+----
+PUT /{index}/_alias/{name}
+----
+
+|===
+|index|索引
+|name|别名
+|routing| 可选的路由
+|filter| 可选的过滤
+|===
+
+例子:
+[source,shell]
+----
+PUT /logs_201305/_alias/2013
+----
+
+列子:
+[source,shell]
+----
+PUT /users
+{
+    "mappings" : {
+        "_doc" : {
+            "properties" : {
+                "user_id" : {"type" : "integer"}
+            }
+        }
+    }
+}
+
+PUT /users/_alias/user_12
+{
+    "routing" : "12",
+    "filter" : {
+        "term" : {
+            "user_id" : 12
+        }
+    }
+}
+
+----
+
+**创建索引的时候指定别名**
+[source,shell]
+----
+PUT /logs_20162801
+{
+    "mappings" : {
+        "_doc" : {
+            "properties" : {
+                "year" : {"type" : "integer"}
+            }
+        }
+    },
+    "aliases" : {
+        "current_day" : {},
+        "2016" : {
+            "filter" : {
+                "term" : {"year" : 2016 }
+            }
+        }
+    }
+}
+----
+
+**删除别名**
+端点: `/{index}/_alias/{name}`
+
+**查询别名信息**
+
+端点: `/{index}/_alias/{alias}`
+
+get索引别名API允许按别名和索引名称进行过滤。 此api重定向到主服务器并获取所请求的索引别名（如果可用）。此api按照顺序查找索引别名。
+
+查询索引logs_20162801的所有别名:
+[source,shell]
+----
+GET /logs_20162801/_alias/*
+----
+[source,json]
+----
+{
+ "logs_20162801" : {
+   "aliases" : {
+     "2016" : {
+       "filter" : {
+         "term" : {
+           "year" : 2016
+         }
+       }
+     }
+   }
+ }
+}
+----
+
+查询别名2016关联的所有索引:
+[source,shell]
+----
+GET /_alias/2016
+----
+响应:
+[source,json]
+----
+{
+  "logs_20162801" : {
+    "aliases" : {
+      "2016" : {
+        "filter" : {
+          "term" : {
+            "year" : 2016
+          }
+        }
+      }
+    }
+  }
+}
+----
+
+查询别名以20开头的别名信息:
+[source,shell]
+----
+GET /_alias/20*
+----
+响应结果:
+[source,json]
+----
+{
+  "logs_20162801" : {
+    "aliases" : {
+      "2016" : {
+        "filter" : {
+          "term" : {
+            "year" : 2016
+          }
+        }
+      }
+    }
+  }
+}
+----
+
+还有一个获取索引别名api的HEAD变体来检查是否存在索引别名。 索引别名存在api支持与get索引别名api相同的选项。 例子：
+[source,shell]
+----
+HEAD /_alias/2016
+HEAD /_alias/20*
+HEAD /logs_20162801/_alias/*
+----
+
+=== 更新索引设置信息
+
+索引设置信息的更新是实时的.
+端点是/_settings(更新所有索引)或者{index}/_settings,请求正文中包含更新的详细信息:
+[source,shell]
+----
+PUT /twitter/_settings
+{
+    "index" : {
+        "number_of_replicas" : 2
+    }
+}
+----
+
+更改某项设置为默认值,只需要设置为null即可,例如:
+[source,shell]
+----
+PUT /twitter/_settings
+{
+    "index" : {
+        "refresh_interval" : null
+    }
+}
+----
+可以在链接[索引模块]找到那些设置可以在索引上动态更新.要保留现有设置不被更新，可以将preserve_existing请求参数设置为true。
+
+**批量索引使用**
+
+例如，更新设置API可用于动态地更改索引，使其更适合批量索引，然后将其移至更实时的索引状态。在批量索引开始之前，使用：
+[source,shell]
+----
+PUT /twitter/_settings
+{
+    "index" : {
+        "refresh_interval" : "-1"
+    }
+}
+----
+另一个优化选项是在没有任何副本的情况下启动索引，并且稍后才添加它们，但这实际上取决于用例.
+
+然后，一旦完成批量索引，就可以更新设置（例如，返回默认值）：
+[source,shell]
+----
+PUT /twitter/_settings
+{
+    "index" : {
+        "refresh_interval" : "1s"
+    }
+}
+----
+
+并且强制合并应该被调用:
+[source,shell]
+----
+POST /twitter/_forcemerge?max_num_segments=5
+----
+
+**更新索引分词引擎**
+
+也可以为索引定义新的分词器。但是需要先关闭索引并在更改后打开它。
+
+如果content分析器还没有被定义在twitter索引上,你可以使用下面命令:
+[source,shell]
+----
+POST /twitter/_close
+
+PUT /twitter/_settings
+{
+  "analysis" : {
+    "analyzer":{
+      "content":{
+        "type":"custom",
+        "tokenizer":"whitespace"
+      }
+    }
+  }
+}
+
+POST /twitter/_open
+----
+
+=== 获取索引设置
+
+[source,shell]
+----
+GET /twitter/_settings
+----
+
+**获取多个索引的设置**
+[source,shell]
+----
+GET /twitter,kimchy/_settings
+
+GET /_all/_settings
+
+GET /log_2013_*/_settings
+----
+
+**根据名称过滤索引设置**
+[source,shell]
+----
+GET /log_2013_-*/_settings/index.number_*
+----
+
+=== 分词
+
+对文本执行分词。
+
+可以在不指定索引的情况下对指定文本进行分词:
+[source,shell]
+----
+GET _analyze
+{
+  "analyzer" : "standard",
+  "text" : "this is a test"
+}
+----
+text参数的值可以是数组:
+[source,shell]
+----
+GET _analyze
+{
+  "analyzer" : "standard",
+  "text" : ["this is a test", "the second text"]
+}
+----
+
+你也可以定义一个临时分词器,该分析器包含断词器,词过滤器,字符过滤器.
+[source,shell]
+----
+GET _analyze
+{
+  "tokenizer" : "keyword",
+  "filter" : ["lowercase"],
+  "text" : "this is a test"
+}
+
+
+GET _analyze
+{
+  "tokenizer" : "keyword",
+  "filter" : ["lowercase"],
+  "char_filter" : ["html_strip"],
+  "text" : "this is a <b>test</b>"
+}
+----
+
+断词器,过滤器可以被自定义,如下:
+[source,shell]
+----
+GET _analyze
+{
+  "tokenizer" : "whitespace",
+  "filter" : ["lowercase", {"type": "stop", "stopwords": ["a", "is", "this"]}],
+  "text" : "this is a test"
+}
+----
+
+分析API也可以指定具体的索引
+[source,shell]
+----
+GET analyze_sample/_analyze
+{
+  "text" : "this is a test"
+}
+----
+
+=== 查看分析详情
+
+如果你想看分词的更多信息,你需要设置explain为true,默认false,这会显示所有的分词属性,你可以使用attributes来过滤结果:
+[source,shell]
+----
+GET _analyze
+{
+  "tokenizer" : "standard",
+  "filter" : ["snowball"],
+  "text" : "detailed output",
+  "explain" : true,
+  "attributes" : ["keyword"] 
+}
+----
+
+显示结果:
+[source,java]
+----
+{
+  "detail" : {
+    "custom_analyzer" : true,
+    "charfilters" : [ ],
+    "tokenizer" : {
+      "name" : "standard",
+      "tokens" : [ {
+        "token" : "detailed",
+        "start_offset" : 0,
+        "end_offset" : 8,
+        "type" : "<ALPHANUM>",
+        "position" : 0
+      }, {
+        "token" : "output",
+        "start_offset" : 9,
+        "end_offset" : 15,
+        "type" : "<ALPHANUM>",
+        "position" : 1
+      } ]
+    },
+    "tokenfilters" : [ {
+      "name" : "snowball",
+      "tokens" : [ {
+        "token" : "detail",
+        "start_offset" : 0,
+        "end_offset" : 8,
+        "type" : "<ALPHANUM>",
+        "position" : 0,
+        "keyword" : false 
+      }, {
+        "token" : "output",
+        "start_offset" : 9,
+        "end_offset" : 15,
+        "type" : "<ALPHANUM>",
+        "position" : 1,
+        "keyword" : false 
+      } ]
+    } ]
+  }
+}
+----
+
+=== 索引模板
+创建索引的时候,会自动引用模板.模板包括settings和mappings,以及是否应用该模板的模式.
+
+NOTE: 模板只应用在索引创建的时候.更改模板对已经存在的模板没有影响.
+
+创建模板:
+[source,shell]
+----
+PUT _template/template_1
+{
+  "index_patterns": ["te*", "bar*"], <1>
+  "settings": {
+    "number_of_shards": 1
+  },
+  "mappings": {
+    "_doc": {
+      "_source": {
+        "enabled": false
+      },
+      "properties": {
+        "host_name": {
+          "type": "keyword"
+        },
+        "created_at": {
+          "type": "date",
+          "format": "EEE MMM dd HH:mm:ss Z yyyy"
+        }
+      }
+    }
+  }
+}
+----
+
+<1> 匹配te*或bar*模式的索引将自动引用该模板.
+
+也可以在模板中设置别名:
+[source,shell]
+----
+PUT _template/template_1
+{
+    "index_patterns" : ["te*"],
+    "settings" : {
+        "number_of_shards" : 1
+    },
+    "aliases" : {
+        "alias1" : {},
+        "alias2" : {
+            "filter" : {
+                "term" : {"user" : "kimchy" }
+            },
+            "routing" : "kimchy"
+        },
+        "{index}-alias" : {} <1>
+    }
+}
+----
+
+<1> {index}占位符会自动替换成索引名称.
+
+**删除模板**
+[source,shell]
+----
+DELETE /_template/template_1
+----
+
+**查询模板详情**
+[source,shell]
+----
+GET /_template/template_1
+----
+你也可以查询多个模板:
+[source,shell]
+----
+GET /_template/temp*
+GET /_template/template_1,template_2
+----
+获取所有索引的模板:
+[source,shell]
+----
+GET /_template
+----
+
+**检查模板是否存在**
+[source,shell]
+----
+HEAD _template/template_1
+----
+
+**多模板匹配**
+有可能出现多个模板与索引匹配的情况,此时,所有的settings和mappigs会被合并然后应用到索引,合并的顺序可以通过order参数指定,数字越小顺序越靠前被应用,然后被数字大的覆盖.
+[sourcee,shell]
+----
+PUT /_template/template_1
+{
+    "index_patterns" : ["*"],
+    "order" : 0,
+    "settings" : {
+        "number_of_shards" : 1
+    },
+    "mappings" : {
+        "_doc" : {
+            "_source" : { "enabled" : false }
+        }
+    }
+}
+
+PUT /_template/template_2
+{
+    "index_patterns" : ["te*"],
+    "order" : 1,
+    "settings" : {
+        "number_of_shards" : 1
+    },
+    "mappings" : {
+        "_doc" : {
+            "_source" : { "enabled" : true }
+        }
+    }
+}
+----
+
+最上面的禁用存储_source，但对于以te*开头的索引，仍将启用_source。 注意，对于映射，合并是“深度”的，这意味着可以在高阶模板上轻松添加/覆盖特定的基于对象/属性的映射，而较低阶模板提供基础。
+
+**模板版本号**
+
+模板可以选择添加版本号，可以是任何整数值，以简化外部系统的模板管理。版本字段是完全可选的，仅用于模板的外部管理。要取消设置版本，只需按照原模板然后不再包含版本字段。
+
+查看版本号,你可以使用filter_path过滤响应
+[source,shell]
+----
+GET /_template/template_1?filter_path=*.version
+----
+响应结果如下:
+[source,json]
+----
+{
+  "template_1" : {
+    "version" : 123
+  }
+}
+----
+
+=== 索引统计
+
+发生在索引的操作,可以使用_stats API统计,API提供有关索引级别范围的统计信息（尽管也可以使用节点级别范围检索大多数统计信息）。
+
+统计所有索引:
+[source,shell]
+----
+GET /_stats
+----
+指定索引统计:
+[source,shell]
+----
+GET /index1,index2/_stats
+----
+
+默认情况下,所有的统计信息都会被返回,也可以返回指定的统计信息,这些信息包括:
+
+|===
+|docs|文档数/删除文档数(还没有合并的文档数),注意，受刷新索引的影响。
+|store|索引的大小
+|indexing|索引统计信息,可以与逗号分隔的类型列表结合使用，以提供文档类型级别统计信息。
+|get|Get statistics, including missing stats.
+|search|Search statistics including suggest statistics
+|segments|检索打开段的内存使用情况。 （可选）设置include_segment_file_sizes标志，报告每个Lucene索引文件的聚合磁盘使用情况。
+|completion|Completion suggest statistics.
+|fielddata|	Fielddata statistics.
+|flush|Flush statistics.
+|merge|Merge statistics.
+|request_cache|Shard request cache statistics.
+|refresh|Refresh statistics.
+|warmer|Warmer statistics
+|translog|Translog statistics.
+|fields|要包含在统计信息中的字段列表。 除非提供更具体的字段列表，否则将其用作默认列表（请参见下文）。
+|completion_fields|要包含在“完成建议”统计信息中的字段列表。
+|fielddata_fields|List of fields to be included in the Fielddata statistics.
+|===
+
+下面是些例子:
+[source,shell]
+----
+# Get back stats for merge and refresh only for all indices
+GET /_stats/merge,refresh
+# Get back stats for type1 and type2 documents for the my_index index
+GET /my_index/_stats/indexing?types=type1,type2
+# Get back just search stats for group1 and group2
+GET /_stats/search?groups=group1,group2
+----
+
+The stats returned are aggregated on the index level, with primaries and total aggregations, where primaries are the values for only the primary shards, and total are the cumulated values for both primary and replica shards.
+
+In order to get back shard level stats, set the level parameter to shards.
+
+Note, as shards move around the cluster, their stats will be cleared as they are created on other nodes. On the other hand, even though a shard "left" a node, that node will still retain the stats that shard contributed to.
+
+=== 索引分段
+
+提供构建Lucene索引（分片级别）的低级别段信息。允许用于提供有关分片和索引状态的更多信息，可能是优化信息，删除时“浪费”的数据，等等。
+
+特定索引的分段信息:
+[source,shell]
+----
+GET /test/_segments
+----
+多个索引的分段信息:
+[source,shell]
+----
+GET /test1,test2/_segments
+----
+所有索引的分段信息:
+[source,shell]
+----
+GET /_segments
+----
+响应:
+[source,json]
+----
+{
+  "_shards": ...
+  "indices": {
+    "test": {
+      "shards": {
+        "0": [
+          {
+            "routing": {
+              "state": "STARTED",
+              "primary": true,
+              "node": "zDC_RorJQCao9xf9pg3Fvw"
+            },
+            "num_committed_segments": 0,
+            "num_search_segments": 1,
+            "segments": {
+              "_0": {
+                "generation": 0,
+                "num_docs": 1,
+                "deleted_docs": 0,
+                "size_in_bytes": 3800,
+                "memory_in_bytes": 1410,
+                "committed": false,
+                "search": true,
+                "version": "7.0.0",
+                "compound": true,
+                "attributes": {
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+----
+
+. _0 :JSON文档的key是段的名称。 此名称用于生成文件名：在分片目录中以此段名开头的所有文件都属于此段。
+. generation: 生成新段的时候生成编号会递增,段名称来自这个生成号
+. num_docs:存储在此段中的未删除文档的数量。
+. deleted_docs:存储在此段中的已删除文档数。如果此数字大于0，则完全正常，当此段合并时将回收空间。
+. size_in_bytes:此段使用的磁盘空间量（以字节为单位）。
+. memory_in_bytes:段需要将一些数据存储到内存中以便可以有效地搜索。此数字返回用于此目的的字节数。值-1表示Elasticsearch无法计算此数字。
+. committed:段是否已在磁盘上同步。提交的段将在硬重启后继续存在。如果出现false，也无需担心，来自未提交段的数据也会存储在事务日志中，以便Elasticsearch能够在下次启动时重放更改。
+. search:该段是否可搜索。 值false很可能意味着该段已写入磁盘但从那时起没有进行刷新以使其可搜索。
+. version:已用于编写此段的Lucene版本。
+. compound:段是否存储在复合文件中。 如果为true，则表示Lucene将段中的所有文件合并为一个文件以保存文件描述符。
+. attributes:包含有关是否启用高压缩的信息
+
+**详细模式**
+要添加可用于调试的其他信息，请使用verbose标志。
+[source,shell]
+----
+GET /test/_segments?verbose=true
+----
+响应:
+[source,json]
+----
+{
+    ...
+        "_0": {
+            ...
+            "ram_tree": [
+                {
+                    "description": "postings [PerFieldPostings(format=1)]",
+                    "size_in_bytes": 2696,
+                    "children": [
+                        {
+                            "description": "format 'Lucene50_0' ...",
+                            "size_in_bytes": 2608,
+                            "children" :[ ... ]
+                        },
+                        ...
+                    ]
+                },
+                ...
+                ]
+
+        }
+    ...
+}
+----
+
+=== 索引恢复
+
+索引恢复API提供对正在进行的索引碎片恢复的监控。可以针对特定索引或群集范围报告恢复状态。
+
+下面的例子报告了index1和index2的恢复信息:
+[source,shell]
+----
+GET index1,index2/_recovery?human
+----
+
+查看整个集群的恢复状态:
+[source,shell]
+----
+GET /_recovery?human
+----
+
+响应信息:
+[source,shell]
+----
+{
+  "index1" : {
+    "shards" : [ {
+      "id" : 0,
+      "type" : "SNAPSHOT",
+      "stage" : "INDEX",
+      "primary" : true,
+      "start_time" : "2014-02-24T12:15:59.716",
+      "start_time_in_millis": 1393244159716,
+      "stop_time" : "0s",
+      "stop_time_in_millis" : 0,
+      "total_time" : "2.9m",
+      "total_time_in_millis" : 175576,
+      "source" : {
+        "repository" : "my_repository",
+        "snapshot" : "my_snapshot",
+        "index" : "index1",
+        "version" : "{version}",
+        "restoreUUID": "PDh1ZAOaRbiGIVtCvZOMww"
+      },
+      "target" : {
+        "id" : "ryqJ5lO5S4-lSFbGntkEkg",
+        "host" : "my.fqdn",
+        "transport_address" : "my.fqdn",
+        "ip" : "10.0.1.7",
+        "name" : "my_es_node"
+      },
+      "index" : {
+        "size" : {
+          "total" : "75.4mb",
+          "total_in_bytes" : 79063092,
+          "reused" : "0b",
+          "reused_in_bytes" : 0,
+          "recovered" : "65.7mb",
+          "recovered_in_bytes" : 68891939,
+          "percent" : "87.1%"
+        },
+        "files" : {
+          "total" : 73,
+          "reused" : 0,
+          "recovered" : 69,
+          "percent" : "94.5%"
+        },
+        "total_time" : "0s",
+        "total_time_in_millis" : 0,
+        "source_throttle_time" : "0s",
+        "source_throttle_time_in_millis" : 0,
+        "target_throttle_time" : "0s",
+        "target_throttle_time_in_millis" : 0
+      },
+      "translog" : {
+        "recovered" : 0,
+        "total" : 0,
+        "percent" : "100.0%",
+        "total_on_start" : 0,
+        "total_time" : "0s",
+        "total_time_in_millis" : 0,
+      },
+      "verify_index" : {
+        "check_index_time" : "0s",
+        "check_index_time_in_millis" : 0,
+        "total_time" : "0s",
+        "total_time_in_millis" : 0
+      }
+    } ]
+  }
+}
+----
+
+上面的响应显示了恢复单个分片的单个索引。 在这种情况下，恢复源是快照存储库，恢复目标是名为“my_es_node”的节点。
+
+此外，输出显示恢复的文件的数量和百分比，以及恢复的字节数和百分比。
+
+在某些情况下，更高水平的细节可能是更可取的。 设置“detailed = true”将显示恢复中的物理文件列表。
+[source,shell]
+----
+GET _recovery?human&detailed=true
+----
+响应:
+[source,json]
+----
+{
+  "index1" : {
+    "shards" : [ {
+      "id" : 0,
+      "type" : "STORE",
+      "stage" : "DONE",
+      "primary" : true,
+      "start_time" : "2014-02-24T12:38:06.349",
+      "start_time_in_millis" : "1393245486349",
+      "stop_time" : "2014-02-24T12:38:08.464",
+      "stop_time_in_millis" : "1393245488464",
+      "total_time" : "2.1s",
+      "total_time_in_millis" : 2115,
+      "source" : {
+        "id" : "RGMdRc-yQWWKIBM4DGvwqQ",
+        "host" : "my.fqdn",
+        "transport_address" : "my.fqdn",
+        "ip" : "10.0.1.7",
+        "name" : "my_es_node"
+      },
+      "target" : {
+        "id" : "RGMdRc-yQWWKIBM4DGvwqQ",
+        "host" : "my.fqdn",
+        "transport_address" : "my.fqdn",
+        "ip" : "10.0.1.7",
+        "name" : "my_es_node"
+      },
+      "index" : {
+        "size" : {
+          "total" : "24.7mb",
+          "total_in_bytes" : 26001617,
+          "reused" : "24.7mb",
+          "reused_in_bytes" : 26001617,
+          "recovered" : "0b",
+          "recovered_in_bytes" : 0,
+          "percent" : "100.0%"
+        },
+        "files" : {
+          "total" : 26,
+          "reused" : 26,
+          "recovered" : 0,
+          "percent" : "100.0%",
+          "details" : [ {
+            "name" : "segments.gen",
+            "length" : 20,
+            "recovered" : 20
+          }, {
+            "name" : "_0.cfs",
+            "length" : 135306,
+            "recovered" : 135306
+          }, {
+            "name" : "segments_2",
+            "length" : 251,
+            "recovered" : 251
+          }
+          ]
+        },
+        "total_time" : "2ms",
+        "total_time_in_millis" : 2,
+        "source_throttle_time" : "0s",
+        "source_throttle_time_in_millis" : 0,
+        "target_throttle_time" : "0s",
+        "target_throttle_time_in_millis" : 0
+      },
+      "translog" : {
+        "recovered" : 71,
+        "total" : 0,
+        "percent" : "100.0%",
+        "total_on_start" : 0,
+        "total_time" : "2.0s",
+        "total_time_in_millis" : 2025
+      },
+      "verify_index" : {
+        "check_index_time" : 0,
+        "check_index_time_in_millis" : 0,
+        "total_time" : "88ms",
+        "total_time_in_millis" : 88
+      }
+    } ]
+  }
+}
+
+----
+此响应显示了已恢复的实际文件及其大小的详细列表（为简洁而截断）。
+
+还显示了各个恢复阶段的时间（以毫秒为单位）：索引检索，translog重放和索引开始时间。
+
+请注意，上面的清单表明恢复处于“完成”阶段。 所有恢复，无论是正在进行还是完成，都保持在集群状态，并且可以随时报告。设置“active_only = true”将仅报告正在进行的恢复。
+
+|===
+|detailed|显示详细视图。这主要用于查看物理索引文件的恢复。 默认值：false。
+|active_only|仅显示当前正在进行的恢复。 默认值：false。
+|id|分片ID
+|type|恢复类型:store,snapshot,replica,relocating
+|stage|恢复阶段,int:恢复还没开始,index:读取索引元数据并复制,start:启动;打开索引使用,translog:重播事务日志,finalize:清楚,done:完成
+|primary|如果分片是主分片，则为真，否则为假
+|start_time|恢复开始的时间
+|stop_time|恢复结束的时间
+|total_time_in_millis|恢复分片的总时间（以毫秒为单位）
+|source|Recovery source:存储库描述，如果恢复来自快照,否则说明源节点
+|target|目标节点
+|index|物理索引恢复统计
+|translog|有关translog恢复的统计信息
+|start|有关打开和启动索引的时间统计信息
+|===
+
+=== 索引分片存储
+提供索引分片副本的存储信息.存储有关哪些节点分片副本存在的信息报告，分片副本分配ID，每个分片副本的唯一标识符以及打开分片索引或早期引擎故障时遇到的任何异常。
+
+默认情况下，仅列出具有至少一个未分配副本的分片的存储信息。当群集运行状况状态为黄色时，这将列出具有至少一个未分配副本的分片的存储信息。当群集运行状况为红色时，这将列出分片的存储信息，该分片具有未分配的原色。
+
+端点包括分片存储特定索引，多个索引或全部的信息：
+[source,shell]
+----
+# return information of only index test
+GET /test/_shard_stores
+
+# return information of only test1 and test2 indices
+GET /test1,test2/_shard_stores
+
+# return information of all indices
+GET /_shard_stores
+----
+
+分片存储信息可以通过status参数修改,默认是yellow和red,yellow列出至少有一个副本未分配,red列出未分配主分片,green列出所有正常分配的
+[source,shell]
+----
+GET /_shard_stores?status=green
+----
+
+分片存储信息通过索引和分片id分组
+[source,json]
+----
+{
+   "indices": {
+       "my-index": {
+           "shards": {
+              "0": { 
+                "stores": [ 
+                    {
+                        "sPa3OgxLSYGvQ4oPs-Tajw": { 
+                            "name": "node_t0",
+                            "ephemeral_id" : "9NlXRFGCT1m8tkvYCMK-8A",
+                            "transport_address": "local[1]",
+                            "attributes": {}
+                        },
+                        "allocation_id": "2iNySv_OQVePRX-yaRH_lQ", 
+                        "allocation" : "primary|replica|unused" 
+                        "store_exception": ... 
+                    }
+                ]
+              }
+           }
+       }
+   }
+}
+----
+
+=== 清除缓存
+
+可以清除所有索引的缓存或特定索引的缓存
+[source,shell]
+----
+POST /twitter/_cache/clear
+----
+
+默认情况下，API将清除所有缓存。通过将query，fielddata或request url参数设置为true，可以显式清除特定的缓存。
+[source,shell]
+----
+POST /twitter/_cache/clear?query=true      
+POST /twitter/_cache/clear?request=true    
+POST /twitter/_cache/clear?fielddata=true   
+----
+
+除此之外，还可以通过使用逗号分隔的应清除字段列表的fields参数来清除与特定字段相关的所有缓存。请注意，提供的名称必须引用具体字段 - 不支持对象和字段别名。
+[source,shell]
+----
+POST /twitter/_cache/clear?fields=foo,bar   
+----
+
+同样也支持多索引和全索引
+[source,shell]
+----
+POST /kimchy,elasticsearch/_cache/clear
+
+POST /_cache/clear
+----
+
+=== FLush
+
+flush API允许通过API刷新一个或多个索引。 索引的刷新过程可确保当前仅保留在事务日志中的任何数据也永久保留在Lucene中。这减少了恢复时间，因为在Lucene索引打开后不需要从事务日志重新编制索引数据,默认情况下，Elasticsearch根据需要自动触发刷新。 用户很少需要直接调用API。
+[source,shell]
+----
+POST twitter/_flush
+----
+
+支持多索引和全索引
+[source,shell]
+----
+POST kimchy,elasticsearch/_flush
+
+POST _flush
+----
+
+=== Refresh
+
+=== Force Merge

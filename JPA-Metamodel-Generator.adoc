@@ -1,0 +1,116 @@
+= JPA Metamodel Generator
+
+== 概述
+
+JPA 2定义了一种新的类型安全的Criteria API，它允许以强类型方式构造条件查询，使用元模型对象提供类型安全性。对于开发人员来说，重要的是元模型生成的任务可以自动化。Hibernate Static Metamodel Generator是一个基于[Pluggable Annotation Processing API]的注释处理器，其任务是创建JPA 2静态元模型类。我们来看下面的例子:
+
+.实体类
+[source,java]
+----
+@Entity
+public class Order {
+
+    @Id 
+    @GeneratedValue
+    Integer id;
+
+    @ManyToOne 
+    Customer customer;
+
+    @OneToMany 
+    Set<Item> items;
+
+    BigDecimal totalCost;
+}
+
+
+@Entity  
+public class Item { 
+
+    @Id
+    @GeneratedValue
+    Integer id;
+
+    int quantity;
+
+    @ManyToOne
+    Order order;
+
+}
+----
+
+.生成的元模型
+[source,java]
+----
+@StaticMetamodel(Order.class)
+public class Order_ {
+
+    public static volatile SingularAttribute<Order, Integer> id;
+
+    public static volatile SingularAttribute<Order, Customer> customer;
+
+    public static volatile SetAttribute<Order, Item> items;
+
+    public static volatile SingularAttribute<Order, BigDecimal> totalCost;
+
+}
+----
+
+.使用
+[source,java]
+----
+CriteriaQuery<Order> cq = entityManager.getCriteriaBuilder().createQuery(Order.class);
+SetJoin<Order, Item> itemNode = cq.from(Order.class).join(Order_.items);
+cq.where(cb.equal(itemNode.get(Item_.id), 5 ) ).distinct(true);
+----
+
+注释处理器为实体类生成元数据模型的规则如下:
+
+. 对于包p中的每个托管类X，创建包p中的元模型类X_。
+. 元模型类的名称是通过将“_”附加到托管类的名称后面派生的。
+. 元模型类X_必须使用javax.persistence.StaticMetamodel批注进行批注。
+. 如果类X扩展另一个类S，其中S是由X扩展的派生类（即，实体或映射超类），则类X_必须扩展类S_，其中S_是为S创建的元模型类。
+. 对于由类X声明的每个持久性非集合值属性y，其中y的类型为Y，元模型类必须包含如下声明：
+	public static volatile SingularAttribute<X, Y> y;
+. 对于由类X声明的每个持久集合值属性z，其中z的元素类型为Z，元模型类必须包含如下声明：
+	public static volatile CollectionAttribute<X, Z> z;
+	public static volatile SetAttribute<X, Z> z;
+    public static volatile ListAttribute<X, Z> z;
+	public static volatile MapAttribute<X, K, Z> z;
+
+
+== 在maven中使用
+
+1.引入maven
+[source,xml]
+----
+        <dependency>
+            <groupId>org.hibernate</groupId>
+            <artifactId>hibernate-jpamodelgen</artifactId>
+            <version>5.3.6.Final</version>
+            <scope>provided</scope>
+        </dependency>
+----
+
+2. 执行mvn complie,在target\generated-sources\annotations目录下面生成元模型(该目录还被mvn添加成源码目录)
+
+[source,java]
+----
+@Generated(value = "org.hibernate.jpamodelgen.JPAMetaModelEntityProcessor")
+@StaticMetamodel(Item2.class)
+public abstract class Item2_ {
+
+	public static volatile MapAttribute<Item2, String, String> data;
+	public static volatile SingularAttribute<Item2, Integer> id;
+
+	public static final String DATA = "data";
+	public static final String ID = "id";
+
+}
+----
+
+生成的代码和上面的规范不一致,这是因为版本的问题,上面的规范是老版本的.
+
+== 在idea中使用
+
+image::idea-annotation-processor-config.png[]

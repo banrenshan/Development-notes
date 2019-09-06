@@ -1,0 +1,213 @@
+---
+title: ngnix
+---
+
+= ngnix 
+:toc: left
+:icons: font
+:imagesdir: /blog/images
+
+== 访问日志解码请求参数
+
+
+== 添加或启动新模块
+
+nginx不支持动态安装、加载模块的，所以当你安装第三方模块或者启动nginx本身的新模块功能的时候，都是覆盖nginx的；所以，一定要注意：首先查看你已经安装的nginx模块！然后安装新东西的时候，要把已安装的，再次配置。
+
+1.查看ngnix已经安装的模块`./nginx -V`
+
+2.执行configure和make
+[source,shell]
+----
+./configure --prefix=/usr/local/nginx \
+ --with-http_stub_status_module \
+ --with-http_ssl_module --with-http_realip_module \
+ --with-http_image_filter_module \
+ --add-module=../ngx_pagespeed-master
+
+
+make
+
+----
+
+3.替换nginx二进制文件
+
+`cp /root/nginx-1.8.1/objs/nginx /usr/local/nginx/sbin/nginx`
+
+
+== X-Forwarded-For 和 X-Real-IP
+
+X-Forwarded-For:被代理服务器使用,用来记录经过的代理服务信息.
+X-Real-IP:被代理服务器使用,用来记录客户端的真实IP地址.
+
+举例: 现在有ngnix代理服务器A和B,请求先请过A[10.187.144.41],然后B[10.187.112.151],最后到达服务器[10.176.175.149]处理该请求.
+
+.A的ngnix配置
+[source,shell]
+----
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Real-IP $remote_addr;
+----
+
+.B的ngnix配置
+[source,shell]
+----
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+----
+
+.服务器的响应
+[source,shell]
+----
+x-forwarded-for:114.141.166.125, 10.187.144.41 
+host:10.176.175.149:8080 
+connection:close 
+x-real-ip:114.141.166.125 
+
+getRemoteAddr:10.187.112.151 
+getRemoteHost:10.187.112.151 
+getServerName:10.176.175.149
+----
+
+
+变动1:如果B的配置也加上proxy_set_header X-Real-IP $remote_addr呢,服务器收到的请求头信息会是神马呢?
+
+[source,shell]
+----
+x-real-ip:10.187.144.41 
+x-forwarded-for:114.141.166.125, 10.187.144.41 
+host:10.176.175.149:8080 
+
+getRemoteAddr:10.187.112.151 
+getRemoteHost:10.187.112.151 
+getServerName:10.176.175.149
+----
+
+需要注意的是x-forwarded-for并没有把最后一个代理添加上去
+
+我们看到x-real-ip的地址发生改变,不再是真实的客户端ip,而是代理A的ip,说明此时的$remote_addr的值是代理A的IP,如何修改这个值为真实的IP呢? 可以使用ngx_http_realip_module模块
+
+== ngx_http_realip_module模块
+
+安装请参考模块安装,A配置不变,B配置如下:
+[source,shell]
+----
+set_real_ip_from 10.187.144.41
+real_ip_header X-Real-IP ;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Real-IP $remote_addr;
+----
+
+set_real_ip_from:指定真实IP的地址是在哪个代理机器上
+real_ip_header:真实IP所在的请求头字段
+
+
+== HttpGeoIP模块
+
+1.安装
+
+[source,shell]
+----
+#下载免费的geo_city数据库
+wget http://geolite.maxmind.com/download/geoip/database/GeoLiteCity.dat.gz
+#下载免费的geo_coundty数据库
+wget http://geolite.maxmind.com/download/geoip/database/GeoLiteCountry/GeoIP.dat.gz
+#在debian中安装libgeoip:
+sudo apt-get install libgeoip-dev
+#其它系统，你可以下载并编译一个源文件
+wget http://geolite.maxmind.com/download/geoip/api/c/GeoIP.tar.gz
+#编译
+./configure --with-http_geoip_module
+----
+
+2.配置数据源
+[source,shell]
+----
+http {
+    geoip_country  GeoIP.dat; #放在ngnix home目录下面
+    geoip_city     GeoLiteCity.dat;
+----
+
+
+3.使用举例
+
+[source,shell]
+----
+
+server {
+...
+        location / {
+            root   /home/vpsee/www;
+            if ($geoip_country_code = CN) {
+                root /home/vpsee/cn;
+            }
+            ...
+        }
+...
+}
+----
+这样，当来自中国的 IP 访问网站后就自动访问到预定的 /home/vpsee/cn 页面
+
+== post_action请求后置处理器
+
+该指令可以在响应完成之后跳转到另外的location上,可用于接口调用统计等.
+
+[source,shell]
+----
+server {
+        listen  80;
+        server_name www.a.com;
+
+
+        location /aa {
+                proxy_set_header Host "www.a-upstream.com";
+                proxy_pass http://127.0.0.1:8000;
+                post_action @action;
+        }
+
+
+        location @action {
+                proxy_set_header Host "www.a-post-action.com";
+                proxy_pass http://127.0.0.1:8001;
+        }
+}
+----
+
+上面的aa请求在发送给8000端口之后,也会发送给8001端口一份
+
+
+== ngx_http_stub_status_module监控ngnix处理的请求数
+
+默认没有开启,配置:
+[source,shell]
+----
+location /basic_status {
+	stub_status;
+}
+----
+
+[source,shell]
+----
+Active connections: 291
+server accepts handled requests
+16630948 16630948 31070465
+Reading: 6 Writing: 179 Waiting: 106
+----
+
+
+. Active connections: 活动状态的连接数；
+. accepts：已经接受的客户端请求的总数；
+. handled：已经处理完成的客户端请求的总数；
+. requests：客户端发来的总的请求数；
+. Reading：处于读取客户端请求报文首部的连接的连接数；
+. Writing：处于向客户端发送响应报文过程中的连接数；
+. Waiting：处于等待客户端发出请求的空闲连接数；
+
+
+== 索引静态目录
+[source,java]
+----
+location  /  { #不能是其他路径
+  autoindex  on;
+}
+----
+

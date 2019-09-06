@@ -1,0 +1,78 @@
+= WeakReference 
+
+即在引用对象的同时仍然允许通过垃圾回收来回收该对象
+
+在Java里, 当一个对象o被创建时, 它被放在Heap里. 当GC运行的时候, 如果发现没有任何引用指向o, o就会被回收以腾出内存空间. 或者换句话说, 一个对象被回收, 必须满足两个条件: 1)没有任何引用指向它 2)GC被运行.
+
+在现实情况写代码的时候, 我们往往通过把所有指向某个对象的referece置空来保证这个对象在下次GC运行的时候被回收.例如:
+[source,java]
+----
+Object c = new Car();  
+c=null; 
+----
+
+但是, 手动置空对象对于程序员来说, 是一件繁琐且违背自动回收的理念的.  对于简单的情况, 手动置空是不需要程序员来做的, 因为在java中, 对于简单对象, 当调用它的方法执行完毕后, 指向它的引用会被从stack中popup, 所以他就能在下一次GC执行时被回收了.
+
+
+但是, 也有特殊例外. 当使用cache的时候, 由于cache的对象正是程序运行需要的, 那么只要程序正在运行, cache中的引用就不会被GC(或者说, cache中的reference拥有了和主程序一样的life cycle). 那么随着cache中的reference越来越多, GC无法回收的object也越来越多, 无法被自动回收. 当这些object需要被回收时, 回收这些object的任务只有交给程序编写者了. 然而这却违背了GC的本质(自动回收可以回收的objects).
+
+所以, java中引入了weak reference. 相对于前面举例中的strong reference:
+[source,java]
+----
+Object c = new Car(); 
+WeakReference<Car> weakCar = new WeakReference(c); 
+----
+
+当一个对象仅仅被weak reference指向, 而没有任何其他strong reference指向的时候, 如果GC运行, 那么这个对象就会被回收. 
+
+[source,java]
+----
+        WeakTest weakTest = new WeakTest(1);
+        WeakReference weakReference = new WeakReference(weakTest);
+        int i = 0;
+        while (true) {
+            if (weakReference.get() != null) { <1>
+                i++;
+                System.err.println("第" + i + "次循环");
+            } else {
+                System.err.println("结束循环");
+                break;
+            }
+
+        }
+    }
+----
+
+<1>  当要获得weak reference引用的object时, 首先需要判断它是否已经被回收.
+
+上面的代码在运行一段时间后就退出了循环,说明WeakReference被gc回收了.
+
+NOTE: 即使有weakTest引用指向对象, 且weakTest是一个strong reference, weak reference指向的对象仍然被回收了. 这是因为java的编译器在发现进入while循环之后, car已经没有被使用了, 所以进行了优化(将其置空?).
+
+如果我们加上一句代码,如下:
+[source,java]
+----
+    public static void main(String[] args) throws InterruptedException {
+        WeakTest weakTest = new WeakTest(1);
+        WeakReference weakReference = new WeakReference(weakTest);
+        int i = 0;
+        while (true) {
+            System.err.println("引用" + weakTest); <1>
+            if (weakReference.get() != null) {
+                i++;
+                System.err.println("第" + i + "次循环");
+            } else {
+                System.err.println("结束循环");
+                break;
+            }
+
+        }
+    }
+----
+
+<1> 此处引用了weakTest对象,就不会被gc回收了,所以循环永远不会退出
+
+
+soft reference和weak reference一样, 但被GC回收的时候需要多一个条件: 当系统内存不足时, soft reference指向的object才会被回收. 正因为有这个特性, soft reference比weak reference更加适合做cache objects的reference. 因为它可以尽可能的retain cached objects, 减少重建他们所需的时间和消耗.
+
+

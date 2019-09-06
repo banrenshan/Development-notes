@@ -1,0 +1,1577 @@
+---
+title: jpa
+---
+
+= jpa 
+:toc: left
+:icons: font
+:imagesdir: /blog/images
+
+
+== 关系映射
+
+=== 单向多对一
+
+. 一方
+[source,java]
+----
+@Entity
+@Table(name = "JPA_PERSON")
+public class Person {
+
+    @Id
+    private Integer id;
+    private String name;
+
+}
+----
+
+.多方
+[source,java]
+----
+@Entity
+@Table(name = "JPA_CAR")
+public class Car {
+
+    @Id
+    @GeneratedValue
+    private Integer id;
+    private String brand;
+
+    @JoinColumn(name = "p_id")
+    @ManyToOne
+    private Person person;
+}
+----
+
+.生成的sql语句
+[source,sql]
+----
+    create table jpa_car (
+       id integer not null,
+        brand varchar(255),
+        p_id integer,
+        primary key (id)
+    ) engine=MyISAM
+
+    create table jpa_person (
+       id integer not null,
+        name varchar(255),
+        primary key (id)
+    ) engine=MyISAM
+
+    alter table jpa_car 
+       add constraint FKjav5b42y9hpwrk4jsiqse1908 
+       foreign key (p_id) 
+       references jpa_person (id)    
+----
+
+1.保存对象
+[source,java]
+----
+        Person person = new Person();
+        person.setId(1);
+        person.setName("zhaozhiqiang");
+
+        Car car = new Car();
+        car.setBrand("奔驰");
+        car.setPerson(person);
+
+        Car car2 = new Car();
+        car2.setBrand("宝马");
+        car2.setPerson(person);
+
+
+        entityManager.persist(person);
+        entityManager.persist(car);
+        entityManager.persist(car2);
+----
+
+.执行的sql
+[source,sql]
+----
+Hibernate: 
+    insert 
+    into
+        jpa_person
+        (name, id) 
+    values
+        (?, ?)
+Hibernate: 
+    insert 
+    into
+        jpa_car
+        (brand, p_id, id) 
+    values
+        (?, ?, ?)
+Hibernate: 
+    insert 
+    into
+        jpa_car
+        (brand, p_id, id) 
+    values
+        (?, ?, ?)
+----
+
+如果先保存多的一方,sql执行会是什么情况呢?请看下面的sql
+
+[source,sql]
+----
+Hibernate: 
+    insert 
+    into
+        jpa_car
+        (brand, p_id, id) 
+    values
+        (?, ?, ?)
+Hibernate: 
+    insert 
+    into
+        jpa_car
+        (brand, p_id, id) 
+    values
+        (?, ?, ?)
+Hibernate: 
+    insert 
+    into
+        jpa_person
+        (name, id) 
+    values
+        (?, ?)
+Hibernate: 
+    update
+        jpa_car 
+    set
+        brand=?,
+        p_id=? 
+    where
+        id=?
+Hibernate: 
+    update
+        jpa_car 
+    set
+        brand=?,
+        p_id=? 
+    where
+        id=?
+
+----
+
+可以看出多了两个update语句.这种情况需要我们注意.在开发的时候一定要避免这种情况,否则会拖慢应用.
+
+2.查询
+
+. 查询person(一方)
+[source,java]
+----
+        entityManager.find(Person.class, 1);
+----
+
+. 查询person的sql
+[source,sql]
+----
+    select
+        person0_.id as id1_2_0_,
+        person0_.name as name2_2_0_ 
+    from
+        jpa_person person0_ 
+    where
+        person0_.id=?
+----
+
+. 查询car(多方)
+[source,java]
+----
+    entityManager.find(Car.class, 2);
+----
+
+. 查询car的sql(多方)
+[source,sql]
+----
+    select
+        car0_.id as id1_1_0_,
+        car0_.brand as brand2_1_0_,
+        car0_.p_id as p_id3_1_0_,
+        person1_.id as id1_2_1_,
+        person1_.name as name2_2_1_ 
+    from
+        jpa_car car0_ 
+    left outer join
+        jpa_person person1_ 
+            on car0_.p_id=person1_.id 
+    where
+        car0_.id=?
+----
+
+对比发现,多的一方默认会开启关联查询(@ManyToOne的fetch属性为early,修改成LAZY就是单表查询了),一的一方则是单表查询(因为该类并没有关联car实体).
+
+
+3.修改
+
+. 更新car
+[source,java]
+----
+        Person person = new Person();
+        person.setId(2);
+        person.setName("zhaozhiqiang33443");
+
+        Car car = new Car();
+        car.setId(17);
+        car.setBrand("奔驰20");
+        car.setPerson(person);
+
+
+        entityManager.merge(car);
+----
+
+. 更新car的sql
+[source,sql]
+----
+Hibernate: 
+    select
+        car0_.id as id1_1_0_,
+        car0_.brand as brand2_1_0_,
+        car0_.p_id as p_id3_1_0_ 
+    from
+        jpa_car car0_ 
+    where
+        car0_.id=?
+Hibernate: 
+    select
+        person0_.id as id1_2_0_,
+        person0_.name as name2_2_0_ 
+    from
+        jpa_person person0_ 
+    where
+        person0_.id=?
+Hibernate: 
+    update
+        jpa_car 
+    set
+        brand=?,
+        p_id=? 
+    where
+        id=?
+----
+
+
+由上面的sql,可以看出更新car的时候,并没有更新person(@ManyToOne的cascade值为none),但是原先的join查询,编程了n+1查询,这是为什么呢?怎么避免这种情况?JPA这种更新是线从数据库里面select相关对象,然后再执行update,明显要比直接update消耗资源,这种怎么避免.
+
+4. 删除
+
+[source,java]
+----
+        Car car1 = entityManager.find(Car.class, 17);
+        entityManager.remove(car1);
+----
+
+JPA不能删除游离状态的实体.
+
+=== 单向一对多
+
+. 一方
+[source,java]
+----
+@Entity
+@Table(name = "JPA_STAFF")
+public class Staff {
+
+    @Id
+    @GeneratedValue
+    private int id;
+
+    private String name;
+
+    @JoinColumn(name = "staff_id")
+    @OneToMany
+    private List<BankCard> cards;
+}
+----
+
+. 多方
+[source,java]
+----
+@Entity
+@Table(name = "JPA_BANKCARD")
+public class BankCard {
+
+    @Id
+    @GeneratedValue
+    private String num;
+
+    private String bank;
+}
+----
+
+建表的sql和单向的多对一是一样的.
+
+1. 添加
+[source,java]
+----
+        Staff staff=new Staff();
+        staff.setName("赵志强");
+
+        BankCard card=new BankCard();
+        card.setBank("建行");
+        card.setNum("212");
+        BankCard card2=new BankCard();
+        card2.setBank("工行");
+        card2.setNum("dsdsd");
+
+        List<BankCard> list=new ArrayList<>();
+        list.add(card);
+        list.add(card2);
+
+        staff.setCards(list);
+
+        entityManager.persist(staff);
+----
+
+[source,sql]
+----
+Hibernate: 
+    insert 
+    into
+        jpa_staff
+        (name, id) 
+    values
+        (?, ?)
+Hibernate: 
+    update
+        jpa_bankcard 
+    set
+        staff_id=? 
+    where
+        num=?
+Hibernate: 
+    update
+        jpa_bankcard 
+    set
+        staff_id=? 
+    where
+        num=?
+----
+
+虽然不会级联保存多的对象,但是会更新绑定关系.
+
+2. 查询
+[source,java]
+----
+        entityManager.find(Staff.class,17);
+----
+
+[source,sql]
+----
+    select
+        staff0_.id as id1_4_0_,
+        staff0_.name as name2_4_0_ 
+    from
+        jpa_staff staff0_ 
+    where
+        staff0_.id=?
+----
+
+查询方式为懒加载,如果想关联查询可以修改fetch方式.
+
+3. 修改
+
+[source,java]
+----
+        Staff staff = entityManager.find(Staff.class, 24);
+        staff.setName("llll");
+        staff.getCards().get(0).setBank("llll");
+----
+
+[source,sql]
+----
+Hibernate: 
+    select
+        staff0_.id as id1_4_0_,
+        staff0_.name as name2_4_0_ 
+    from
+        jpa_staff staff0_ 
+    where
+        staff0_.id=?
+Hibernate: 
+    select
+        cards0_.staff_id as staff_id3_1_0_,
+        cards0_.num as num1_1_0_,
+        cards0_.num as num1_1_1_,
+        cards0_.bank as bank2_1_1_ 
+    from
+        jpa_bankcard cards0_ 
+    where
+        cards0_.staff_id=?
+Hibernate: 
+    update
+        jpa_staff 
+    set
+        name=? 
+    where
+        id=?
+Hibernate: 
+    update
+        jpa_bankcard 
+    set
+        bank=? 
+    where
+        num=?
+----
+
+发生了级联更新
+
+NOTE: 所有的更新,都是实体被加载后,状态发生了变化,JPA然后把这些变化持久化.区别新建实体的保存.
+
+4. 删除
+[source,java]
+----
+        Staff staff = entityManager.find(Staff.class, 24);
+        entityManager.remove(staff);
+----
+
+[source,sql]
+----
+Hibernate: 
+    select
+        staff0_.id as id1_4_0_,
+        staff0_.name as name2_4_0_ 
+    from
+        jpa_staff staff0_ 
+    where
+        staff0_.id=?
+Hibernate: 
+    update
+        jpa_bankcard 
+    set
+        staff_id=null 
+    where
+        staff_id=?
+Hibernate: 
+    delete 
+    from
+        jpa_staff 
+    where
+        id=?
+----
+
+没有级联删除,只是解绑了关系.
+
+
+=== 双向一对多
+
+== 常用注解
+
+. @Entity	
+. @Table(name="tablename")
+. @Column(name = "columnname")
+. @Id
+. @Transient :指定该属性不映射为数据库字段.	
+
+== ID生成策略
+
+ID对应数据库表的主键，是保证唯一性的重要属性。JPA提供了以下几种ID生成策略
+
+. GeneratorType.AUTO ，由JPA自动生成
+. GenerationType.IDENTITY，使用数据库的自增长字段，需要数据库的支持（如SQL Server、MySQL、DB2、Derby等）
+. GenerationType.SEQUENCE，使用数据库的序列号，需要数据库的支持（如Oracle）
+. GenerationType.TABLE，使用指定的数据库表记录ID的增长 需要定义一个TableGenerator，在@GeneratedValue中引用。例如：
+
+[source,java]
+----
+@TableGenerator( name="myGenerator", table="GENERATORTABLE", pkColumnName = "ENTITYNAME", pkColumnValue="MyEntity", valueColumnName = "PKVALUE", allocationSize=1 )
+
+@GeneratedValue(strategy = GenerationType.TABLE,generator="myGenerator")
+----
+
+== 复合主键
+
+
+== 实体生命周期
+
+images::20160324004308608.jpg[]
+
+. New：瞬时对象，尚未有id，还未和Persistence Context建立关联的对象。
+. Managed：持久化受管对象，有id值，已经和Persistence Context建立了关联的对象。
+. Datached：游离态离线对象，有id值，但没有和Persistence Context建立关联的对象。
+. Removed：删除的对象，有id值，尚且和Persistence Context有关联，但是已经准备好从数据库中删除
+
+
+Managed状态下的数据保存，更新以及删除数据下的Removed状态，数据都不会立即更新到数据库，只有当你事务提交或者em.flush()，才会立即更新到数据库。
+
+Datached的状态，可以调用em.merge()方法，这个方法会根据实体类的id来更新数据库数据，这时实体类变成了Managed状态。
+
+[source,java]
+----
+    //New 状态
+    Task t = new Task();
+    t.setTaskName("task" + new Date().getTime());
+    t.setCreateTime(new Date());
+
+    //Managed状态
+    em.persist(t); //实体类t已经有id t.getId();
+    t.setTaskName("kkk");  //更新任务名称，这时，如果提交事务，则直接将kkk更新到数据库
+
+    //Detached状态 事务提交或者调用em.clear都直接将实体任务状态变为Detached
+    em.clear();
+    t.setTaskName("kkk"); //更新数据不会更新到数据库
+
+    //Removed状态
+    em.remove(t)
+
+----
+
+== 生命周期事件
+
+image::20150430094759399.png[]
+
+. 通过在实体的方法上标注@PrePersist，@PostPersist等声明即可在事件发生时触发这些方法。
+. 在实体类上标注@EntityListeners(class=)来绑定事件
+
+== 实体关系
+
+JPA定义了one-to-one、one-to-many、many-to-one、many-to-many 4种关系。
+
+对于数据库来说，通常在一个表中记录对另一个表的外键关联；对应到实体对象，持有关联数据的一方称为owning-side，另一方称为inverse-side。
+
+为了编程的方便，我们经常会希望在inverse-side也能引用到owning-side的对象，此时就构建了双向关联关系。 在双向关联中，需要在inverse-side定义mappedBy属性，以指明在owning-side是哪一个属性持有的关联数据。
+
+关系映射要点
+
+|===
+|关系类型	|Owning-Side	|Inverse-Side
+|one-to-one |	@OneToOne|	@OneToOne(mappedBy="othersideName")
+|one-to-many/many-to-one|	@ManyToOne	@OneToMany(mappedBy="xxx")
+|many-to-many |	@ManyToMany | @ManyToMany(mappedBy ="xxx")
+|===
+
+其中one-to-many/many-to-one关系使用@JoinColumn指定外键列的信息
+其中 many-to-many关系的owning-side可以使用@JoinTable声明自定义关联表，比如Book和Author之间的关联表：
+@JoinTable(name = "BOOKAUTHOR", joinColumns = { @JoinColumn(name = "BOOKID", referencedColumnName = "id") }, inverseJoinColumns = { @JoinColumn(name = "AUTHORID", referencedColumnName = "id") })
+
+关联关系还可以定制延迟加载和级联操作的行为（owning-side和inverse-side可以分别设置）：
+
+. 通过设置fetch=FetchType.LAZY 或 fetch=FetchType.EAGER来决定关联对象是延迟加载或立即加载。
+. 通过设置cascade={options}可以设置级联操作的行为，其中options可以是以下组合：
+	. CascadeType.MERGE 级联更新
+	. CascadeType.PERSIST 级联保存
+	. CascadeType.REFRESH 级联刷新
+	. CascadeType.REMOVE 级联删除
+	. CascadeType.ALL 级联上述4种操作
+
+== 继承关系
+
+继承关系
+JPA通过在父类增加@Inheritance(strategy=InheritanceType.xxx)来声明继承关系,支持3种继承策略：
+
+. 单表继承（InheritanceType.SINGLETABLE），所有继承树上的类共用一张表，在父类指定（@DiscriminatorColumn）声明并在每个类指定@DiscriminatorValue来区分类型。
+. 类表继承（InheritanceType.JOINED），父子类共同的部分公用一张表，其余部分保存到各自的表，通过join进行关联。
+. 具体表继承（InheritanceType.TABLEPERCLASS)，每个具体类映射到自己的表。
+
+其中1和2能够支持多态，但是1需要允许字段为NULL，2需要多个JOIN关系；3最适合关系数据库，对多态支持不好。具体应用时根据需要取舍。
+
+
+== 结果投影
+
+
+== 查询缓存
+
+== 持久化类型
+
+持久化类型是指可以存储在数据库中的数据类型,包括:
+
+. 用户定义类:Entity classes(实体类), Mapped superclasses(映射父类), Embeddable classes(嵌入类)
+. java简单类型: 基本类型, 包装类型, String, Date and Math types.
+. 多值类型:Collections, Maps 和 Arrays.
+. 其他类型:Enum types and Serializable types (user or system defined)
+
+NOTE: 只有实体类的实例可以直接存储在数据库中。其他可持久类型可以作为字段嵌入实体类中。
+
+== 实体类
+实体类是普通用户定义的Java类，其实例可以存储在数据库中。将类声明为实体的简单方法是使用@Entity标记它：
+
+[source,java]
+----
+@Entity
+public class MyEntity {
+  
+}
+----
+
+=== 映射超类
+
+在JPA中，声明为映射超类的类具有实体类的某些功能，但也有一些限制。 但是，ObjectDB不会强制实施这些限制，因此ObjectDB将映射的超类视为普通实体类
+
+*_映射的超类实际上仅在使用基于ORM的JPA的应用程序中有用（例如Hibernate，TopLink，EclipseLink，OpenJPA，JPOX，DataNucleus等）。_*
+
+=== Embeddable(嵌入类)
+
+可嵌入类是用户定义的可持久类，用作值类型。 与其他非实体类型一样，可嵌入类的实例只能作为嵌入对象存储在数据库中，即作为包含在实体对象的一部分.
+
+.定义嵌入类
+[source,java]
+----
+@Embeddable
+public class AddressInfo {
+    private String region;
+    private String city;
+    private String area;
+}
+----
+
+实体类的要求:
+
+. 应该是顶级类（即不是嵌套/内部类）。
+. 应该有一个公共或受保护的无参数构造函数。
+. 不能是final的，不能有final方法或final实例变量。
+
+.使用嵌入类
+[source,java]
+----
+@Entity
+@Table(name = "JPA_USER_INFO")
+public class UserInfo extends IntIdentity {
+
+    private String name;
+    private int age;
+    private String email;
+
+    @JoinColumn(name = "user_id")
+    @OneToOne
+    private User user;
+
+    @Embedded
+    private AddressInfo addressInfo;
+}
+
+----
+
+.生成的sql
+[source,sql]
+----
+    create table jpa_user_info (
+       id integer not null,
+        area varchar(255),
+        city varchar(255),
+        region varchar(255),
+        age integer not null,
+        email varchar(255),
+        name varchar(255),
+        user_id integer,
+        primary key (id)
+    )
+----
+
+可嵌入类的实例始终嵌入在其他实体对象中，并且不需要单独的空间分配和单独的存储和检索操作。 因此，使用可嵌入类可以节省数据库中的空间并提高效率。
+
+
+但是，可嵌入类没有自己的标识（主键），这会导致一些限制（例如，它们的实例不能被不同的实体对象共享，也无法直接查询），因此决定是否将类声明为 实体或嵌入式要求逐案考虑。
+
+
+
+NOTE: 在创建数据库表的时候,可嵌入类中的字段作为引用类中的列创建数据表
+
+=== JAVA基础数据类型
+
+. 基本类型: boolean, byte, short, char, int, long, float and double
+. 包装类型: Boolean, Byte, Short, Character, Integer, Long, Float and Double
+. java.math.BigInteger, java.math.BigDecimal
+. java.lang.String
+. java.util.Date, java.util.Calendar,java.sql.Date, java.sql.Time, java.sql.Timestamp
+    
+****
+    * java.sql.Date - 仅仅代表日期 (e.g. 2010-12-31).
+    * java.sql.Time - 仅仅代表时钟 (e.g. 23:59:59).
+    * java.sql.Timestamp - 代表日期和时钟 (e.g. 2010-12-31 23:59:59).
+****
+
+另一方面，java.util.Date和java.util.Calendar类型是通用的，可以使用@Temporal JPA注释表示上述任何一种：
+[source,java]
+----
+@Entity
+public class DatesAndTimes {
+    // Date Only:
+    java.sql.Date date1;
+    @Temporal(TemporalType.DATE) java.util.Date date2
+    @Temporal(TemporalType.DATE) java.util.Calendar date3;
+
+    // Time Only:
+    java.sql.Time time1;
+    @Temporal(TemporalType.TIME) java.util.Date time2;
+    @Temporal(TemporalType.TIME) java.util.Calendar time3;
+
+    // Date and Time:
+    java.sql.Timestamp dateAndTime1;
+    @Temporal(TemporalType.TIMESTAMP) java.util.Date dateAndTime2;
+    @Temporal(TemporalType.TIMESTAMP) java.util.Calendar dateAndTime3;
+    java.util.Date dateAndTime4; // date and time but not JPA portable
+    java.util.Calendar dateAndTime5; // date and time but not JPA portable  
+}
+----
+
+通过使用java.sql.Date类型或通过指定@Temporal（TemporalType.DATE）注释来保存纯日期（没有时间部分）有几个好处：
+
+. 节省了数据库中的空间。
+. 更有效（存储和检索更快）。
+. 简化了日期和日期范围的查询。
+
+存储实体时，其日期和时间字段会自动调整为所请求的模式。 例如，上面的字段date1，date2和date3可以初始化为新的Date（），即同时具有日期和时间。 当它们存储在数据库中时，它们的时间部分被丢弃。
+
+=== 多值类型
+
+以下多值类型是可持久的:
+. java.util包下面集合: ArrayList, Vector, Stack, LinkedList, ArrayDeque, PriorityQueue, HashSet, LinkedHashSet, TreeSet.
+. java.util包下面的map: HashMap, Hashtable, WeakHashMap, IdentityHashMap, LinkedHashMap, TreeMap and Properties
+. 数组(包括多维数组)
+
+支持泛型（例如ArrayList <String>）和非泛型（例如ArrayList）集合和map类型，只要它们的值（即集合和数组中的元素以及map中的键和值）是空值或持久性实例类型。
+
+除了ObjectDB完全支持的集合和映射类之外，在存储实体时还可以使用任何其他实现java.util.Collection或java.util.Map的类。 如果使用不受支持的集合或映射类型，则在从数据库检索数据时，ObjectDB将切换到类似的受支持类型。
+
+例如，Arrays.asList方法返回ObjectDB不支持的内部Java集合类型的实例。 不过，可以存储以下实体：
+
+[source,java]
+----
+@Entity
+public class EntityWithList {
+    private List<String> words = Arrays.asList("not", "ArrayList");
+}
+----
+
+从数据库中检索实体时，该列表将实例化为ArrayList。 在这种情况下，使用接口（List <String>）对于字段类型是必不可少的，以便在检索实体时切换到支持的集合类型。 实际上，JPA要求仅将持久集合和Map字段声明为接口类型（即java.util.Collection，java.util.List，java.util.Set，java.util.Map），这在使用ObjectDB工作时也是一种很好的做法。
+
+=== 代理类
+
+当从数据库查询实体时,多值类型(collections, maps and dates)通过代理类(扩展原始类)被实例化,例如,实体以java.util.ArrayList方式存储到数据库中,查询的时候被代理实例化成objectdb.java.util.ArrayList(继承java.util.ArrayList).
+
+=== 枚举类型
+
+每个枚举类型（用户定义或系统定义）都是可持久的。 但是，如果要对其他平台的可移植性，则只应保留用户定义的枚举类型的值。
+
+默认情况下，枚举值在内部由其序号表示。修改已在现有数据库中使用的枚举类型时需要小心。 新的枚举字段只能在最后安全添加（使用
+
+或者，枚举值可以通过其名称在内部表示。 在这种情况下，名称必须可修改，因为更改名称可能会导致现有数据库中的数据丢失。新的更高的序号）。
+
+使用@Enumerated选择表示方式
+
+[source,java]
+----
+@Entity
+public class Style {
+    Color color1; // default is EnumType.ORDINAL
+    @Enumerated(EnumType.ORDINAL) Color color2;
+    @Enumerated(EnumType.STRING) Color color3;
+}
+
+enum Color { RED, GREEN, BLUE }; 
+----
+
+在上面的示例中，color1和color2字段的值存储为序数（即0,1,2），而color3字段的值在内部存储为字符串（即“RED”，“GREEN”，“BLUE”）。
+
+=== 序列化类型
+
+每个可序列化的类（用户定义的或系统定义的）也是可持久的，但是在持久化数据中依赖序列化具有缺乏可移植性的严重缺点。 在其他平台（例如.NET）上，ObjectDB的未来版本将无法访问内部Java序列化格式。因此，建议仅使用明确指定的可持久类型。
+
+2.2.9版本之后默认禁用序列化。
+
+== 字段
+
+用户定义的类(entity classes, embeddable classes and mapped superclasses)中的字段可以分为下面五中:
+
+. Transient(瞬态) fields
+. Persistent(持久化) fields
+. Inverse (Mapped By) fields
+. Primary key (ID) fields
+. Version field
+
+前三个组（transient, persistent and inverse fields）可用于实体类和可嵌入类。但是，最后两个组（primary key and version fields）只能在实体类中使用。
+
+=== Transient字段
+
+瞬态实体字段是不参与持久性的字段，它们的值永远不会存储在数据库中（类似于Java中不参与序列化的瞬态字段）。 static和final实体字段始终被视为瞬态。 使用Java transient修饰符（也影响序列化）或JPA @Transient注释（仅影响持久性），可以将其他字段显式声明为瞬态：
+
+[source,java]
+----
+@Entity
+public class EntityWithTransientFields {
+    static int transient1; // not persistent because of static
+    final int transient2 = 0;  // not persistent because of final
+    transient int transient3; // not persistent because of transient
+    @Transient int transient4; // not persistent because of @Transient
+}
+----
+
+=== 持久化字段
+
+当实体对象存储在数据库中时，每个持久字段必须包含null或其中一个受支持的可持久类型的值。 ObjectDB支持具有任何声明的静态类型的持久字段，包括通用java.lang.Object，只要运行时实际值的类型是可持久的（或null）。
+
+每个持久字段都可以使用以下注释之一进行标记：
+
+. @OneToOne，@ManyToOne  - 用于实体类型的引用。
+. @OneToMany，@ManyToMany  - 用于实体类型的集合和Map。
+. @Basic - 适用于任何其他持久性类型。
+
+在JPA中，只有@Basic是可选的，而上述其他注释在适用时是必需的。 但是，ObjectDB不强制使用任何这些注释，因此它们仅对同时与ORM JPA提供程序（如Hibernate）一起使用的类或更改默认字段设置有用。 例如：
+
+[source,java]
+----
+@Entity
+public class EntityWithFieldSettings {
+    @Basic(optional=false) Integer field1;
+    @OneToOne(cascade=CascadeType.ALL) MyEntity field2;
+    @OneToMany(fetch=FetchType.EAGER) List<MyEntity> field3;
+}
+----
+
+ 指定optional = false（如field1所示）设定改值不能为空,否则抛出异常。
+
+ 如果实体类的字段是嵌入类型,需要标定注解,如下:
+
+[source,java]
+----
+
+public class Person {
+    @Embedded Address address;
+}
+----
+
+=== Inverse Fields
+
+Inverse (or mapped by) fields 不做为字段存储在数据库中,但该字段的值可能被查询填充.
+
+通过反向字段导航比通过普通持久字段导航效率低得多，因为它需要运行查询。 使用ORM JPA实现时，反向字段对于集合字段至关重要，但在使用ObjectDB时则不然。 避免双向关系和反向字段以及维持两个单向关系通常效率更高（除非反向导航很少）。
+
+[source,java]
+----
+@Entity
+public class Employee {
+    String name;
+    @ManyToOne Department department;
+}
+
+@Entity
+public class Department {
+    @OneToMany(mappedBy="department") Set<Employee> employees;
+}
+----
+
+mappedBy元素（上面）指定employees字段是反向字段而不是持久字段。 员工集的内容不会存储为部门实体的一部分。 而是在从数据库中检索Department实体时自动填充员工。 ObjectDB通过有效运行以下查询来实现此目的（其中：d代表Department实体）：
+
+[source,sql]
+----
+SELECT e FROM Employee e WHERE e.department = :d
+----
+
+mappedBy元素定义双向关系。 在双向关系中，存储数据的一方（在我们的示例中为Employee类）是所有者。 只有对所有者方的更改才会影响数据库，因为查询不会存储和计算另一方。
+
+所有者字段上的索引可以加速逆查询和逆域的加载。 但即使使用索引，执行加载字段的查询也相对较慢。 因此，如果经常使用employees字段，持久字段比反向字段更有效。 
+
+在管理经常更改的非常大的集合时，反向字段可以提高效率。 这是因为逆向字段的改变不需要再次存储整个集合。 只有所有者方存储在数据库中。
+
+特殊设置可用于类型为List或Map的反向字段。 对于反向列表字段，可以通过OrderBy注释设置检索到的所有者实体的顺序：
+
+[source,java]
+----
+@Entity
+public class Department {
+    @OneToMany(mappedBy="department") @OrderBy("name")
+    List<Employee> employees;
+}
+----
+
+对应的sql
+[source,sql]
+----
+SELECT e FROM Employee e WHERE e.department = :d ORDER BY e.name
+----
+指定的字段（“name”）必须是所有者方的可排序字段。
+
+对于逆序map字段，可以通过使用MapKey批注指定选定的键字段从反向查询结果中提取键：
+[source,java]
+----
+@Entity
+public class Department {
+    @OneToMany(mappedBy="department") @MapKey(name="name")
+    Map<String,Employee> employees;
+}
+----
+
+
+单值也支持
+[source,java]
+----
+@Entity
+public class Employee {
+    @OneToOne MedicalInsurance medicalInsurance;
+}
+
+@Entity
+public class MedicalInsurance {
+    @OneToOne(mappedBy="medicalInsurance") Employee employee;
+}
+----
+
+单值反向字段比反向集合或映射字段效率低，因为不使用代理类，并且在首次访问实体对象时急切地执行反向查询。
+
+
+== JPA生命周期
+
+回调方法是在实体中,用户定义的绑定生命周期事件的方法，当触发生命周期事件的时候由JPA调用。
+
+=== 内部回调方法
+
+内部回调方法是定义在实体类中的普通方法,并用响应的注解标注该方法,例如:
+[source,java]
+----
+@Entity
+public static class MyEntityWithCallbacks {
+    @PrePersist void onPrePersist() {}
+    @PostPersist void onPostPersist() {}
+    @PostLoad void onPostLoad() {}
+    @PreUpdate void onPreUpdate() {}
+    @PostUpdate void onPostUpdate() {}
+    @PreRemove void onPreRemove() {}
+    @PostRemove void onPostRemove() {}
+}
+----
+
+内部回调方法应始终返回void并且不带参数。 它们可以具有任何名称和任何访问级别（public, protected, package and private），但不应该是静态的。
+
+. @PrePersist  - 在新实体持久化之前（添加到EntityManager）。
+. @PostPersist  - 在数据库中存储新实体（在提交或刷新期间）。
+. @PostLoad  - 从数据库中检索实体后。
+. @PreUpdate  - 当实体被EntityManager标识为已修改时。
+. @PostUpdate  - 更新数据库中的实体（在提交或刷新期间）。
+. @PreRemove  - 在EntityManager中标记要删除的实体时。
+. @PostRemove  - 从数据库中删除实体（在提交或刷新期间）。
+
+* 可以定义一到多个回调事件方法,但是不能为单个事件定义多个回调方法
+* 这些注解可以被继承,想要覆盖的话,只需要在子类中重新定义
+
+=== 监听器和外部回调方法
+
+外部回调方法定义在实体类之外,通过实体类绑定listener来关联这些回调方法
+
+[source,java]
+----
+public class MyListener {
+    @PrePersist void onPrePersist(Object o) {}
+    @PostPersist void onPostPersist(Object o) {}
+    @PostLoad void onPostLoad(Object o) {}
+    @PreUpdate void onPreUpdate(Object o) {}
+    @PostUpdate void onPostUpdate(Object o) {}
+    @PreRemove void onPreRemove(Object o) {}
+    @PostRemove void onPostRemove(Object o) {}
+}
+----
+
+外部回调方法（在侦听器类中）应始终返回void并使用一个参数指定作为生命周期事件源的实体。参数可以具有与实际值匹配的任何类型（例如，在上面的代码中，Object可以由更具体的类型替换）。 监听器类应该是无状态的，并且应该有一个公共的无参数构造函数（或根本没有构造函数）来启用自动实例化。
+
+在实体上绑定监听器
+[source,java]
+----
+@Entity @EntityListeners(MyListener.class)
+public class MyEntityWithListener {
+}
+----
+
+附加到实体类的侦听器由其子类继承，除非子类使用@ExcludeSuperclassListeners批注显式地排除继承：
+[source,java]
+----
+@Entity @ExcludeSuperclassListeners
+public class EntityWithNoListener extends EntityWithListener {
+}
+----
+
+=== 默认实体监听器
+
+默认实体侦听器是默认情况下应用于所有实体类的侦听器。 目前，只能在映射XML文件中指定默认侦听器，因为没有等效的注释：
+[source,xml]
+----
+<entity-mappings xmlns="http://java.sun.com/xml/ns/persistence/orm"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xsi:schemaLocation="http://java.sun.com/xml/ns/persistence/orm
+ http://java.sun.com/xml/ns/persistence/orm_1_0.xsd" version="1.0">
+  <persistence-unit-metadata>
+    <persistence-unit-defaults>
+      <entity-listeners>
+        <entity-listener class="samples.MyDefaultListener1" />
+        <entity-listener class="samples.MyDefaultListener2" />
+      </entity-listeners>
+    </persistence-unit-defaults>
+  </persistence-unit-metadata>
+</entity-mappings>
+----
+
+默认侦听器默认应用于所有实体类。 @ExcludeDefaultListeners注释可用于排除实体类及其所有后代类使用默认侦听器：
+[source,java]
+----
+@Entity @ExcludeDefaultListeners
+public class NoDefaultListenersForThisEntity {
+}
+
+@Entity
+public class NoDefaultListenersForThisEntityEither
+  extends NoDefaultListenersForThisEntity {
+}
+----
+
+=== 生命周期事件的调用顺序
+
+如果必须为生命周期事件（例如，来自多个侦听器）调用多个回调方法，则调用顺序基于以下规则：
+. 所有外部回调方法（在侦听器中定义）都在内部回调方法（在实体类中定义）之前调用。
+. 首先处理默认侦听器，然后处理顶级实体类的侦听器，然后在层次结构中向下处理直到实际实体类的侦听器。如果层次结构中同一级别有多个默认侦听器或多个侦听器，则调用顺序遵循定义顺序。
+. 从顶层实体类开始调用内部回调方法，然后在层次结构中调用，直到调用实际实体类中的回调方法。
+
+
+== 注解
+
+https://www.oracle.com/technetwork/cn/middleware/ias/toplink-jpa-annotations-100895-zhs.html[JPA注解官方参考]
+
+=== 标注在类上
+
+@Cacheable: 实体对象是否被缓存,该注解可以被继承,子类重新定义该注解来覆盖
+@Embeddable: 标注该类为嵌入类(需要被包含在实体类中).
+@Entity: 标注类为实体类
+@EntityListeners:绑定生命周期事件监听类
+@ExcludeDefaultListeners:排除默认的事件监听器
+@ExcludeSuperclassListene:排除父类事件监听器
+@IdClass:绑定联合主键类
+@MappedSuperclass:定义实体类的超类
+
+=== 标注在字段上
+
+* @Basic:绑定基本数据类型到数据库字段,可字段不是必须的,系统会默认指定
+* @Embedded:绑定嵌入类到实体类中的字段上.
+* @ElementCollection:定义基本类型或可嵌入类实例的集合。 如果要通过表映射集合，则必须指定。
+
+    create table user_info_instrests (
+       user_info_id integer not null,
+        instrests varchar(255)
+    )
+
+    查询的时候采用关联表的方式,JPA会把查询到多条数据合并成单条,实现集合的形式.和一对多的方式相似
+
+* @Id:标定主键字段
+* @EmbeddedId:使用嵌入类,作为联合主键
+* @Version:标注的字段记录数据变更的版本信息
+* @Transient:被标注的字段不会被持久化成数据库字段
+* @Enumerated:用在枚举字段上,指定序列化的类型,是字符串还是整形
+* @Temporal:指定日期格式的字段的序列化方式
+* @MapKeyEnumerated: 当实体的字段是map,并且key是枚举类型时,该字段用来指定枚举的序列化方式
+* @MapKeyTemporal:当实体的字段是map,并且key是日期类型时,该字段用来指定枚举的序列化方式
+
+=== SQL查询
+
+[source,java]
+----
+   Query q = em.createNativeQuery(
+       "SELECT o.id AS order_id, " +
+           "o.quantity AS order_quantity, " +
+           "o.item AS order_item, " + 
+           "i.name AS item_name, " +
+         "FROM Order o, Item i " +
+         "WHERE (order_quantity > 25) AND (order_item = i.id)",
+       "OrderResults");
+
+   @SqlResultSetMapping(name="OrderResults",
+       entities={
+           @EntityResult(entityClass=com.acme.Order.class, fields={
+               @FieldResult(name="id", column="order_id"),
+               @FieldResult(name="quantity", column="order_quantity"),
+               @FieldResult(name="item", column="order_item")})},
+       columns={
+           @ColumnResult(name="item_name",type=String.class)}
+       )
+----
+
+. @SqlResultSetMapping:映射NamedQuery查询语句的结果集
+. @EntityResult,@FieldResult:映射数据库列和javabean属性关系
+. @ColumnResult:指定查询的结果列的数据类型
+
+=== 关系映射
+
+. @AssociationOverride:覆盖mapped超类和embeddable类中的映射关系
+
+[source,java]
+----
+    @MappedSuperclass
+    public class Employee {
+        ...
+        @ManyToOne
+        protected Address address;
+        ...
+    }
+    
+    @Entity 
+        @AssociationOverride(name="address", 
+                             joinColumns=@JoinColumn(name="ADDR_ID"))
+        // 外键覆盖为ADDR_ID
+    public class PartTimeEmployee extends Employee {
+        ...
+    }
+----
+
+如果关系映射是外键映射，则使用joinColumns元素。 如果关系映射使用连接表，则必须指定joinTable元素以覆盖连接表和其连接列的映射。
+
+[source,java]
+----
+ @Entity
+    public class Employee {
+        @Id int id;
+        @AssociationOverride(
+          name="phoneNumbers",
+          joinTable=@JoinTable(
+             name="EMPPHONES",
+             joinColumns=@JoinColumn(name="EMP"),
+             inverseJoinColumns=@JoinColumn(name="PHONE")
+          )
+        )
+        @Embedded ContactInfo contactInfo;
+       ...
+    }
+ 
+    @Embeddable
+    public class ContactInfo {
+        @ManyToOne Address address; // Unidirectional
+        @ManyToMany(targetEntity=PhoneNumber.class) List phoneNumbers;
+    }
+ 
+    @Entity
+    public class PhoneNumber {
+        @Id int number;
+        @ManyToMany(mappedBy="contactInfo.phoneNumbers")
+        Collection
+    
+      employees;
+     }
+
+----
+
+当应用AssociationOverride用作嵌入类的映射时，“value”。 必须用于在被重写的可嵌入类中的属性名称前加上，以便将其指定为映射值的一部分。
+
+. @AttributeOverride
+
+用于覆盖超类字段映射。
+
+.基本使用
+[source,java]
+----
+    @MappedSuperclass
+    public class Employee {
+        @Id protected Integer id;
+        @Version protected Integer version;
+        protected String address;
+        public Integer getId() { ... }
+        public void setId(Integer id) { ... }
+        public String getAddress() { ... }
+        public void setAddress(String address) { ... }
+    }
+
+    @Entity
+    @AttributeOverride(name="address", column=@Column(name="ADDR"))
+    public class PartTimeEmployee extends Employee {
+        // address field mapping overridden to ADDR
+        protected Float wage();
+        public Float getHourlyWage() { ... }
+        public void setHourlyWage(Float wage) { ... }
+    }
+----
+
+.多层级举例
+[source,java]
+----
+    @Embeddable public class Address {
+        protected String street;
+        protected String city;
+        protected String state;
+        @Embedded protected Zipcode zipcode;
+    }
+
+    @Embeddable public class Zipcode {
+        protected String zip;
+        protected String plusFour;
+    }
+
+    @Entity public class Customer {
+        @Id protected Integer id;
+        protected String name;
+        @AttributeOverrides({
+            @AttributeOverride(name="state",
+                               column=@Column(name="ADDR_STATE")),
+            @AttributeOverride(name="zipcode.zip",
+                               column=@Column(name="ADDR_ZIP"))
+        })
+        @Embedded protected Address address;
+        ...
+    }
+----
+
+.map使用
+[source,java]
+----
+   @Entity public class PropertyRecord {
+        @EmbeddedId PropertyOwner owner;
+        @AttributeOverrides({
+            @AttributeOverride(name="key.street", 
+                               column=@Column(name="STREET_NAME")),
+            @AttributeOverride(name="value.size", 
+                               column=@Column(name="SQUARE_FEET")),
+            @AttributeOverride(name="value.tax", 
+                               column=@Column(name="ASSESSMENT"))
+        })
+       @ElementCollection
+       Map parcels;
+    }
+
+   @Embeddable public class PropertyInfo {
+       Integer parcelNumber;
+       Integer size;
+       BigDecimal tax;
+   }
+
+----
+上面的map存储的应该是
+
+----
+    {
+        "street":{
+            "size":2,
+            "tax":23.89
+        }
+    }
+----
+
+. @CollectionTable
+
+实体类中包含集合字段时,使用该注解建立映射表.
+
+默认情况下，对于可嵌入类或基本类型,生成的集合表的列是根据可嵌入类的属性派生的，或者是根据Column批注的值派生的.
+在基本类型的情况下，列名称是从集合值字段或属性的名称派生的。 对于可嵌入类，列名称是从可嵌入类的字段或属性名称派生的。
+. 要覆盖用于基本类型的列的默认属性，除了ElementCollection批注之外，还会在集合值属性上使用@Column。
+. 要覆盖可嵌入类的这些默认值，除ElementCollection批注外，还可以使用AttributeOverride和/或AttributeOverrides批注。如果embeddable类包含对其他实体的引用，则可以通过AssociationOverride和/或AssociationOverrides注释覆盖与这些引用对应的列的默认值。
+
+如果缺少CollectionTable注释，则应用CollectionTable注释元素的默认值。
+[source,java]
+----
+@Embeddable public class Address {
+       protected String street;
+       protected String city;
+       protected String state;
+       ... 
+     }
+
+    @Entity public class Person {
+       @Id protected String ssn;
+       protected String name;
+       protected Address home;
+       ...
+       @ElementCollection  // use default table (PERSON_NICKNAMES)
+       @Column(name="name", length=50)
+       protected Set
+    
+      nickNames = new HashSet();
+       ...
+    }
+
+    @Entity public class WealthyPerson extends Person {
+       @ElementCollection
+       @CollectionTable(name="HOMES") // use default join column name
+       @AttributeOverrides({
+          @AttributeOverride(name="street", 
+                             column=@Column(name="HOME_STREET")),
+          @AttributeOverride(name="city", 
+                             column=@Column(name="HOME_CITY")),
+          @AttributeOverride(name="state", 
+                             column=@Column(name="HOME_STATE"))
+        })
+       protected Set
+      vacationHomes = new HashSet(); ... }
+----
+
+. @Lob :指定该字段是大字段
+
+. @MapKeyClass
+
+指定java.util.Map类型关联的映射键的类型。映射键可以是基本类型，可嵌入类或实体。 如果使用Java泛型指定映射，则无需指定MapKeyClass批注和关联类型; 否则必须指定它们。
+
+[source,java]
+----
+    @Entity
+    public class Item {
+       @Id int id;
+       ...
+       @ElementCollection(targetClass=String.class)
+       @MapKeyClass(String.class)
+       Map data;  
+       ...
+    }
+----
+
+[source,sql]
+----
+    create table item (
+       id integer not null,
+        primary key (id)
+    ) engine=MyISAM
+
+    
+    create table item_data (
+       item_id integer not null,
+        data varchar(255),
+        data_key varchar(255) not null,
+        primary key (item_id, data_key)
+    ) engine=MyISAM
+
+    alter table item_data 
+       add constraint FKeaiunnkadtdsugc680ya8i47w 
+       foreign key (item_id) 
+       references item (id)
+----
+
+. @MapKeyColumn
+
+[source,java]
+----
+    @Entity
+    public class Item {
+       @Id int id;
+       ...
+       @ElementCollection
+       @MapKeyColumn(name="IMAGE_NAME")
+       @Column(name="IMAGE_FILENAME")
+       @CollectionTable(name="IMAGE_MAPPING")
+       Map
+    
+      images;  // map from image name to filename
+       ...
+    }
+----
+
+[source,sql]
+----
+    create table image_mapping (
+       item2_id integer not null,
+        image_filename varchar(255),
+        image_name varchar(255) not null,
+        primary key (item2_id, image_name)
+    ) engine=MyISAM
+
+    
+    create table item2 (
+       id integer not null,
+        primary key (id)
+    ) engine=MyISAM
+----
+
+
+. @MapKeyJoinColumn
+[source,java]
+----
+@Entity
+public class VideoStore {
+    @Id
+    int id;
+    String name;
+
+
+    @ElementCollection
+    @CollectionTable(name = "INVENTORY",
+            joinColumns = @JoinColumn(name = "STORE"))
+    @Column(name = "COPIES_IN_STOCK")
+    @MapKeyJoinColumn(name = "MOVIE", referencedColumnName = "ID")
+    Map<String,String> videoInventory;
+
+}
+----
+
+
+[source,sql]
+----
+    create table inventory (
+        store integer not null,
+        copies_in_stock varchar(255),
+        video_inventory_key varchar(255) not null,
+        primary key (store, video_inventory_key)
+    ) engine=MyISAM
+
+    create table video_store (
+       id integer not null,
+        name varchar(255),
+        primary key (id)
+    ) engine=MyISAM
+
+    alter table inventory 
+       add constraint FKs943eu6udlvq8g9g66bpmvuoy 
+       foreign key (store) 
+       references video_store (id)
+----
+
+. @MapsId
+
+指定ManyToOne或OneToOne关系属性，该属性提供EmbeddedId主键，EmbeddedId主键中的属性或父实体的简单主键的映射。value元素指定关系属性对应的复合键中的属性。 如果实体的主键与关系引用的实体的主键具有相同的Java类型，则不指定value属性。
+
+[source,java]
+----
+    // parent entity has simple primary key
+
+    @Entity
+    public class Employee {
+       @Id long empId;
+       String name;
+       ...
+    } 
+
+    // dependent entity uses EmbeddedId for composite key
+
+    @Embeddable
+    public class DependentId {
+       String name;
+       long empid;   // corresponds to primary key type of Employee
+    }
+
+    @Entity
+    public class Dependent {
+       @EmbeddedId DependentId id;
+        ...
+       @MapsId("empid")  //  maps the empid attribute of embedded id
+       @ManyToOne Employee emp;
+    }
+----
+
+
+. @UniqueConstraint
+
+定义不重复约束
+
+[source,java]
+----
+    @Entity
+    @Table(
+        name="EMPLOYEE", 
+        uniqueConstraints=
+            @UniqueConstraint(columnNames={"EMP_ID", "EMP_NAME"})
+    )
+    public class Employee { ... }
+----
+
+. @Inheritance
+
+定义实体间的继承关系,根据不同的继承关系,创建不同类型的表.
+. JOINED: 子类和父类是关联关系
+. SINGLE_TABLE:所有的子类和父类在一张表中
+. TABLE_PER_CLASS:每个子类单独创建一张表
+
+. @DiscriminatorColumn和@DiscriminatorValue
+
+在定义继承关系的时候,全部放在一个表中使用一个列来区分父子。@DiscriminatorColumn(鉴别器)就是用来定义区分列的;
+
+@DiscriminatorColumn,里面的属性呢有个name 和普通过的@Cloumn一样的性质，还有一个是discriminatorType ，这个属性说明我们用什么来区分父子的属性 
+. DiscriminatorType.CHAR 
+. DiscriminatorType.INTEGER 
+. DiscriminatorType.STRING 
+
+@DiscriminatorValue用来指定区分列的值,下面是综合举例:
+
+[source,java]
+----
+@Entity
+@DiscriminatorColumn(name="person_type" , <1>
+    discriminatorType=DiscriminatorType.STRING)
+@DiscriminatorValue("普通人")  <2>
+@Table(name="person_inf")
+public class Person{
+    
+}
+
+----
+<1> 定义辨别者列的列名为person_type，列类型为字符串
+<2> 指定Person实体对应的记录在辨别者列的值为"普通人"
+
+[source,java]
+----
+@Entity
+@DiscriminatorValue("顾客") <1>
+@Table(name="customer_inf")
+public class Customer extends Person{
+    
+}
+
+----
+
+<1> 指定Customer实体对应的记录在辨别者列的值为"顾客"
+
+. @PrimaryKeyJoinColumn  
+
+指定主键列,用作连接到另一个表的外键.主要用在三个场景:
+
+. 继承关系为JOINED类型,指定主表(父类)和从表(子类)的链接字段
+. 它在SecondaryTable注释中用于将辅助表连接到主表;
+. 它可以用在OneToOne映射中，其中被引用实体的主键用作引用实体的外键。
+
+.继承举例
+[source,java]
+----
+    @Entity
+    @Table(name="CUST")
+    @Inheritance(strategy=JOINED)
+    @DiscriminatorValue("CUST")
+    public class Customer { ... }
+    
+    @Entity
+    @Table(name="VCUST")
+    @DiscriminatorValue("VCUST")
+    @PrimaryKeyJoinColumn(name="CUST_ID")
+    public class ValuedCustomer extends Customer { ... }
+----
+
+
+. 一对一举例
+[source,java]
+----
+@Table(name = "Employee")   
+public class Employee {  
+    @OneToOne    
+    @PrimaryKeyJoinColumn(name = "id", referencedColumnName="INFO_ID") 
+    EmployeeInfo info;  
+
+ }  
+
+----
+
+Employee的主键列id作为外键指向EmployeeInfo的主键列INFO_ID
+
+.@SecondaryTable举例
+[source,java]
+----
+ @Entity    
+ @Table(name="CUSTOMER")    
+ @SecondaryTable(name="CUST_DETAIL",pkJoin=@PrimaryKeyJoinColumn(name="CUST_ID"，referencedCo
+lumnName="id"))    
+ public class Customer {     
+     
+     @Id(generate = GeneratorType.AUTO)    
+     public Integer getId() {   
+
+        return id;    
+
+    }    
+
+}   
+
+----
+
+Customer映射到两个表，主表CUSTOMER,从表CUST_DETAIL，从表需要建立主键列CUST_ID，该列和主表的主键列id除了列名不同，其他定义一样
+
+. SecondaryTable
+为带@Entity的实体类指定辅助表。 指定一个或多个辅助表表示实体类的数据存储在多个表中。
+如果未指定SecondaryTable注释，则假定实体的所有持久字段或属性都映射到主表.如果未指定主键连接列，则假定连接列引用主表的主键列，并且具有与主表的引用主键列相同的名称和类型。
+
+[source,java]
+----
+    @Entity
+    @Table(name="CUSTOMER")
+    @SecondaryTable(name="CUST_DETAIL", 
+        pkJoinColumns=@PrimaryKeyJoinColumn(name="CUST_ID"))
+    public class Customer { ... }
+----
+

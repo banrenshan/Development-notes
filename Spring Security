@@ -1,0 +1,1193 @@
+= Spring Security
+:toc: left
+:icons: font
+:sectanchors: 
+:toclevels: 4
+:source-highlighter: pygments
+:pygments-style: manni
+:source-linenums-option: 
+
+
+== 1. 概述
+
+Spring Security为基于Java EE的企业软件应用程序提供了全面的安全解决方案。正如您在参考指南中发现的那样，我们试图为您提供一个有用且高度可配置的安全系统。
+
+安全是一个不断变化的目标，追求全面的全系统方法非常重要。在安全圈中，我们鼓励您采用“安全层”，以便每层都尽可能保证安全，连续层提供额外的安全性。每层的安全性越“紧密”，应用程序就越健壮和安全。在底层，您需要处理诸如传输安全和系统识别等问题，以缓解中间人攻击。接下来，您通常会使用防火墙，也许使用VPN或IP安全性来确保只有经过授权的系统才能尝试连接。在公司环境中，您可以部署一个DMZ，以将面向公众的服务器与后端数据库和应用程序服务器分开。您的操作系统也将扮演重要角色，解决诸如以无特权用户身份运行进程等问题并最大限度地提高文件系统安全性。操作系统通常也会配置自己的防火墙。希望在这个过程中你会试图阻止对系统的拒绝服务和暴力攻击。入侵检测系统对于监视和响应攻击也特别有用，因为这些系统能够采取保护措施，例如实时阻止侵入TCP/IP地址。转移到更高层，您的Java虚拟机将有望配置为最大限度地减少授予不同Java类型的权限，然后您的应用程序将添加自己的问题特定于域的安全配置。 Spring Security使后面的这个领域 - 应用程序的安全性更容易。
+
+当然，您需要正确处理上面提到的所有安全层，以及包含每个层的管理因素。这些管理因素的非详尽清单将包括安全公告监控，修补，人员审查，审计，变更控制，工程管理系统，数据备份，灾难恢复，性能基准测试，负载监控，集中式日志记录，事件响应程序等。
+
+由于Spring Security专注于帮助企业应用程序安全层，因此您会发现有多少不同的需求与业务问题域相同。银行应用程序对电子商务应用程序有不同的需求。电子商务应用程序对企业销售人员自动化工具有不同的需求。这些自定义要求使应用程序安全性变得有趣，富有挑战性和有益。
+
+请首先阅读第1章入门。这将向您介绍框架和基于命名空间的配置系统，您可以使用该系统快速启动和运行。为了更好地理解Spring Security的工作原理以及您可能需要使用的一些类，您应该阅读第II部分“架构和实现”。本指南的其余部分采用更传统的参考样式，旨在根据需要进行阅读。我们还建议您尽可能多地阅读应用程序安全问题。Spring Security不是解决所有安全问题的万能药。从一开始，应用程序的设计就要考虑到安全性，这一点很重要。试图改造它并不是一个好主意。特别是，如果您正在构建Web应用程序，则应该意识到许多潜在的漏洞，例如跨站脚本，请求伪造和会话劫持，您应该从一开始就考虑这些漏洞。 OWASP网站（http://www.owasp.org/）维护着十大Web应用程序漏洞列表以及大量有用的参考信息。
+
+
+== 2. 集成Spring Security
+
+应用程序安全性的两个主要方面是“身份验证”和“授权”（或“访问控制”）。“认证”是识别委托人的过程（“委托人”通常指的是用户，设备或其他可以在您的应用程序中执行动作的系统）。“授权”是指是否允许委托人（用户）执行某项操作。 在授权之前，委托人的身份已经由认证过程确定。 这些概念很常见，并不完全针对Spring Security。
+
+在认证级别，Spring Security支持广泛的认证模型。这些认证模式大多由第三方提供，或者由相关标准组织（如互联网工程任务组）开发。另外，Spring Security还提供了自己的一套认证功能。具体而言，Spring Security目前支持与所有这些技术的认证集成：
+
+* HTTP BASIC authentication headers (an IETF RFC-based standard)
+* HTTP Digest authentication headers (an IETF RFC-based standard)
+* HTTP X.509 client certificate exchange (an IETF RFC-based standard)
+* LDAP (跨平台认证需求的一种非常常见的方法，特别是在大型环境中)
+* 基于表单的认证（用于简单的用户界面需求）
+* OpenID认证
+* 基于预先建立的请求标题的认证（例如Computer Associates Siteminder）
+* Jasig中央身份验证服务（也称为CAS，这是一种流行的开源单点登录系统）
+* 远程方法调用（RMI）和HttpInvoker（Spring远程协议）的透明身份验证上下文传播
+* 自动“记住我”身份验证（这样您可以勾选一个框以避免在预定时间段内重新验证）
+* 匿名身份验证（允许每个未经身份验证的呼叫自动采用特定的安全身份）
+* Run-as验证（which is useful if one call should proceed with a different security identity）
+* Java认证和授权服务（JAAS）
+* Java EE容器认证（因此如果需要，您仍然可以使用容器管理认证）
+* Kerberos
+* Java Open Source Single Sign-On (JOSSO) *
+* OpenNMS Network Management Platform *
+* AppFuse *
+* AndroMDA *
+* Mule ESB *
+* Direct Web Request (DWR) *
+* Grails *
+* Tapestry *
+* JTrac *
+* Jasypt *
+* Roller *
+* Elastic Path *
+* Atlassian Crowd *
+* Your own authentication systems (see below)
+
+许多独立软件供应商（ISV）都采用Spring Security，因为这种灵活的身份验证模型的选择非常重要。这样做可以让他们快速地将他们的解决方案与他们最终客户需要的任何内容集成起来，而无需进行大量工程或要求客户改变其环境。如果上述认证机制都不符合您的需求，Spring Security是一个开放平台，编写您自己的认证机制非常简单。 Spring Security的许多公司用户需要与不遵循任何特定安全标准的“传统”系统集成，而Spring Security很高兴能够与这样的系统“很好地发挥”。
+
+无论身份验证机制如何，Spring Security都提供了一套深层次的授权功能。有三个主要的感兴趣领域：授权Web请求，授权是否可以调用方法并授权访问单个域对象实例。为帮助您理解这些差异，请分别考虑Servlet规范Web模式安全性，EJB容器托管安全性和文件系统安全性中的授权功能。 Spring Security在所有这些重要领域提供了深入的功能，我们将在本参考指南的后面部分探讨这些功能。
+
+
+=== 2.1. 快速入门
+
+MVC的配置
+
+[source,xml]
+----
+@Configuration
+@EnableWebMvc
+@ComponentScan
+public class WebMvcConfig implements WebMvcConfigurer {
+
+}
+----
+
+1.添加依赖
+[source,xml]
+----
+	<dependencies>
+		<!-- ... other dependency elements ... -->
+		<dependency>
+			<groupId>org.springframework.security</groupId>
+			<artifactId>spring-security-web</artifactId>
+			<version>5.0.3.RELEASE</version>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.security</groupId>
+			<artifactId>spring-security-config</artifactId>
+			<version>5.0.3.RELEASE</version>
+		</dependency>
+	</dependencies>
+----
+
+2.创建我们的Spring Security Java配置。
+
+该配置会创建一个称为springSecurityFilterChain的Servlet过滤器，它负责应用程序中的所有安全性（保护应用程序URL，验证提交的用户名和密码，重定向到登录表单等）。
+
+[source,java]
+----
+import org.springframework.beans.factory.annotation.Autowired;
+
+import org.springframework.context.annotation.*;
+import org.springframework.security.config.annotation.authentication.builders.*;
+import org.springframework.security.config.annotation.web.configuration.*;
+
+@EnableWebSecurity
+public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
+
+	@Bean
+	public UserDetailsService userDetailsService() throws Exception {
+		InMemoryUserDetailsManager manager = new InMemoryUserDetailsManager();
+		manager.createUser(User.withDefaultPasswordEncoder().username("user").password("password").roles("USER").build());
+		return manager;
+	}
+}
+----
+
+[NOTE]
+====
+	上面的配置到底做了哪些工作？
+
+	* 要求对应用程序中的每个URL进行认证
+    * 为您生成一个登录表单
+    * 允许具有用户名为user和密码为password的用户使用基于表单的身份验证进行身份验证
+    * 允许用户注销
+    * CSRF攻击预防
+	* 会话固定保护
+	* 安全头集成
+		** 用于安全请求的HTTP严格传输安全性
+		** X-Content-Type-Options集成
+		** 高速缓存控制（稍后可由应用程序覆盖，以允许缓存静态资源）
+		** X-XSS-Protection集成
+		** X-Frame-Options集成有助于防止点击劫持
+	* 与以下Servlet API方法集成
+		** HttpServletRequest#getRemoteUser()
+		** HttpServletRequest#getUserPrincipal()
+		** HttpServletRequest#isUserInRole(java.lang.String)
+		** HttpServletRequest#login(java.lang.String, java.lang.String)
+		** HttpServletRequest#logout()
+====
+
+3.注册springSecurityFilterChain
+
+这可以在Servlet 3.0+环境中使用Spring的WebApplicationInitializer支持的Java配置中完成。Spring Security提供了一个基类AbstractSecurityWebApplicationInitializer，它将确保springSecurityFilterChain被注册。
+
+如果我们在应用程序的其他地方使用Spring，我们可能已经有了一个加载我们的Spring配置的WebApplicationInitializer。 如果我们使用以前的配置，我们会得到一个错误。 相反，我们应该使用现有的ApplicationContext注册Spring Security。 例如，如果我们使用Spring MVC，我们的SecurityWebApplicationInitializer将如下所示：
+
+[source,java]
+----
+import org.springframework.security.web.context.*;
+
+public class SecurityWebApplicationInitializer
+	extends AbstractSecurityWebApplicationInitializer {
+
+}
+----
+
+4.注册配置类
+
+上面的代码只会为应用程序中的每个URL注册springSecurityFilterChain过滤器。 之后，我们将确保WebSecurityConfig加载到我们现有的ApplicationInitializer中。 例如，如果我们使用Spring MVC，它将被添加到getRootConfigClasses（）
+[source,java]
+----
+public class MyWebApplicationInitializer extends AbstractAnnotationConfigDispatcherServletInitializer {
+
+
+    protected Class<?>[] getRootConfigClasses() {
+        return new Class[]{WebMvcConfig.class, WebSecurityConfig.class}; 
+    }
+
+    protected Class<?>[] getServletConfigClasses() {
+        return new Class[0];
+    }
+
+    protected String[] getServletMappings() {
+        return new String[]{"/"};
+    }
+
+}
+----
+
+到此一个基本的例子已经完成了，当你访问/index路径的时候，会被拦截要求登录，输入验证后跳转到index页面。如果你要做更精细的web定制化，请看下面的步骤
+
+=== 2.2.自定义配置
+
+
+迄今为止，我们的WebSecurityConfig仅包含有关用户的信息。 Spring Security如何知道我们想要求所有用户进行身份验证？ Spring Security如何知道我们想要支持基于表单的身份验证？ 答案是WebSecurityConfigurerAdapter在configure（HttpSecurity http）方法中提供了一个默认配置，如下所示：
+[source,java]
+----
+protected void configure(HttpSecurity http) throws Exception {
+	http
+		.authorizeRequests()
+			.anyRequest().authenticated()
+			.and()
+		.formLogin()
+			.and()
+		.httpBasic();
+}
+----
+上面的代码说明：
+
+* 确保对我们应用程序的任何请求都要求用户进行身份验证
+* 允许用户使用基于表单的登录进行身份验证
+* 允许用户使用HTTP基本认证进行认证
+
+==
+
+==== 2.2.1 自定义登录页
+
+在默认的配置中，系统为我们配置了登录页，但是更多情况下，我们想使用自己的登录页，代码如下：
+[source,java]
+----
+protected void configure(HttpSecurity http) throws Exception {
+	http
+		.authorizeRequests()
+			.anyRequest().authenticated()
+			.and()
+		.formLogin()
+			.loginPage("/login")  <1>
+			.permitAll();        <2>
+}
+----
+
+<1> 指定登录页
+<2> 允许所有人访问
+
+自定义登录页JSP实现
+[source,jsp]
+----
+<c:url value="/login" var="loginUrl"/>
+<form action="${loginUrl}" method="post">       <1>
+	<c:if test="${param.error != null}">        <2>
+		<p>
+			Invalid username and password.
+		</p>
+	</c:if>
+	<c:if test="${param.logout != null}">       <3>
+		<p>
+			You have been logged out.
+		</p>
+	</c:if>
+	<p>
+		<label for="username">Username</label>
+		<input type="text" id="username" name="username"/>	<4>
+	</p>
+	<p>
+		<label for="password">Password</label>
+		<input type="password" id="password" name="password"/>	<5>
+	</p>
+	<input type="hidden"                        <6>
+		name="${_csrf.parameterName}"
+		value="${_csrf.token}"/>
+	<button type="submit" class="btn">Log in</button>
+</form>
+----
+
+
+<1> POST请求提交到/login认证用户身份（/login是系统默认的认证接口）
+<2> 如果请求参数存在error，显示认证失败
+<3> 如果请求参数存在logout, 显示登出成功
+<4> name必须是username
+<5> name必须是password
+<6> 防止csrf攻击
+
+==== 2.2.2 个性化URL认证
+
+我们的示例只需要用户进行身份验证，并已为我们的应用程序中的每个URL完成此操作。我们可以通过向我们的http.authorizeRequests（）方法添加多个子项来为我们的URL指定自定义需求。例如：
+[source,java]
+----
+protected void configure(HttpSecurity http) throws Exception {
+	http
+		.authorizeRequests()                                                                <1>
+			.antMatchers("/resources/**", "/signup", "/about").permitAll()                  <2>
+			.antMatchers("/admin/**").hasRole("ADMIN")                                      <3>
+			.antMatchers("/db/**").access("hasRole('ADMIN') and hasRole('DBA')")            <4>
+			.anyRequest().authenticated()                                                   <5>
+			.and()
+		// ...
+		.formLogin();
+}
+----
+
+<1> http.authorizeRequests（）方法可以有多个路径组合，每个匹配者按照他们声明的顺序被执行。
+<2> 指定了任何用户都可以访问多个网址的格式。具体来说，如果URL以“/resources/”开头，等于“/ignup”或等于“/ about”，则可以被任何用户访问。
+<3> 任何以“/admin/”开头的网址都将限制为被“ROLE_ADMIN”角色的用户访问。你会注意到，因为我们调用hasRole方法，所以我们不需要指定“ROLE_”前缀。
+<4> 任何以“/db/”开头的URL都需要用户同时拥有“ROLE_ADMIN”和“ROLE_DBA”。你会注意到，因为我们正在使用hasRole表达式，所以我们不需要指定“ROLE_”前缀。
+<5> 任何尚未匹配的URL只需要用户进行身份验证即可访问
+
+
+==== 2.2.3 自定义登出
+
+使用WebSecurityConfigurerAdapter时，会自动应用注销功能。默认情况下访问URL /logout 将通过以下方式注销用户：
+
+* 使HTTP会话无效
+* 清理已配置的任何RememberMe认证
+* 清除SecurityContextHolder
+* 重定向到/login?logout
+
+但是，类似于配置登录功能，您还可以有多种选项来进一步自定义注销要求：
+
+[source,java]
+----
+protected void configure(HttpSecurity http) throws Exception {
+	http
+		.logout()                                                                <1>
+			.logoutUrl("/my/logout")                                                <2>
+			.logoutSuccessUrl("/my/index")                                           <3>
+			.logoutSuccessHandler(logoutSuccessHandler)                              <4>
+			.invalidateHttpSession(true)                                             <5>
+			.addLogoutHandler(logoutHandler)                                         <6>
+			.deleteCookies(cookieNamesToClear)                                       <7>
+			.and()
+		...
+}
+----
+
+<1> 提供注销支持。这在使用WebSecurityConfigurerAdapter时会自动应用。
+<2> 触发注销的URL（默认为/注销）。如果启用CSRF保护（默认），则该请求也必须是POST。有关更多信息，请咨询JavaDoc。
+<3> 注销后重定向到的URL。默认是/login?logout。有关更多信息，请咨询JavaDoc。
+<4> 让我们来指定一个自定义的LogoutSuccessHandler。如果指定了，logoutSuccessUrl（）将被忽略。有关更多信息，请咨询JavaDoc。
+<5> 指定在注销时是否使HttpSession失效。默认是true。配置下面的SecurityContextLogoutHandler。有关更多信息，请咨询JavaDoc。
+<6> 添加一个LogoutHandler。 SecurityContextLogoutHandler默认添加为最后一个LogoutHandler。
+<7> 允许指定要在注销成功时删除的cookie的名称。这是一个明确添加CookieClearingLogoutHandle的快捷方式。
+
+*LogoutHandler*
+
+通常，LogoutHandler实现指示参与注销处理的类。它们将被调用来执行必要的清理。因此，他们不应该抛出异常。提供了各种实现：
+
+* PersistentTokenBasedRememberMeServices
+* TokenBasedRememberMeServices
+* CookieClearingLogoutHandler
+* CsrfLogoutHandler
+* SecurityContextLogoutHandler
+
+NOTE: 框架还提供了addLogoutHandler(logoutHandler) 方法的快捷方式，例如deleteCookies()就是CookieClearingLogoutHandler的快捷方式。
+
+*LogoutSuccessHandler*
+
+LogoutSuccessHandler在LogoutFilter成功注销后被调用，以处理例如重定向或转发到适当的目的地。请注意，该接口与LogoutHandler几乎相同，但可能引发异常。
+
+提供了以下实现：
+
+* SimpleUrlLogoutSuccessHandler
+* HttpStatusReturningLogoutSuccessHandler
+
+如上所述，您不需要直接指定SimpleUrlLogoutSuccessHandler。流式API通过设置logoutSuccessUrl（）提供了一个快捷方式。这将在后台设置SimpleUrlLogoutSuccessHandler。提供的URL在注销后重定向。默认是/login?logout。
+
+HttpStatusReturningLogoutSuccessHandler可以在应用在REST API类型场景。LogoutSuccessHandler不是在成功注销后重定向到URL，而是允许您返回纯HTTP状态码。缺省情况下将返回状态代码200。
+
+
+
+
+==== 2.2.4 认证
+
+*认证信息保存内存中*
+[source,java]
+----
+@Bean
+public UserDetailsService userDetailsService() throws Exception {
+	// ensure the passwords are encoded properly
+	UserBuilder users = User.withDefaultPasswordEncoder();
+	InMemoryUserDetailsManager manager = new InMemoryUserDetailsManager();
+	manager.createUser(users.username("user").password("password").roles("USER").build());
+	manager.createUser(users.username("admin").password("password").roles("USER","ADMIN").build());
+	return manager;
+}
+----
+
+*认证信息保存在数据库中*
+[source,java]
+----
+@Autowired
+private DataSource dataSource;
+
+@Autowired
+public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
+	// ensure the passwords are encoded properly
+	UserBuilder users = User.withDefaultPasswordEncoder();
+	auth
+		.jdbcAuthentication()
+			.dataSource(dataSource)
+			.withDefaultSchema()
+			.withUser(users.username("user").password("password").roles("USER"))
+			.withUser(users.username("admin").password("password").roles("USER","ADMIN"));
+}
+----
+
+==== 2.2.5方法权限
+
+从2.0版本开始，Spring Security已经大大改善了对服务层方法的安全性的支持。它提供了对JSR-250注释和框架原始@Secured的支持。从3.0开始，您还可以使用基于表达式的新注释。您可以将安全应用于单个bean，使用intercept-method元素来装饰bean声明，或者可以使用AspectJ样式切入点在整个服务层中保护多个bean。
+
+
+*启用方法注解*
+
+我们可以在任何@Configuration实例上使用@EnableGlobalMethodSecurity注释来启用基于注解的安全性。例如，以下将启用Spring Security的@Secured注释。
+[source,java]
+----
+@EnableGlobalMethodSecurity(securedEnabled = true)
+public class MethodSecurityConfig {
+// ...
+}
+----
+然后向方法（在类或接口上）添加注释将相应地限制对该方法的访问。 Spring Security的本地注释支持为该方法定义了一组属性。这些将被传递给AccessDecisionManager以供其做出实际决定
+[source,java]
+----
+public interface BankService {
+
+@Secured("IS_AUTHENTICATED_ANONYMOUSLY")
+public Account readAccount(Long id);
+
+@Secured("IS_AUTHENTICATED_ANONYMOUSLY")
+public Account[] findAccounts();
+
+@Secured("ROLE_TELLER")
+public Account post(Account account, double amount);
+}
+----
+
+启用JSR-250注解：
+[source,java]
+----
+@EnableGlobalMethodSecurity(jsr250Enabled = true)
+public class MethodSecurityConfig {
+// ...
+}
+----
+
+这些都是基于标准的，允许应用简单的基于角色的约束，但是没有Spring Security的本地注释的强大功能。要使用新的基于表达式的语法，您可以使用
+[source,java]
+----
+@EnableGlobalMethodSecurity(prePostEnabled = true)
+public class MethodSecurityConfig {
+// ...
+}
+----
+
+等价的java代码：
+[source,java]
+----
+public interface BankService {
+
+@PreAuthorize("isAnonymous()")
+public Account readAccount(Long id);
+
+@PreAuthorize("isAnonymous()")
+public Account[] findAccounts();
+
+@PreAuthorize("hasAuthority('ROLE_TELLER')")
+public Account post(Account account, double amount);
+}
+----
+
+== 3.核心概念
+
+在Spring Security 3.0中，spring-security-core jar的内容被精简到最低限度。 它不再包含任何与Web应用程序安全性，LDAP或命名空间配置相关的代码。我们在核心模块中可以找到的一些Java类型，它们代表了框架的构建块。
+
+=== 3.1 SecurityContextHolder, SecurityContext and Authentication Objects
+
+最基本的对象是SecurityContextHolder。 这是存储应用当前安全上下文信息的地方，其中包括当前使用该应用的主体的详细信息。默认情况下，SecurityContextHolder使用ThreadLocal来存储信息，这意味着即使安全上下文没有显式作为参数传递给方法，安全上下文也始终可用于同一执行线程中的方法。如果在处理当前委托人的请求之后会清除线程，使用ThreadLocal是相当安全的。 当然，Spring Security会自动为您处理，因此您无需担心。
+
+有些应用程序并不适合使用ThreadLocal，因为它们使用线程的方式。例如，Swing客户端可能希望Java虚拟机中的所有线程使用相同的安全上下文。可以在启动时使用策略配置SecurityContextHolder，以指定如何存储上下文。 对于独立应用程序，您可以使用SecurityContextHolder.MODE_GLOBAL策略。其他应用程序可能希望安全线程产生的线程也具有相同的安全身份。这是通过使用SecurityContextHolder.MODE_INHERITABLETHREADLOCAL实现的。 您可以通过两种方式修改默认的SecurityContextHolder.MODE_THREADLOCAL模式。第一个是设置系统属性，第二个是在SecurityContextHolder上调用一个静态方法。大多数应用程序不需要改变默认值，但是如果你这样做了，请查看JavaDoc for SecurityContextHolder以了解更多信息。
+
+=== 3.2 获取有关当前用户的信息
+
+在SecurityContextHolder中，我们存储当前与应用程序交互的委托人的详细信息。 Spring Security使用一个Authentication对象来表示这些信息。您通常不需要自己创建一个Authentication对象，但用户查询Authentication对象相当常见。 您可以使用以下代码块 - 从应用程序中的任何位置 - 获取当前通过身份验证的用户的名称，例如：
+
+[source,java]
+----
+	Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+
+	if (principal instanceof UserDetails) {
+	String username = ((UserDetails)principal).getUsername();
+	} else {
+	String username = principal.toString();
+	}
+----
+
+调用getContext()所返回的对象是SecurityContext接口的一个实例。 这是保存在线程本地存储中的对象正如我们将在下面看到的，Spring Security中的大多数身份验证机制都返回一个UserDetails实例作为主体。
+
+
+=== 3.3 UserDetailsService
+UserDetails是Spring Security的核心接口。 它代表一个委托人，但以一种可扩展的和特定于应用程序的方式。 将UserDetails看作用户数据库与SecurityContextHolder存储信息的适配器。作为您自己的用户数据库中某些东西的表示形式，通常您会将UserDetails转换为您的应用程序提供的原始对象，以便您可以调用业务特定的方法（如getEmail（），getEmployeeNumber（）等）。
+
+现在你可能想知道，所以我何时提供一个UserDetails对象？ 我怎么做？简单的答案是有一个名为UserDetailsService的接口。 此接口上的唯一方法接受基于String的用户名参数并返回UserDetails：
+
+[source,java]
+----
+UserDetails loadUserByUsername(String username) throws UsernameNotFoundException;
+----
+
+
+在成功认证时，UserDetails用于构建存储在SecurityContextHolder中的Authentication对象（下面更多内容）。好消息是，我们提供了许多UserDetailsService实现，包括使用内存映射（InMemoryDaoImpl）和使用JDBC（JdbcDaoImpl）。
+
+
+NOTE: 它纯粹是用于用户数据的DAO，除了将该数据提供给框架内的其他组件外，不执行其他功能。特别是，它不认证用户，由AuthenticationManager完成。在许多情况下，如果您需要自定义身份验证过程，则直接实施AuthenticationProvider更有意义。
+
+
+=== 3.4 GrantedAuthority
+
+除了principal之外，Authentication提供的另一个重要方法是getAuthorities()。此方法提供了一个GrantedAuthority对象的数组。GrantedAuthority是指授予委托人的权限。这些权限通常是“角色”，例如ROLE_ADMINISTRATOR或ROLE_HR_SUPERVISOR。稍后将为Web授权，方法授权和域对象授权配置这些角色。GrantedAuthority对象通常由UserDetailsService加载。
+
+通常，GrantedAuthority对象是应用程序范围的权限。它们不是特定于给定域对象的。因此，您不可能有一个GrantedAuthority来代表54号员工对象的权限，因为如果有成千上万的这样的权限，您会很快耗尽内存（或者至少导致应用程序花费很长时间 时间来验证用户）。但是你可以使用项目的域对象安全功能来达到这个目的。
+
+
+
+SecurityContextHolder：提供对SecurityContext的访问。
+SecurityContext： 保存身份验证和可能的特定于请求的安全信息。
+Authentication： 以Spring Security特定的方式表示主体。
+GrantedAuthority： 以反映授予委托人的应用程序范围的权限。
+UserDetails： 用于提供必要的信息以从应用程序的DAO或其他安全数据源构建一个Authentication对象。
+UserDetailsService：以基于字符串的用户名（或证书ID等）传递时创建UserDetails。
+
+
+== 4. 认证
+
+=== 4.1 认证流程
+
+. 系统会提示用户使用用户名和密码登录。
+. 系统（成功）验证密码对用户名是否正确。
+. 获取该用户的上下文信息（其角色列表等）。
+. 为用户建立安全上下文
+. 用户可能继续执行一些操作，该操作可能受访问控制机制保护，访问控制机制针对当前安全上下文信息检查操作所需的权限。
+
+前三项构成了认证过程，因此我们将在Spring Security中看看这些是如何发生的。
+
+. 获取用户名和密码并将其组合到UsernamePasswordAuthenticationToken（我们之前看到的Authentication接口的一个实例）的实例中。
+. 令牌传递给AuthenticationManager的一个实例进行验证。
+. AuthenticationManager在成功认证时返回完全填充的Authentication实例。
+. 通过调用SecurityContextHolder.getContext().setAuthentication（...）来建立安全上下文，传入返回的认证对象。
+
+从那时起，用户被认为是被认证的。 我们来看一些代码作为例子。
+
+[source,java]
+----
+import org.springframework.security.authentication.*;
+import org.springframework.security.core.*;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+
+public class AuthenticationExample {
+private static AuthenticationManager am = new SampleAuthenticationManager();
+
+public static void main(String[] args) throws Exception {
+	BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
+
+	while(true) {
+	System.out.println("Please enter your username:");
+	String name = in.readLine();
+	System.out.println("Please enter your password:");
+	String password = in.readLine();
+	try {
+		Authentication request = new UsernamePasswordAuthenticationToken(name, password);
+		Authentication result = am.authenticate(request);
+		SecurityContextHolder.getContext().setAuthentication(result);
+		break;
+	} catch(AuthenticationException e) {
+		System.out.println("Authentication failed: " + e.getMessage());
+	}
+	}
+	System.out.println("Successfully authenticated. Security context contains: " +
+			SecurityContextHolder.getContext().getAuthentication());
+}
+}
+
+class SampleAuthenticationManager implements AuthenticationManager {
+static final List<GrantedAuthority> AUTHORITIES = new ArrayList<GrantedAuthority>();
+
+static {
+	AUTHORITIES.add(new SimpleGrantedAuthority("ROLE_USER"));
+}
+
+public Authentication authenticate(Authentication auth) throws AuthenticationException {
+	if (auth.getName().equals(auth.getCredentials())) {
+	return new UsernamePasswordAuthenticationToken(auth.getName(),
+		auth.getCredentials(), AUTHORITIES);
+	}
+	throw new BadCredentialsException("Bad Credentials");
+}
+}
+----
+
+这里我们写了一个小程序，要求用户输入用户名和密码并执行上述顺序。 我们在这里实现的AuthenticationManager将认证任何用户名和密码相同的用户。 它为每个用户分配一个角色。 从上面的输出将会是这样的：
+[source,shell]
+----
+Please enter your username:
+bob
+Please enter your password:
+password
+Authentication failed: Bad Credentials
+Please enter your username:
+bob
+Please enter your password:
+bob
+Successfully authenticated. Security context contains: \
+org.springframework.security.authentication.UsernamePasswordAuthenticationToken@441d0230: \
+Principal: bob; Password: [PROTECTED]; \
+Authenticated: true; Details: null; \
+Granted Authorities: ROLE_USER
+----
+
+请注意，您通常不需要编写任何代码。 该过程通常会在内部发生，例如在Web认证过滤器中。 我们刚刚在这里包含了代码，以证明Spring Security中实际构成认证的问题有一个相当简单的解决方案。 当SecurityContextHolder包含完全填充的认证对象时，用户将被认证。
+
+=== 4.2 直接设置SecurityContextHolder内容
+
+实际上，Spring Security并不介意如何将Authentication对象放在SecurityContextHolder中。唯一关键的要求是SecurityContextHolder包含一个Authentication，它代表AbstractSecurityInterceptor之前的一个委托人（我们稍后会看到更多）需要授权用户操作。
+
+您可以（以及许多用户）编写自己的过滤器或MVC控制器，以提供与基于Spring Security的身份验证系统的互操作性。 例如，您可能正在使用容器管理的身份验证，它使当前用户可以从ThreadLocal或JNDI位置获得。或者你可能会为拥有传统专有认证系统的公司工作，这是一个企业“标准”，你无法控制。 在这种情况下，Spring Security很容易运行，并且仍然提供授权功能。 你所需要做的就是编写一个过滤器（或者等价物），从一个位置读取第三方用户信息，构建一个Spring Security特有的认证对象，并将其放入SecurityContextHolder。在这种情况下，您还需要考虑通常由内置身份验证基础结构自动处理的事情。 例如，在您将响应写入客户端脚注之前，您可能需要先用创建HTTP会话来缓存请求之间的上下文：[在响应提交后无法创建会话。
+
+=== 4.3 web认证
+
+==== 4.3.1 ExceptionTranslationFilter
+
+ExceptionTranslationFilter是一个Spring Security过滤器，负责检测抛出的任何Spring Security异常。 AbstractSecurityInterceptor通常会引发这种异常，后者是授权服务的主要提供者。我们将在下一节讨论AbstractSecurityInterceptor，但现在我们只需要知道它会产生Java异常，并且对HTTP没有任何认识，或者如何去认证一个主体。相反，ExceptionTranslationFilter提供此服务，具体负责返回错误代码403（如果主体已经过身份验证，因此根本没有足够的访问权限 - 按照上述步骤7），或者启动AuthenticationEntryPoint（如果主体尚未经过身份验证并且 因此我们需要开始第三步）。
+
+==== 4.3.2 AuthenticationEntryPoint
+AuthenticationEntryPoint负责上面列表中的第三步。 正如你可以想象的那样，每个Web应用程序都会有一个默认的身份验证策略（当然，这可以像Spring Security中的其他任何东西一样配置，但现在让我们保持简单）。 每个主要的认证系统都有自己的AuthenticationEntryPoint实现，它通常执行步骤3中描述的操作之一。
+
+==== 4.3.3 Authentication Mechanism
+一旦您的浏览器提交了您的身份验证凭证（无论是作为HTTP表单发布还是HTTP标头），服务器上都需要有一些“收集”这些身份验证信息的东西。 到目前为止，我们正在上面的列表中的第六步。 在Spring Security中，我们为从用户代理（通常是Web浏览器）收集验证信息的功能提供了一个特殊的名称，称之为“验证机制”。 示例是基于表单的登录和基本身份验证。 一旦从用户代理收集了认证详细信息，就构建一个认证“请求”对象，然后将其呈现给AuthenticationManager。
+
+认证机制接收到完全填充的认证对象后，认为请求有效，将认证放入SecurityContextHolder，并导致原始请求重试（上面的第七步）。 另一方面，如果AuthenticationManager拒绝了请求，认证机制将要求用户代理重试（上面的第二步）。
+
+==== 4.3.4 在请求之间存储SecurityContext
+根据应用程序的类型，可能需要制定一个策略来存储用户操作之间的安全上下文。 在典型的Web应用程序中，用户登录一次，随后通过其会话ID进行标识。 服务器缓存持续时间会话的主要信息。 在Spring Security中，在请求之间存储SecurityContext的责任归属于SecurityContextPersistenceFilter，SecurityContextPersistenceFilter默认将上下文存储为HTTP请求之间的HttpSession属性。 它将每个请求的上下文恢复到SecurityContextHolder，并在请求完成时清除SecurityContextHolder。 出于安全目的，您不应该直接与HttpSession进行交互。 没有理由这么做 - 总是使用SecurityContextHolder来代替。
+
+许多其他类型的应用程序（例如，无状态的RESTful Web服务）不使用HTTP会话，并将在每个请求中重新进行身份验证。 但是，SecurityContextPersistenceFilter包含在链中以确保SecurityContextHolder在每个请求之后被清除仍然很重要。
+
+
+=== 4.4 访问控制
+
+负责在Spring Security中进行访问控制决策的主要接口是AccessDecisionManager。
+[source,java]
+----
+    void decide(Authentication var1, Object var2, Collection<ConfigAttribute> var3) throws AccessDeniedException, InsufficientAuthenticationException;
+----
+var1:主体请求访问的Authentication对象
+var2:“安全对象”（见下文）
+var3:适用于该对象的安全元数据属性列表（例如访问所需的角色列表）。
+
+
+==== 4.4.1 Security and AOP Advice
+
+如果你熟悉AOP，你会意识到有不同类型的advice可用:before、after、throws和around。around advice非常有用，因为顾问可以选择是否继续进行方法调用，是否修改响应以及是否抛出异常。Spring Security为方法调用和Web请求提供了一个around advice。 我们使用Spring的标准AOP支持为方法调用提供了around advice，并且我们使用标准Filter实现了对Web请求的around advice。
+
+对于那些不熟悉AOP的人来说，理解的关键是Spring Security可以帮助您保护方法调用以及Web请求。 大多数人都对保护其服务层上的方法调用感兴趣。这是因为服务层是大多数业务逻辑驻留在当代Java EE应用程序中的地方。 如果你只需要在服务层保证方法调用的安全，Spring的标准AOP就足够了。 如果您需要直接保护域对象，您可能会发现AspectJ值得考虑。
+
+您可以选择使用AspectJ或Spring AOP执行方法授权，也可以选择使用过滤器执行Web请求授权。 您可以一起使用零个，一个，两个或三个这些方法。 主流使用模式是执行一些Web请求授权，再加上服务层上的一些Spring AOP方法调用授权。
+
+==== 4.4.2 Secure Objects and the AbstractSecurityInterceptor
+
+那么什么是“安全对象”呢？ Spring Security使用这个术语来指代可以有安全性的任何对象（例如授权决定）。最常见的例子是方法调用和Web请求。每个支持的安全对象类型都有自己的拦截器类，它是AbstractSecurityInterceptor的一个子类。 重要的是，在AbstractSecurityInterceptor被调用的时候，如果委托人已被认证，SecurityContextHolder将包含一个有效的认证。
+
+AbstractSecurityInterceptor为处理安全对象请求提供了一致的工作流程，通常为：
+
+. 查找与当前请求关联的“配置属性”
+. 将安全对象，当前认证和配置属性提交给AccessDecisionManager以作出授权决定
+. 可以选择更改调用发生的身份验证
+. 允许安全对象调用继续（假设访问被授予）
+. 一旦调用返回，调用AfterInvocationManager（如果已配置）。 如果调用引发异常，则不会调用AfterInvocationManager。
+
+**Configuration Attributes**
+
+“配置属性”可以被认为是对AbstractSecurityInterceptor使用的类具有特殊含义的字符串。它们由框架内的接口ConfigAttribute表示。它们可能是简单的角色名称，或者具有更复杂的含义，具体取决于AccessDecisionManager实现的复杂程度。AbstractSecurityInterceptor配置了一个SecurityMetadataSource，它用来查找安全对象的属性。通常这个配置对用户是隐藏的。配置属性将作为安全方法的注释或安全URL上的访问属性输入。例如，当我们在名称空间介绍中看到类似于<intercept-url pattern ='/secure/**'access ='ROLE_A，ROLE_B'/>的情况时，这表示配置属性ROLE_A和ROLE_B适用于匹配的Web请求给定的模式。实际上，使用默认的AccessDecisionManager配置，这意味着任何拥有与这两个属性中的任何一个匹配的GrantedAuthority的人都将被允许访问。严格来说，它们只是属性，解释依赖于AccessDecisionManager实现。使用前缀ROLE_是一个标记，用于指示这些属性是角色，并且应该由Spring Security的RoleVoter使用。 这只有在使用基于投票人的AccessDecisionManager时才有意义。
+
+**RunAsManager**
+
+假设AccessDecisionManager决定允许请求，那么AbstractSecurityInterceptor通常会继续处理请求.话虽如此，在极少数情况下，用户可能希望用不同的身份验证代替SecurityContext内的身份验证，该验证由AccessDecisionManager处理，调用RunAsManager.在合理的异常情况下，这可能非常有用，例如，如果服务层方法需要调用远程系统并呈现不同的身份.由于Spring Security自动将安全身份从一台服务器传播到另一台服务器（假设您使用正确配置的RMI或HttpInvoker远程协议客户端），这可能很有用。
+
+**AfterInvocationManager**
+
+在安全对象调用过程之后，然后返回 - 这可能意味着方法调用完成或过滤器链处理-AbstractSecurityInterceptor最终有机会处理调用。在这个阶段，AbstractSecurityInterceptor对可能修改返回对象感兴趣。 我们可能希望发生这种情况，因为授权决策无法在安全对象调用的“途中”中进行。AbstractSecurityInterceptor是高度可插入的，将控制传递给AfterInvocationManager，以根据需要实际修改对象。 这个类甚至可以完全替换对象，或者抛出异常，或者不以任何方式改变它。 只有调用成功时才会执行调用后检查。 如果发生异常，则额外的检查将被跳过。
+
+image::images/security-interception.png[]
+
+==== 4.4.3 扩展安全对象模型
+
+只有开发人员想要采用全新的截取和授权请求的方式，才需要直接使用安全对象。 例如，可以构建一个新的安全对象来保护对消息系统的调用。 任何需要安全性并且还提供拦截呼叫的方式（如围绕通知语义的AOP）都可以变成安全的对象。 话虽如此，大多数Spring应用程序将完全透明地使用目前支持的三种安全对象类型（AOP Alliance MethodInvocation，AspectJ JoinPoint和Web请求FilterInvocation）。
+
+== 5. 核心服务
+
+现在我们已经对Spring Security体系结构及其核心类进行了高级概述，让我们仔细研究一个或两个核心接口及其实现，特别是AuthenticationManager，UserDetailsService和AccessDecisionManager。 这些文件会在本文档的其余部分定期出现，因此了解它们如何配置以及如何操作非常重要。
+
+=== 5.1 AuthenticationManager, ProviderManager and AuthenticationProvider
+
+AuthenticationManager只是一个接口，所以实现可以是我们选择的任何东西，但它在实践中是如何工作的？如果我们需要检查多个身份验证数据库或不同的身份验证服务（如数据库和LDAP服务器）的组合，该怎么办？
+Spring Security中的默认实现名为ProviderManager，他自己不处理身份验证请求，而是委托给配置的AuthenticationProvider列表，依次查询是否可以执行身份验证。每个提供者都会抛出一个异常或返回完全填充的认证对象。验证身份验证请求的最常见方法是加载相应的UserDetails并检查已加载的密码与用户输入的密码。 这是DaoAuthenticationProvider使用的方法（见下文）。 加载的UserDetails对象- 特别是其包含的GrantedAuthority-将用于构建完整填充的Authentication对象，该对象从成功的身份验证返回并存储在SecurityContext中。
+
+
+如果您使用的是名称空间，则会在内部创建并维护一个ProviderManager实例，并使用名称空间身份验证提供程序元素（请参阅命名空间章节）向其添加提供程序。 在这种情况下，您不应该在应用程序上下文中声明ProviderManager bean。 但是，如果您不使用名称空间，那么您会声明它如下所示：
+[source,xml]
+----
+<bean id="authenticationManager"
+		class="org.springframework.security.authentication.ProviderManager">
+	<constructor-arg>
+		<list>
+			<ref local="daoAuthenticationProvider"/>
+			<ref local="anonymousAuthenticationProvider"/>
+			<ref local="ldapAuthenticationProvider"/>
+		</list>
+	</constructor-arg>
+</bean>
+----
+
+在上面的例子中，我们有三个提供者。它们按所示顺序（使用List来暗示）进行尝试，每个提供者都可以尝试验证，或者通过简单地返回null来跳过验证。如果所有实现都返回null，那么ProviderManager将抛出一个ProviderNotFoundException。 如果您有兴趣了解更多关于链接提供者的信息，请参阅ProviderManager Javadoc。
+
+身份验证机制（例如Web表单登录处理过滤器）通过引用ProviderManager，并调用它来处理其身份验证请求。 您需要的提供者有时可以与认证机制互换，而在其他时候，他们将依赖于特定的认证机制。例如，DaoAuthenticationProvider和LdapAuthenticationProvider与任何提交简单的用户名/密码认证请求的机制兼容，因此可以与基于表单的登录或HTTP基本认证一起使用。 另一方面，某些认证机制会创建一个只能由单一类型的AuthenticationProvider解释的认证请求对象。例如，JA-SIG CAS使用服务票据的概念，因此只能由CasAuthenticationProvider进行身份验证。您不必太在意这一点，因为如果您忘记注册合适的提供者，那么当尝试进行身份验证时，您只会收到一个ProviderNotFoundException。
+
+==== 5.1.1 擦除身份验证成功时的凭证
+
+默认情况下（从Spring Security 3.1开始），ProviderManager将尝试清除认证对象中的任何敏感凭据信息，这是由成功的认证请求返回的。 这可以防止密码等信息被保留超过必要的时间。
+
+例如，当您使用用户对象缓存时，以提高无状态应用程序的性能，这可能会有问题。 如果身份验证包含对缓存中对象的引用（如UserDetails实例），并且已删除其凭据，那么将无法再对缓存的值进行身份验证。
+如果您使用缓存，则需要考虑这一点。 一个明显的解决方案是先创建对象的副本，无论是在缓存实现中还是在创建返回的Authentication对象的AuthenticationProvider中。或者，您可以禁用ProviderManager上的eraseCredentialsAfterAuthentication属性。 有关更多信息，请参阅Javadoc。
+
+==== 5.1.2 DaoAuthenticationProvider
+
+Spring Security最简单的AuthenticationProvider是DaoAuthenticationProvider，它也是框架最早支持的之一。 它利用UserDetailsService（作为DAO）来查找用户名，密码和GrantedAuthority。 它仅通过将UsernamePasswordAuthenticationToken中提交的密码与UserDetailsService加载的密码进行比较来验证用户身份。 配置提供者非常简单：
+[source,java]
+----
+<bean id="daoAuthenticationProvider"
+	class="org.springframework.security.authentication.dao.DaoAuthenticationProvider">
+<property name="userDetailsService" ref="inMemoryDaoImpl"/>
+<property name="passwordEncoder" ref="passwordEncoder"/>
+</bean>
+---- 
+
+PasswordEncoder是可选的。 PasswordEncoder提供对从配置的UserDetailsService返回的UserDetails对象中提供的密码进行编码和解码。 这将在下面更详细地讨论。
+
+
+=== 5.2 UserDetailsService 实现
+
+如本参考指南前面所述，大多数身份验证提供程序都利用UserDetails和UserDetailsService接口。 回想一下UserDetailsService的方法：
+[source,java]
+----
+UserDetails loadUserByUsername(String username) throws UsernameNotFoundException;
+----
+
+返回的UserDetails是一个接口，它提供的getter可以保证认证信息非空的提供，例如用户名，密码，授予的权限以及用户帐户是启用还是禁用。大多数身份验证提供程序都将使用UserDetailsService，即使用户名和密码实际上并未用作身份验证决策的一部分。他们可能使用返回的UserDetails对象仅仅是为了它的GrantedAuthority信息，因为一些其他系统（如LDAP或X.509或CAS等）承担了实际验证凭证的责任。
+
+鉴于UserDetailsService实现起来非常简单，用户可以很容易地使用他们选择的持久性策略来检索认证信息。 话虽如此，Spring Security确实包含了一些有用的基础实现，我们将在下面进行介绍。
+
+
+==== 5.2.1 In-Memory Authentication
+
+易于使用创建自定义的UserDetailsService实现，从实现的持久性引擎中提取信息，但许多应用程序不需要这种复杂性。 如果您正在构建原型应用程序或刚开始集成Spring Security，那么尤其如此，因为当您不想花时间配置数据库或编写UserDetailsService实现时。 对于这种情况，一个简单的选择是使用安全名称空间中的用户服务元素：
+
+[source,java]
+----
+<user-service id="userDetailsService">
+<!-- Password is prefixed with {noop} to indicate to DelegatingPasswordEncoder that
+NoOpPasswordEncoder should be used. This is not safe for production, but makes reading
+in samples easier. Normally passwords should be hashed using BCrypt -->
+<user name="jimi" password="{noop}jimispassword" authorities="ROLE_USER, ROLE_ADMIN" />
+<user name="bob" password="{noop}bobspassword" authorities="ROLE_USER" />
+</user-service>
+----
+
+这也支持使用外部属性文件：
+[source,xml]
+----
+<user-service id="userDetailsService" properties="users.properties"/>
+----
+
+属性文件应该包含表单中的条目
+[source,shell]
+----
+username=password,grantedAuthority[,grantedAuthority][,enabled|disabled]
+----
+
+例如：
+[source,shell]
+----
+jimi=jimispassword,ROLE_USER,ROLE_ADMIN,enabled
+bob=bobspassword,ROLE_USER,enabled
+----
+
+==== 5.2.2 JdbcDaoImpl
+Spring Security还包含一个可以从JDBC数据源获取认证信息的UserDetailsService。 使用内部Spring JDBC，因此避免了用于存储用户详细信息的全功能对象关系映射程序（ORM）的复杂性。 如果您的应用程序确实使用了ORM工具，那么您可能更愿意编写自定义的UserDetailsService以重用您可能已创建的映射文件。 返回到JdbcDaoImpl，示例配置如下所示：
+[source,xml]
+----
+<bean id="dataSource" class="org.springframework.jdbc.datasource.DriverManagerDataSource">
+<property name="driverClassName" value="org.hsqldb.jdbcDriver"/>
+<property name="url" value="jdbc:hsqldb:hsql://localhost:9001"/>
+<property name="username" value="sa"/>
+<property name="password" value=""/>
+</bean>
+
+<bean id="userDetailsService"
+	class="org.springframework.security.core.userdetails.jdbc.JdbcDaoImpl">
+<property name="dataSource" ref="dataSource"/>
+</bean>
+----
+
+您可以通过修改上面显示的DriverManagerDataSource来使用不同的关系数据库管理系统。 您也可以像使用其他Spring配置一样使用从JNDI获取的全局数据源。
+
+==== 5.2.3 Authority Groups
+
+默认情况下，JdbcDaoImpl会为单个用户加载权限，并假定权限直接映射到用户（请参阅数据库架构附录）。 另一种方法是将权限分为组并将组分配给用户。 有些人更喜欢这种方法作为管理用户权利的手段。 有关如何启用组权限的更多信息，请参阅JdbcDaoImpl Javadoc。 组模式也包含在附录中。
+
+
+=== 5.3 加密
+
+Spring Security的PasswordEncoder接口用于执行密码的单向转换，以便安全地存储密码。鉴于PasswordEncoder是一种单向转换，当密码转换需要两种方式（即存储用于向数据库进行身份验证的凭证）时，并不打算这样做。 通常，PasswordEncoder用于存储需要在验证时与用户提供的密码进行比较的密码。
+
+
+==== 5.3.1 历史
+
+多年来，用于存储密码的标准机制已经发展。开始时密码以纯文本形式存储。密码被认为是安全的，因为数据存储密码被保存在所需的凭据中以便访问它。但是，恶意用户可以通过SQL注入等攻击找到方法来获取用户名和密码的大量“数据转储”。 随着越来越多的用户凭据成为公安专家意识到我们需要做更多的事情来保护用户的密码。
+
+然后鼓励开发人员在通过单向散列（如SHA-256）运行密码后存储密码。当用户尝试认证时，散列密码将与他们键入的密码的散列进行比较。这意味着系统只需要存储密码的单向散列。如果发生了违规，那么只有密码的单向散列被暴露。 由于哈希是一种方法，并且在计算上很难猜测给定散列的密码，所以在系统中找出每个密码是不值得的。 为了击败这个新系统，恶意用户决定创建名为Rainbow Tables的查找表。 他们不是每次都在猜测每个密码，而是一次计算密码并将其存储在查找表中。
+
+为了降低Rainbow Tables的有效性，鼓励开发者使用salt密码。 而不是仅使用密码作为散列函数的输入，将为每个用户的密码生成随机字节（称为salt）。 salt和用户的密码将通过产生唯一散列的散列函数来运行。 盐将以明文形式与用户密码一起存储。 然后当用户尝试认证时，散列密码将与存储的盐的哈希以及他们输入的密码进行比较。 独特的salt意味着Rainbow Tables不再有效，因为每种盐和密码组合的散列值都不相同。
+
+在现代，我们意识到密码哈希（如SHA-256）不再安全。 原因是，使用现代硬件，我们可以每秒执行数十亿次哈希计算。 这意味着我们可以轻松破解每个密码。
+
+现在鼓励开发人员利用自适应单向函数来存储密码。 使用自适应单向函数对密码进行验证是有意识的资源（即CPU，内存等）密集型。 自适应单向函数允许配置随硬件变得越来越好的“工作因素”。 建议将“工作因素”调整为在您的系统上验证密码需要大约1秒钟的时间。 这种权衡是为了让攻击者难以破解密码，但并不那么昂贵，它会给你自己的系统带来过大的负担。 Spring Security试图为“工作因素”提供一个良好的起点，但鼓励用户为他们自己的系统定制“工作因素”，因为不同系统的性能会有很大差异。 应该使用的自适应单向函数的示例包括bcrypt，PBKDF2，scrypt和Argon2。
+
+由于自适应单向函数是故意耗费资源的，因此验证每个请求的用户名和密码将显着降低应用程序的性能。 Spring Security（或任何其他库）没有什么能够加速验证密码，因为通过使验证资源密集而获得安全性。 鼓励用户交换短期凭证（即会话，OAuth令牌等）的长期凭证（即用户名和密码）。 短期凭证可以快速验证而不会有任何安全性损失。
+
+==== 5.3.2 DelegatingPasswordEncoder
+
+在Spring Security 5.0之前，默认的PasswordEncoder是NoOpPasswordEncoder，它需要纯文本密码。 根据密码历史部分，您可能会认为默认的PasswordEncoder现在是类似于BCryptPasswordEncoder的东西。 但是，这忽略了三个现实世界的问题：
+
+	. 有许多使用旧密码编码的应用程序无法轻松迁移
+	. 密码存储的最佳做法将再次发生变化。
+	. 作为一个框架，Spring Security不能经常发生突变
+
+相反，Spring Security引入了DelegatingPasswordEncoder，它解决了所有的问题：
+
+	. 确保使用当前密码存储建议对密码进行编码
+	. 允许验证现代和传统格式的密码
+	. 允许将来升级编码
+
+您可以使用PasswordEncoderFactories轻松构建DelegatingPasswordEncoder的实例。
+
+[source,java]
+----
+PasswordEncoder passwordEncoder =
+    PasswordEncoderFactories.createDelegatingPasswordEncoder();
+----
+或者，您可以创建自己的自定义实例。 例如：
+[source,java]
+----
+String idForEncode = "bcrypt";
+Map encoders = new HashMap<>();
+encoders.put(idForEncode, new BCryptPasswordEncoder());
+encoders.put("noop", NoOpPasswordEncoder.getInstance());
+encoders.put("pbkdf2", new Pbkdf2PasswordEncoder());
+encoders.put("scrypt", new SCryptPasswordEncoder());
+encoders.put("sha256", new StandardPasswordEncoder());
+
+PasswordEncoder passwordEncoder =
+    new DelegatingPasswordEncoder(idForEncode, encoders);
+----
+
+**密码存储格式**
+
+`{id}encodedPassword`
+
+这样的id是一个标识符，用于查找应使用哪个PasswordEncoder，并且encodedPassword是所选PasswordEncoder的原始编码密码。 该ID必须位于密码的开头，以{开始并以}结束。 如果无法找到id，则id将为空。 例如，以下可能是使用不同ID编码的密码列表。 所有原始密码都是“密码”。
+
+[source,shell]
+----
+{bcrypt}$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG <1>
+{noop}password <2>
+{pbkdf2}5d923b44a6d129f3ddf3e3c8d29412723dcbde72445e8ef6bf3b508fbf17fa4ed4d6b99ca763d8dc <3>
+{scrypt}$e0801$8bWJaSu2IKSn9Z9kM+TPXfOc/9bdYSrN1oD9qfVThWEwdRTnO7re7Ei+fUZRJ68k9lTyuTeUp4of4g24hHnazw==$OAOec05+bXxvuu/1qZ6NUR+xQYvYv7BeL1QxwRpY5Pc=  <4>
+{sha256}97cde38028ad898ebc02e690819fa220e88c62e0699403e94fff291cfffaf8410849f27605abcbc0 <5>
+----
+
+<1> 第一个密码的密码编码器ID为bcrypt，编码密码为$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG。 匹配时将委托给BCryptPasswordEncoder
+<2> 第二个密码将具有noop的密码编码器ID。 当匹配它将委托给NoOpPasswordEncoder
+<3> 第三个密码的密码编码器ID为pbkdf2，编码密码为5d923b44a6d129f3ddf3e3c8d29412723dcbde72445e8ef6bf3b508fbf17fa4ed4d6b99ca763d8dc。 匹配时将委托给Pbkdf2PasswordEncoder
+<4> 第四个密码的密码编码器ID为scrypt，将委托给SCryptPasswordEncoder
+<5> 第五个密码的密码编码器ID为sha256 ，将委托给StandardPasswordEncoder
+
+**密码编码**
+
+传递给构造函数的idForEncode决定使用哪一个PasswordEncoder来编码密码。 在我们上面构建的DelegatingPasswordEncoder中，这意味着编码密码的结果将被委派给BCryptPasswordEncoder并以{bcrypt}为前缀。 最终结果如下所示：
+
+`{bcrypt}$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG`
+
+**密码匹配**
+匹配是基于{id}以及id与构造函数中提供的PasswordEncoder的映射完成的。 我们在“密码存储格式”一节中的例子提供了一个如何完成的实例。 默认情况下，调用带有密码的匹配（CharSequence，String）和未映射的id（包括空id）的结果将导致IllegalArgumentException。 此行为可以使用DelegatingPasswordEncoder.setDefaultPasswordEncoderForMatches（PasswordEncoder）进行自定义。
+
+通过使用id，我们可以匹配任何密码编码，但使用最现代的密码编码对密码进行编码。 这很重要，因为与加密不同，密码哈希的设计使得没有简单的方法来恢复明文。 由于无法恢复明文，因此难以迁移密码。 虽然用户迁移NoOpPasswordEncoder非常简单，但我们选择默认包含它以简化入门体验。
+
+
+**入门体验**
+
+如果您正在制作演示或样本，花时间散列用户的密码会有点麻烦。 有便利的机制可以使这更容易，但这仍然不适用于生产。
+
+[source,java]
+----
+User user = User.withDefaultPasswordEncoder()
+  .username("user")
+  .password("password")
+  .roles("user")
+  .build();
+System.out.println(user.getPassword());
+// {bcrypt}$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG
+----
+
+如果您正在创建多个用户，则还可以重新使用该构建器。
+
+[source,java]
+----
+UserBuilder users = User.withDefaultPasswordEncoder();
+User user = users
+  .username("user")
+  .password("password")
+  .roles("USER")
+  .build();
+User admin = users
+  .username("admin")
+  .password("password")
+  .roles("USER","ADMIN")
+  .build();
+----
+
+这确实散列了存储的密码，但密码仍在内存和编译后的源代码中公开。 因此，对于生产环境来说，它仍然不被认为是安全的。 对于生产，你应该在外部散列你的密码。
+
+**故障排除**
+当存储的密码没有id时，将出现以下错误，如“密码存储格式”一节中所述。
+
+[source,java]
+----
+java.lang.IllegalArgumentException: There is no PasswordEncoder mapped for the id "null"
+	at org.springframework.security.crypto.password.DelegatingPasswordEncoder$UnmappedIdPasswordEncoder.matches(DelegatingPasswordEncoder.java:233)
+	at org.springframework.security.crypto.password.DelegatingPasswordEncoder.matches(DelegatingPasswordEncoder.java:196)
+----
+
+解决错误的最简单方法是切换到明确提供密码编码的PasswordEncoder。 解决这个问题的最简单方法是弄清楚你的密码当前如何存储，并明确提供正确的PasswordEncoder。 如果您正在从Spring Security 4.2.x迁移，您可以通过公开NoOpPasswordEncoder bean来恢复到以前的行为。 例如，如果您正在使用Java配置，则可以创建如下所示的配置：
+[source,java]
+----
+@Bean
+public static NoOpPasswordEncoder passwordEncoder() {
+    return NoOpPasswordEncoder.getInstance();
+}
+----
+
+如果您使用XML配置，则可以使用id passwordEncoder公开一个PasswordEncoder：
+[source,xml]
+----
+<b:bean id="passwordEncoder"
+        class="org.springframework.security.crypto.password.NoOpPasswordEncoder" factory-method="getInstance"/>
+----
+
+或者，您可以使用正确的ID为所有密码加上前缀，并继续使用DelegatingPasswordEncoder。 例如，如果您使用的是BCrypt，则可以将密码从以下类似的位置迁移：
+
+`$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG`
+
+to
+
+`{bcrypt}$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG`
+
+==== 5.3.3 BCryptPasswordEncoder
+
+BCryptPasswordEncoder实现使用广泛支持的bcrypt算法来散列密码。 为了使它对密码破解更有抵触性，bcrypt故意缓慢。 与其他自适应单向函数一样，应该调整大约1秒以验证系统上的密码。
+[source,java]
+----
+BCryptPasswordEncoder encoder = new BCryptPasswordEncoder(16);
+String result = encoder.encode("myPassword");
+assertTrue(encoder.matches("myPassword", result));
+----
+
+==== 5.3.4  Pbkdf2PasswordEncoder
+
+Pbkdf2PasswordEncoder实现使用PBKDF2算法来散列密码。 为了破解密码破解PBKDF2是一个故意缓慢的算法。 与其他自适应单向函数一样，应该调整大约1秒以验证系统上的密码。 当需要FIPS认证时，此算法是一个不错的选择。
+
+[source,java]
+-----
+// Create an encoder with all the defaults
+Pbkdf2PasswordEncoder encoder = new Pbkdf2PasswordEncoder();
+String result = encoder.encode("myPassword");
+assertTrue(encoder.matches("myPassword", result));
+-----
+
+==== 5.3.5 SCryptPasswordEncoder
+
+SCryptPasswordEncoder实现使用scrypt算法来散列密码。 为了击败定制硬件上的密码破解scrypt是一个故意缓慢的算法，需要大量的内存。 与其他自适应单向函数一样，应该调整大约1秒以验证系统上的密码。
+
+[source,java,linenums]
+----
+// Create an encoder with all the defaults
+SCryptPasswordEncoder encoder = new SCryptPasswordEncoder();
+String result = encoder.encode("myPassword");
+assertTrue(encoder.matches("myPassword", result));
+----
+
+
+== 6.web 安全
+
+在这一部分中，我们将看看Spring Security如何为应用程序的Web层提供身份验证和访问控制功能。我们学习名称空间，并查看实际组装哪些类和接口以提供Web层安全性。在某些情况下，有必要使用传统的bean配置来完全控制配置，所以我们还将看到如何在没有命名空间的情况下直接配置这些类。
+
+Spring Security的Web基础架构完全基于标准的servlet过滤器。它不在内部使用servlet或任何其他基于servlet的框架（如Spring MVC），因此它没有与任何特定Web技术的强耦合。它处理HttpServletRequest和HttpServletResponse，并不关心请求是来自浏览器，Web服务客户端，HttpInvoker还是AJAX应用程序。
+
+
+Spring Security在内部维护一个过滤器链，其中每个过滤器都有特定的责任，并且根据需要哪些服务来添加或从配置中删除过滤器。过滤器的排序很重要，因为它们之间存在依赖关系。如果您一直在使用命名空间配置，那么过滤器会自动为您配置，而且您不必明确定义任何Spring Bean，但是在这里可能有时需要完全控制安全过滤器链，因为您正在使用功能这在名称空间中不受支持，或者您正在使用您自己的定制版本的类。
+
+=== 6.1. DelegatingFilterProxy
+
+当使用servlet过滤器时，显然需要在web.xml中声明它们，否则它们将被servlet容器忽略。在Spring Security中，过滤器类也是在应用程序上下文中定义的Spring bean，因此可以利用Spring丰富的依赖注入工具和生命周期接口。Spring的DelegatingFilterProxy提供了web.xml和应用程序上下文之间的链接。当使用DelegatingFilterProxy时，你会在web.xml文件中看到类似下面的内容：
+
+[source,xml]
+----
+<filter>
+<filter-name>springSecurityFilterChain</filter-name>
+<filter-class>org.springframework.web.filter.DelegatingFilterProxy</filter-class>
+</filter>
+
+<filter-mapping>
+<filter-name>springSecurityFilterChain</filter-name>
+<url-pattern>/*</url-pattern>
+</filter-mapping>
+----
+
+请注意，过滤器实际上是一个DelegatingFilterProxy，而不是实际实现过滤器逻辑的类。 DelegatingFilterProxy所做的是将Filter的方法委托给从Spring应用程序上下文获得的bean。这使得bean可以从Spring Web应用程序上下文生命周期支持和配置灵活性中受益。该bean必须实现javax.servlet.Filter，并且它的名称必须与filter-name元素中的名称相同。阅读Javadoc的DelegatingFilterProxy以获取更多信息
+
+=== 6.2. FilterChainProxy
+
+Spring Security的Web基础结构只能用于委托给FilterChainProxy的一个实例。安全过滤器不应该单独使用。从理论上讲，您可以在应用程序上下文文件中声明您需要的每个Spring Security过滤器bean，并为每个过滤器添加一个对应的DelegatingFilterProxy条目到web.xml，以确保它们的顺序正确，但这样做会很麻烦并且会混乱如果您有很多过滤器，请快速使用web.xml文件。FilterChainProxy允许我们向web.xml添加一个条目，并完全处理应用程序上下文文件以管理我们的Web安全bean。它使用DelegatingFilterProxy进行连接，就像上面的示例一样，但filter-name设置为bean名称“filterChainProxy”。过滤器链然后在应用程序上下文中用相同的bean名称声明
+
+[source,xml]
+----
+<bean id="filterChainProxy" class="org.springframework.security.web.FilterChainProxy">
+	<constructor-arg>
+		<list>
+			<sec:filter-chain pattern="/restful/**" filters="
+				securityContextPersistenceFilterWithASCFalse,
+				basicAuthenticationFilter,
+				exceptionTranslationFilter,
+				filterSecurityInterceptor" />
+			<sec:filter-chain pattern="/**" filters="
+				securityContextPersistenceFilterWithASCTrue,
+				formLoginFilter,
+				exceptionTranslationFilter,
+				filterSecurityInterceptor" />
+		</list>
+	</constructor-arg>
+</bean>
+----
+名称空间元素filter-chain用于方便地设置应用程序中所需的安全过滤器链。它将特定的URL模式映射到由filters元素中指定的bean名称构建的过滤器列表，并将它们组合到SecurityFilterChain类型的bean中。模式属性采用Ant路径，最具体的URI应该定义在前。 在运行时，FilterChainProxy将找到与当前Web请求相匹配的第一个URI模式，而由filters属性指定的过滤器bean列表将应用于该请求。 筛选器将按照它们定义的顺序调用，因此您可以完全控制应用于特定URL的过滤器链。
+
+您可能已经注意到我们已经在过滤器链中声明了两个SecurityContextPersistenceFilter（ASC是allowSessionCreation的简写，SecurityContextPersistenceFilter的一个属性）。 由于Web服务永远不会为将来的请求提供一个jsessionid，所以为这样的用户代理创建HttpSession将是浪费的。 如果您有一个需要最大可伸缩性的高容量应用程序，我们建议您使用上述方法。 对于较小的应用程序，使用单个SecurityContextPersistenceFilter（默认的allowSessionCreation为true）可能就足够了。
+
+请注意，FilterChainProxy不会在其配置的过滤器上调用标准过滤器生命周期方法。 我们建议您使用Spring的应用程序上下文生命周期接口作为替代，就像您对其他任何Spring bean一样。
+
+当我们查看如何使用命名空间配置来设置web安全性时，我们使用了名为“springSecurityFilterChain”的DelegatingFilterProxy。 您现在应该能够看到这是由名称空间创建的FilterChainProxy的名称。
+
+您可以使用属性filters =“none”作为提供过滤器bean列表的替代方法。 这将完全忽略来自安全过滤器链的请求模式。 请注意，与此路径相匹配的任何内容都不会应用认证或授权服务，并且可以自由访问。 如果您想在请求过程中使用SecurityContext的内容，那么它必须通过安全过滤器链。 否则SecurityContextHolder将不会被填充，并且内容将为空。
+
+=== 6.3. 过滤器的顺序
+
+过滤器在链中定义的顺序非常重要。 无论您实际使用哪些过滤器，顺序应如下所示：
+
+. ChannelProcessingFilter，因为它可能需要重定向到不同的协议
+. SecurityContextPersistenceFilter，因此SecurityContext可以在Web请求开始时的SecurityContextHolder中设置，并且可以在Web请求结束时将SecurityContext的任何更改复制到HttpSession中（准备好用于下一个Web请求）
+. ConcurrentSessionFilter，因为它使用SecurityContextHolder功能并需要更新SessionRegistry以反映来自主体的持续请求
+. 身份验证处理机制 - UsernamePasswordAuthenticationFilter，CasAuthenticationFilter，BasicAuthenticationFilter等 - 以便可以修改SecurityContextHolder以包含有效的身份验证请求令牌
+. SecurityContextHolderAwareRequestFilter，如果你正在使用它来安装Spring Security HttpServletRequestWrapper到你的servlet容器
+. JaasApiIntegrationFilter，如果一个JaasAuthenticationToken在SecurityContextHolder中，它将把FilterChain作为JaasAuthenticationToken中的Subject
+. RememberMeAuthenticationFilter，这样如果没有更早的认证处理机制更新SecurityContextHolder，并且请求提供了一个允许记住我服务的cookie，那么一个合适的记忆认证对象将会放在那里
+. AnonymousAuthenticationFilter，这样如果没有更早的认证处理机制更新SecurityContextHolder，那么匿名认证对象将会放在那里
+. ExceptionTranslationFilter，捕获任何Spring Security异常，以便返回HTTP错误响应或者可以启动相应的AuthenticationEntryPoint
+. FilterSecurityInterceptor，用于保护Web URI并在访问被拒绝时引发异常
+
+=== 6.4. 请求匹配和HttpFirewall
+
+Spring Security有几个区域，您定义的模式会针对传入的请求进行测试，以决定如何处理请求。当FilterChainProxy决定哪个过滤器链应该通过请求时，以及FilterSecurityInterceptor决定哪个安全约束适用于请求时，会发生这种情况。 了解机制是什么以及在针对您定义的模式进行测试时使用的URL值非常重要。
+
+Servlet规范为HttpServletRequest定义了几个属性，这些属性可以通过getter方法访问，并且我们可能需要匹配。 这些是contextPath，servletPath，pathInfo和queryString。 Spring Security只关心应用程序中的路径，所以contextPath被忽略。不幸的是，servlet规范没有精确定义在特定的请求URI下servletPath和pathInfo的值包含什么。 例如，URL中的每个路径段可能包含参数，如RFC 2396中所定义的。 规范没有明确说明这些是否应该包含在servletPath和pathInfo值中，并且行为在不同的servlet容器之间有所不同。当应用程序部署在未从这些值中剥离路径参数的容器中时，攻击者可能会将其添加到请求的URL中，以使模式匹配成功或意外失败。 传入URL中的其他变体也是可能的。 例如，它可能包含路径遍历序列（如/../）或多个正斜杠（//），这些也可能导致模式匹配失败。在执行servlet映射之前，一些容器将这些归一化，但其他容器却不这样。 为了避免这些问题，FilterChainProxy使用HttpFirewall策略来检查和包装请求。 未规范化的请求默认会自动被拒绝，路径参数和重复的斜杠会被删除以达到匹配的目的。因此，必须使用FilterChainProxy来管理安全过滤器链。请注意，servletPath和pathInfo值由容器解码，因此您的应用程序不应该包含任何包含分号的有效路径，因为这些部分将被删除以达到匹配目的。
+
+如上所述，默认策略是使用Ant风格路径进行匹配，这对于大多数用户来说可能是最佳选择。该策略在AntPathRequestMatcher类中实现，该类使用Spring的AntPathMatcher对模式与连接的servletPath和pathInfo执行不区分大小写的匹配，忽略queryString。
+
+如果由于某种原因，您需要更强大的匹配策略，则可以使用正则表达式。 策略实现是RegexRequestMatcher。 有关更多信息，请参阅此类的Javadoc。
+
+在实践中，我们建议您在服务层使用方法安全性，以控制对应用程序的访问，而不完全依赖于使用Web应用程序级定义的安全性约束。URL变化，很难考虑到应用程序可能支持的所有可能的URL以及请求可能被操纵的方式。你应该试着限制自己使用一些简单易懂的简单ant路径。 总是尝试使用“默认拒绝”方法，即最后定义了全部通配符（/或）并拒绝访问。
+
+在服务层定义的安全性更健壮，更难绕过，所以你应该总是利用Spring Security的方法安全选项。
+
+HttpFirewall还通过拒绝HTTP响应头中的新行字符来防止HTTP响应分裂。
+
+默认使用StrictHttpFirewall。 该实现拒绝看起来是恶意的请求。 如果它对您的需求太严格，那么您可以自定义哪些类型的请求被拒绝。 但是，您知道这会打开您的应用程序以应对攻击，这一点很重要。 例如，如果您希望利用Spring MVC的Matrix变量，则可以在XML中使用以下配置：
+
+[source,xml]
+----
+<b:bean id="httpFirewall"
+      class="org.springframework.security.web.firewall.StrictHttpFirewall"
+      p:allowSemicolon="true"/>
+
+<http-firewall ref="httpFirewall"/>
+----
+使用Java配置通过暴露StrictHttpFirewall bean也可以实现同样的目的。
+
+[source,java]
+----
+@Bean
+public StrictHttpFirewall httpFirewall() {
+    StrictHttpFirewall firewall = new StrictHttpFirewall();
+    firewall.setAllowSemicolon(true);
+    return firewall;
+}
+----
+
+=== 6.5. 高级配置
+正如我们前面在命名空间章节中看到的，可以使用多个http元素为不同的URL模式定义不同的安全配置。 每个元素都在内部FilterChainProxy中创建一个过滤器链，并且应该映射到它的URL模式。 元素将按照它们声明的顺序添加，因此必须首先声明最具体的模式。 下面是另一个例子，对于上述类似的情况，应用程序同时支持无状态的RESTful API以及用户使用表单登录的普通Web应用程序。
+[source,xml]
+----
+<!-- Stateless RESTful service using Basic authentication -->
+<http pattern="/restful/**" create-session="stateless">
+<intercept-url pattern='/**' access="hasRole('REMOTE')" />
+<http-basic />
+</http>
+
+<!-- Empty filter chain for the login page -->
+<http pattern="/login.htm*" security="none"/>
+
+<!-- Additional filter chain for normal users, matching all other requests -->
+<http>
+<intercept-url pattern='/**' access="hasRole('USER')" />
+<form-login login-page='/login.htm' default-target-url="/home.htm"/>
+<logout />
+</http>
+----
+
+==== 
+== 附录
+
+=== 1. 项目模块依赖说明
+
+在Spring Security 3.0中，代码库被细分为独立的jar，更清楚地区分不同的功能区域和第三方依赖关系。
+
+*Core - spring-security-core.jar*
+
+包含核心认证、访问控制类和接口、远程处理支持和基本配置API。支持独立应用程序，远程客户端，方法（服务层）安全性和JDBC用户配置。包含顶级包：
+
+* org.springframework.security.core
+* org.springframework.security.access
+* org.springframework.security.authentication
+* org.springframework.security.provisioning
+
+*Remoting - spring-security-remoting.jar*
+
+提供与Spring Remoting的集成。 除非你正在编写一个使用Spring Remoting的远程客户端，否则你不需要这个。 主要的包是org.springframework.security.remoting。
+
+*Web - spring-security-web.jar*
+
+包含过滤器和相关的网络安全基础架构代码。 如果您需要Spring Security Web认证服务和基于URL的访问控制，您将需要它。 主要的软件包是org.springframework.security.web。
+
+*Config - spring-security-config.jar*
+
+包含安全名称空间解析代码和Java配置代码。 如果您使用Spring Security XML名称空间进行配置或Spring Security的Java配置支持，则需要它。 主包是org.springframework.security.config。 这些类都不能直接用于应用程序。
+
+*LDAP - spring-security-ldap.jar*
+
+LDAP认证和供应代码。 如果您需要使用LDAP身份验证或管理LDAP用户条目，则为必需。 顶层包是org.springframework.security.ldap。
+
+*OAuth 2.0 Core - spring-security-oauth2-core.jar*
+
+spring-security-oauth2-core.jar包含为OAuth 2.0授权框架和OpenID Connect Core 1.0提供支持的核心类和接口。 使用OAuth 2.0或OpenID Connect Core 1.0的应用程序（例如客户端，资源服务器和授权服务器）需要此功能。 顶层包是org.springframework.security.oauth2.core。
+
+*OAuth 2.0 Client - spring-security-oauth2-client.jar*
+
+spring-security-oauth2-client.jar是Spring Security对OAuth 2.0授权框架和OpenID Connect Core 1.0的客户端支持。 应用程序需要使用OAuth 2.0登录和/或OAuth客户端支持。 顶层包是org.springframework.security.oauth2.client。
+
+*OAuth 2.0 JOSE - spring-security-oauth2-jose.jar*
+
+spring-security-oauth2-jose.jar包含Spring Security对JOSE（Javascript对象签名和加密）框架的支持。 JOSE框架旨在提供一种安全地在各方之间转让请求的方法。 它由一系列规格构建而成：
+
+* JSON Web Token (JWT)
+* JSON Web Signature (JWS)
+* JSON Web Encryption (JWE)
+* JSON Web Key (JWK)
+
+包含的顶级包：
+
+* org.springframework.security.oauth2.jwt
+* org.springframework.security.oauth2.jose
+
+*ACL - spring-security-acl.jar*
+
+专门的域对象ACL实现。 用于将安全性应用于应用程序内的特定域对象实例。 顶层包是org.springframework.security.acls。
+
+*CAS - spring-security-cas.jar*
+
+Spring Security CAS客户端集成。 如果您想使用CAS单点登录服务器的Spring Security Web认证。 顶层包是org.springframework.security.cas。
+
+*OpenID - spring-security-openid.jar*
+
+OpenID Web认证支持。 用于对外部OpenID服务器进行身份验证。org.springframework.security.openid。 需要OpenID4Java。

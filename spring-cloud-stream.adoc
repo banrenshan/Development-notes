@@ -1,0 +1,78 @@
+= spring-cloud-stream
+
+== 1.Spring数据集成简史
+
+Spring的数据集成之旅始于Spring Integration项目.通过编程模型,可以构建链接数据库,消息中间件等外部系统的企业级应用.
+
+快进到云时代，微服务在企业环境中崛起.Spring Boot改变了开发人员构建应用程序的方式。使用Spring的编程模型和Spring Boot实时管理，它可以无缝地开发独立的，生产级的基于Spring的微服务。
+
+为了将其扩展到数据集成工作，Spring Integration和Spring Boot被整合到一个新项目中。 Spring Cloud Stream诞生了。
+
+借助Spring Cloud Stream，开发人员可以:
+. 独立构建，测试，迭代和部署以数据为中心的应用程序
+. 应用现代微服务架构模式，包括消息组合
+. 以事件为中心驱动应用程序.事件可以表示某段时间内发生的事情，下游消费者应用可以在不知道其来源或生产者身份的情况下做出反应。
+. 将业务逻辑移植到消息代理（例如RabbitMQ，Apache Kafka，Amazon Kinesis）。
+. 通过使用Project Reactor的Flux和Kafka Streams API，在基于通道和非基于通道的应用程序绑定方案之间进行互操作，以支持无状态和有状态计算。
+. 依靠框架对常见用例的自动内容类型支持。可以扩展到不同的数据转换类型。
+
+
+== 2.快速开始
+
+我们将向您展示如何创建Spring Cloud Stream应用程序，该应用程序接收来自您选择的消息传递中间件的消息（稍后将详细介绍）并将收到的消息记录到控制台。 我们称之为LoggingConsumer.虽然不太实用，但它提供了一些主要概念和抽象的基本介绍，使其更容易消化本用户指南的其余部分。
+
+=== 2.1 导入依赖
+
+[source,xml]
+----
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-amqp</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-stream</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-stream-binder-rabbit</artifactId>
+		</dependency>
+----
+
+=== 2.2 添加消息处理程序
+
+[source,java]
+----
+@EnableBinding(Sink.class) <1>
+@SpringBootApplication
+public class LoggingConsumerApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(LoggingConsumerApplication.class, args);
+    }
+
+    @StreamListener(Sink.INPUT)
+    public void handle(Person person) { <2>
+        System.out.println("Received: " + person);
+    }
+
+    public static class Person {
+        private String name;
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String toString() {
+            return this.name;
+        }
+    }
+}
+----
+
+<1> 我们使用@EnableBinding（Sink.class）启用了Sink绑定（input-no-output）。这样做会向框架发出信号，以启动与消息传递中间件的绑定，并自动创建绑定到Sink.INPUT通道的目标（即队列，主题和其他）。
+<2> 我们添加了一个handle方法来接收Person类型的传入消息。 这样做可以让您看到框架的核心功能之一：它尝试自动将传入的消息转换为Person类型。

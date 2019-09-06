@@ -1,0 +1,1473 @@
+= spring-cloud-netflix
+
+
+该项目为Spring Boot应用程序提供Netflix OSS集成。通过一些简单的注释，您可以快速启用和配置应用程序内的常见模式，并使用经过实战考验的Netflix组件构建大型分布式系统。 提供的模式包括服务发现（Eureka），断路器（Hystrix），智能路由（Zuul）和客户端负载平衡（Ribbon）。
+
+== 1.服务发现:Eureka客户端
+
+=== 1.1 引入依赖
+
+----
+group:org.springframework.cloud
+artifact:spring-cloud-starter-netflix-eureka-client
+----
+
+=== 1.2在Eureka注册
+
+当客户端向Eureka注册时，它会提供有关自身的元数据,例如host,port,检测应用健康的URL,主页.每个客户端实例向Eureka发送心跳消息。如果心跳故障超过可配置的时间，则通常会从注册表中删除该实例。
+
+以下示例显示了最小的Eureka客户端应用程序：
+[source,java]
+----
+@SpringBootApplication
+@RestController
+public class Application {
+
+    @RequestMapping("/")
+    public String home() {
+        return "Hello world";
+    }
+
+    public static void main(String[] args) {
+        new SpringApplicationBuilder(Application.class).web(true).run(args);
+    }
+
+}
+----
+
+请注意，前面的示例显示了一个普通的Spring Boot应用程序。 通过在类路径上安装spring-cloud-starter-netflix-eureka-client，您的应用程序将自动注册到Eureka Server。 找到Eureka服务器需要进行配置，如以下示例所示：
+[souce,yml]
+----
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://localhost:8761/eureka/
+----
+
+在前面的示例中，“defaultZone”是一个魔术字符串后备值，它为任何不表示首选项的客户端提供服务URL（换句话说，它是一个有用的默认值）。
+
+The default application name (that is, the service ID), virtual host, and non-secure port (taken from the Environment) are ${spring.application.name}, ${spring.application.name} and ${server.port}, respectively.
+
+在类路径上使用spring-cloud-starter-netflix-eureka-client使应用程序成为Eureka“实例”（自己向服务端注册）和“客户端”（它可以查询服务端以查找其他服务）。 实例行为由eureka.instance.*配置键驱动，但如果您确保应用程序具有spring.application.name的值（这是Eureka服务ID或VIP的默认值），默认值即可。
+
+参考 https://github.com/spring-cloud/spring-cloud-netflix/tree/master/spring-cloud-netflix-eureka-client/src/main/java/org/springframework/cloud/netflix/eureka/EurekaInstanceConfigBean.java[EurekaInstanceConfigBean] 和 
+https://github.com/spring-cloud/spring-cloud-netflix/tree/master/spring-cloud-netflix-eureka-client/src/main/java/org/springframework/cloud/netflix/eureka/EurekaClientConfigBean.java[EurekaClientConfigBean]查看详细的配置选项
+
+要禁用Eureka Discovery Client，可以将eureka.client.enabled设置为false。 当spring.cloud.discovery.enabled设置为false时，Eureka Discovery Client也将被禁用。
+
+=== 1.3使用Eureka Server进行身份验证
+
+如果其中一个eureka.client.serviceUrl.defaultZone URL中嵌入了凭据，则会自动将HTTP基本身份验证添加到您的eureka客户端（如：http://user:password@localhost:8761/eureka）。对于更复杂的需求，您可以创建一个类型为DiscoveryClientOptionalArgs的@Bean并将ClientFilter实例注入其中，所有这些实例都应用于从客户端到服务器的调用。
+
+NOTE: 由于Eureka的限制，无法支持每个服务器基本身份验证凭据，因此仅使用找到的第一个集合。
+
+=== 1.4状态页面和健康指标
+
+Eureka实例的状态页面和运行状况指示器分别默认为/info和/health，它们是Spring Boot Actuator应用程序中有用端点的默认路径.
+
+如果使用非默认上下文路径或servlet路径（例如server.servletPath =/ custom），则需要更改这些，即使对于Actuator应用程序也是如此。 以下示例显示了两个设置的默认值：
+
+[source,yml]
+----
+eureka:
+  instance:
+    statusPageUrlPath: ${server.servletPath}/info
+    healthCheckUrlPath: ${server.servletPath}/health
+----
+
+这些链接显示在客户端使用的元数据中，并在某些情况下用于决定是否向您的应用程序发送请求，因此如果它们准确，则会很有帮助。
+
+=== 1.5注册安全应用程序
+
+如果您的应用程序想通过HTTPS联系，您可以在EurekaInstanceConfig中设置两个标志：
+. eureka.instance.[nonSecurePortEnabled]=[false]
+. eureka.instance.[securePortEnabled]=[true]
+
+对于以这种方式配置的服务，Spring Cloud DiscoveryClient始终返回以https开头的URI。同样，当以这种方式配置服务时，Eureka（本机）实例信息具有安全的运行状况检查URL。
+
+由于Eureka在内部工作的方式，它仍然会发布状态和主页的非安全URL，除非您也明确地覆盖这些URL。 您可以使用占位符来配置eureka实例URL，如以下示例所示：
+
+[source,yml]
+----
+eureka:
+  instance:
+    statusPageUrl: https://${eureka.hostname}/info
+    healthCheckUrl: https://${eureka.hostname}/health
+    homePageUrl: https://${eureka.hostname}/
+----
+
+NOTE: ${eureka.hostname}是一个本机占位符，仅在更高版本的Eureka中可用。 您也可以使用Spring占位符实现相同的功能 - 例如，使用$ {eureka.instance.hostName}。
+
+=== 1.6 eureka的健康检查
+
+默认情况下，Eureka使用客户端心跳来确定客户端是否已启动。 除非另有说明，否则Discovery Client不会传播应用程序的当前运行状态.因此，在成功注册后，Eureka始终宣布应用程序处于“UP”状态。通过启用Eureka运行状况检查可以更改此行为，从而将应用程序状态传播到Eureka。 因此，每个其他应用程序都不会向“UP”以外的状态下的应用程序发送流量。以下示例显示如何为客户端启用运行状况检查：
+[source,yml]
+----
+eureka:
+  client:
+    healthcheck:
+      enabled: true 
+----
+
+NOTE: Eureka根据心跳来判断应用程序是否活着,如果心跳状态正常,则认为应用健康,设置了这个属性之后,则是根据healthcheck是否处于UP状态来决定应用是否活着,如果处于非up状态,将会对应用进行隔离,其不再处理请求.
+
+如果您需要更多控制运行状况检查，请考虑实现自己的com.netflix.appinfo.HealthCheckHandler。
+
+=== 1.7 实例和客户端的Eureka元数据
+
+存在标准元数据，用于提供主机名，IP地址，端口号，状态页和运行状况检查等信息。这些元数据缓存在服务端，客户端可以从服务端读取。 可以通过eureka.instance.metadataMap添加其他的元数据信息，并且可以在远程客户端中访问此元数据。通常，除非客户端了解元数据的含义，否则其他元数据不会更改客户端的行为。 本文稍后将介绍几种特殊情况，其中Spring Cloud已经为元数据映射赋予了意义。
+
+
+==== 1.7.1 Cloud Foundry
+
+==== 1.7.2 AWS
+
+==== 1.7.3 更改实例ID
+
+一个vanilla Netflix Eureka实例注册的ID等于其主机名（即每个主机只有一个服务）。 Spring Cloud Eureka提供合理的默认值，定义如下：
+	${spring.cloud.client.hostname}:${spring.application.name}:${spring.application.instance_id:${server.port}}}
+例如: `myhost:myappname:8080`
+
+通过使用Spring Cloud，您可以通过在eureka.instance.instanceId中提供唯一标识符来覆盖此值，如以下示例所示：
+
+[source,yml]
+----
+eureka:
+  instance:
+    instanceId: ${spring.application.name}:${vcap.application.instance_id:${spring.application.instance_id:${random.value}}}
+----
+
+使用上面示例中显示的元数据,部署在localhost上的多个服务实例，将随机值插入其中以使实例唯一.在Cloud Foundry中，vcap.application.instance_id会自动填充在Spring Boot应用程序中，因此不需要随机值。
+
+=== 1.8 使用EurekaClient
+
+如果你的应用程序作为服务发现端，就可以使用它从Eureka Server发现服务实例。 一种方法是使用本机com.netflix.discovery.EurekaClient（而不是Spring Cloud DiscoveryClient），如以下示例所示：
+[source,java]
+----
+@Autowired
+private EurekaClient discoveryClient;
+
+public String serviceUrl() {
+    InstanceInfo instance = discoveryClient.getNextServerFromEureka("STORES", false);
+    return instance.getHomePageUrl();
+}
+----
+
+NOTE: 不要在@PostConstruct方法或@Scheduled方法中使用EurekaClient（或者可能尚未启动ApplicationContext的任何地方）。 它在SmartLifecycle中初始化（阶段= 0），因此最早可以依赖它的是另一个具有更高阶段的SmartLifecycle。
+
+=== 1.9 Native Netflix EurekaClient的替代品
+
+您无需使用原始Netflix EurekaClient。此外，在某种包装后面使用它通常更方便。
+
+为了实现逻辑URL替代物理URL,spring cloud提供了Feign和RestTemplate.您还可以使用org.springframework.cloud.client.discovery.DiscoveryClient，它为客户端提供简单的API（不特定于Netflix），如以下示例所示：
+[source,java]
+----
+@Autowired
+private DiscoveryClient discoveryClient;
+
+public String serviceUrl() {
+    List<ServiceInstance> list = discoveryClient.getInstances("STORES");
+    if (list != null && list.size() > 0 ) {
+        return list.get(0).getUri();
+    }
+    return null;
+}
+----
+
+=== 1.10为什么注册服务这么慢？
+
+作为实例还涉及到注册表的定期心跳（通过客户端的serviceUrl），默认间隔时间为30秒。在服务器,实例和客户端在其本地缓存中都具有相同的元数据之前，客户端无法发现服务（因此可能需要3次心跳）。您可以通过设置eureka.instance.leaseRenewalIntervalInSeconds来更改周期。将其设置为小于30的值会加快使客户端连接到其他服务的过程。在生产中，最好坚持使用默认值，因为服务器中的内部计算会对租赁续订期做出假设。
+
+=== 1.11 Zones
+
+如果已将Eureka客户端部署到多个区域，则可能希望这些客户端在尝试另一个区域中的服务之前使用同一区域内的服务。 要进行此设置，您需要正确配置Eureka客户端。
+
+首先，您需要确保将Eureka服务器部署到每个区域，并确保它们彼此对等。
+
+接下来，您需要告诉Eureka您的服务所在的区域。您可以使用metadataMap属性来执行此操作。如果服务1部署到区域1和区域2，则需要在服务1中设置以下Eureka属性：
+
+.Service 1 in Zone 1
+[source]
+----
+eureka.instance.metadataMap.zone = zone1
+eureka.client.preferSameZoneEureka = true
+----
+
+.Service 1 in Zone 2
+[source]
+----
+eureka.instance.metadataMap.zone = zone2
+eureka.client.preferSameZoneEureka = true
+----
+
+=== 笔记
+
+
+. 分析注册过程
+. 分析心跳机制
+. 分析离线机制
+
+
+== 2.服务发现:服务端
+
+=== 2.1 引入服务端
+
+. group:org.springframework.cloud
+. artifact:spring-cloud-starter-netflix-eureka-server
+
+如果您的项目已使用Thymeleaf作为其模板引擎，则可能无法正确加载Eureka服务器的Freemarker模板。 在这种情况下，有必要手动配置模板加载器：
+[source,yml]
+----
+spring:
+  freemarker:
+    template-loader-path: classpath:/templates/
+    prefer-file-system-access: false
+----
+
+=== 2.2 运行服务端
+
+下面的例子展示一个最小的服务端
+[source,java]
+----
+@SpringBootApplication
+@EnableEurekaServer
+public class Application {
+
+    public static void main(String[] args) {
+        new SpringApplicationBuilder(Application.class).web(true).run(args);
+    }
+
+}
+----
+
+服务器有一个主页，其中包含用于/eureka/*下正常Eureka功能的UI和HTTP API端点。
+
+=== 2.3 高可用,zones和regions
+
+Eureka服务器没有后端存储，但注册表中的服务实例都必须发送心跳以使其注册保持最新（因此可以在内存中完成）。客户端还有一个Eureka注册的内存缓存（因此，他们不必为服务的每个请求转到注册表）。
+
+默认情况下，每个Eureka服务器也是Eureka客户端，并且需要（至少一个）service URL来定位对等体。 如果您不提供该服务，该服务可以正常运行，但它会在您的日志中填充很多关于无法向对等方注册的噪音。
+
+Zones and Regions的讲解请参考ribbon.
+
+=== 2.4 独立模式
+
+两个缓存（客户端和服务器）和心跳的组合使得独立的Eureka服务器能够非常适应故障，只要有某种监视器或 elastic runtime （例如Cloud Foundry）使其保持活动状态即可。
+
+在独立模式下，您可能更愿意关闭客户端行为，以便它不会不断尝试无法访问的对等方。 以下示例显示如何关闭客户端行为：
+
+[source,yml]
+----
+server:
+  port: 8761
+
+eureka:
+  instance:
+    hostname: localhost
+  client:
+    registerWithEureka: false
+    fetchRegistry: false
+    serviceUrl:
+      defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
+----
+
+请注意，serviceUrl指向与本地实例相同的主机。
+
+=== 2.5 多机部署
+通过运行多个实例并要求它们相互注册，可以使Eureka更具弹性和可用性。实际上，这是默认行为，因此您需要做的就是将有效的serviceUrl添加到对等体，如以下示例所示：
+[source,yml]
+----
+---
+spring:
+  profiles: peer1
+eureka:
+  instance:
+    hostname: peer1
+  client:
+    serviceUrl:
+      defaultZone: http://peer2/eureka/
+
+---
+spring:
+  profiles: peer2
+eureka:
+  instance:
+    hostname: peer2
+  client:
+    serviceUrl:
+      defaultZone: http://peer1/eureka/
+----
+在前面的示例中，我们有一个YAML文件，可以通过在不同的Spring配置文件中运行它来在两个主机（peer1和peer2）上运行相同的服务器。您可以使用此配置通过操作/etc/hosts来解析主机名来模拟多机部署（在生产中执行此操作没有太大价值）。实际上，如果您在知道自己的主机名的计算机上运行，则不需要eureka.instance.hostname（默认情况下，使用java.net.InetAddress查找它）。
+
+您可以将多个对等体添加到系统中，并且只要它们通过至少一个边缘彼此连接，它们就会在它们之间同步注册。如果对等体在物理上是分开的（在数据中心内或在多个数据中心之间），那么系统原则上可以存在“裂脑”类型的故障。您可以向系统添加多个对等体，只要它们彼此直接连接，它们就会在它们之间同步注册。
+
+[source,yml]
+----
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://peer1/eureka/,http://peer2/eureka/,http://peer3/eureka/
+
+---
+spring:
+  profiles: peer1
+eureka:
+  instance:
+    hostname: peer1
+
+---
+spring:
+  profiles: peer2
+eureka:
+  instance:
+    hostname: peer2
+
+---
+spring:
+  profiles: peer3
+eureka:
+  instance:
+    hostname: peer3
+----
+
+=== 2.6何时优先选择IP地址
+
+在某些情况下，Eureka最好使用服务的IP地址而不是主机名。将eureka.instance.preferIpAddress设置为true，当应用程序向eureka注册时，它使用其IP地址而不是其主机名。
+
+=== 2.7保护Eureka服务器
+
+只需将Spring Security添加到服务器的类路径中，即可通过spring-boot-starter-security保护您的Eureka服务器。默认情况下，当Spring Security位于类路径上时，它将要求在应用程序的每个请求中发送有效的CSRF令牌。
+
+Eureka客户端通常不会拥有有效的跨站点请求伪造（CSRF）令牌，您需要为/eureka/**端点禁用此要求。 例如：
+
+[source,java]
+----
+@EnableWebSecurity
+class WebSecurityConfig extends WebSecurityConfigurerAdapter {
+
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http.csrf().ignoringAntMatchers("/eureka/**");
+        super.configure(http);
+    }
+}
+----
+
+https://github.com/spring-cloud-samples/eureka/tree/Eureka-With-Security[eureka安全服务端的参考示例]
+
+=== 2.8 JDK 11 Support
+
+
+=== 笔记
+
+image::../images/20190220111528.png[]
+
+. applicaton: 服务的名称,对应配置文件中 `eureka.instance.appname`,如果改值不存在则取 `spring.application.name`
+. status: 文本显示instanceId,超链接执行 `/info` 路径.超链接中的hostname可以通过 `eureka.instance.hostname`来修改,也可以使用ip来直接显示,设置`eureka.instance.prefer-ip-address`为true即可.
+
+
+== 3.断路器:Hystrix 客户端
+
+Netflix创建了一个名为Hystrix的库，用于实现断路器模式。 在微服务架构中，通常有多层服务调用，如以下示例所示：
+
+image::../iamges/HystrixFallback.png[]
+
+较低级别的服务中的服务故障可能导致级联故障一直到用户层面。当调用特定的服务 在circuitBreaker.requestVolumeThreshold (默认20请求)指定的请求数 失败比列circuitBreaker.errorThresholdPercentage ( 默认大于50%) 并且在特定的时间metrics.rollingStats.timeInMilliseconds (默认10 ),满足上面的条件之后断路器就会打开,服务被终止调用.在出现错误和断路的情况下，开发人员可以提供回退方法返回给一些默认信息。
+
+
+断路器可以阻止级联故障,给过载和故障服务提供时间恢复.fallback可以使一个方法调用,静态值或者一个合理的空值.可以链接回退，以便第一个回退进行一些其他业务调用，这反过来又回到静态数据。
+
+=== 3.1 引入Hystrix
+
+. group:org.springframework.cloud 
+. artifact:spring-cloud-starter-netflix-hystrix
+
+以下示例显示了具有Hystrix断路器的最小服务发现客户端：
+[source,java]
+----
+@SpringBootApplication
+@EnableCircuitBreaker
+public class Application {
+
+    public static void main(String[] args) {
+        new SpringApplicationBuilder(Application.class).web(true).run(args);
+    }
+
+}
+
+@Component
+public class StoreIntegration {
+
+    @HystrixCommand(fallbackMethod = "defaultStores")
+    public Object getStores(Map<String, Object> parameters) {
+        //do stuff that might fail
+    }
+
+    public Object defaultStores(Map<String, Object> parameters) {
+        return /* something useful */;
+    }
+}
+----
+
+@HystrixCommand由名为“javanica”的Netflix contrib库提供。 Spring Cloud在连接到Hystrix断路器的代理中自动包装带有该注释的Spring bean。 断路器计算何时打开和关闭短路以及在发生故障时应采取的措施。
+
+要配置@HystrixCommand，可以将commandProperties属性与@HystrixProperty注释列表一起使用。 有关详细信息，请参见 https://github.com/Netflix/Hystrix/tree/master/hystrix-contrib/hystrix-javanica#configuration[此处] 有关可用属性的详细信息，请参阅 https://github.com/Netflix/Hystrix/wiki/Configuration[Hystrix wiki]。
+
+=== 3.2 Propagating the Security Context or Using Spring Scopes
+
+如果您希望某些threadlocal上下文传播到@HystrixCommand，则默认声明不起作用，因为它在线程池中执行该命令（如果超时）。您可以通过配置或直接在注释中切换Hystrix以使用与调用者相同的线程，方法是要求它使用不同的“隔离策略”。 以下示例演示如何在注释中设置线程：
+[source,java]
+----
+@HystrixCommand(fallbackMethod = "stubMyService",
+    commandProperties = {
+      @HystrixProperty(name="execution.isolation.strategy", value="SEMAPHORE")
+    }
+)
+----
+
+如果您使用@SessionScope或@RequestScope，则同样适用。 如果遇到运行时异常，表示无法找到作用域上下文，则需要使用相同的线程。
+
+您还可以选择将hystrix.shareSecurityContext属性设置为true。这样做会自动配置Hystrix并发策略，该插件将SecurityContext从主线程传输到Hystrix命令使用的线程。
+
+Hystrix不会注册多个Hystrix并发策略，因此通过将您自己的HystrixConcurrencyStrategy声明为Spring bean，可以使用扩展机制。 Spring Cloud在Spring上下文中查找您的实现，并将其包装在自己的插件中。
+
+=== 3.3 Health Indicator
+
+使用/health端点,可以查看断路器的状态,例如:
+[source,json]
+----
+{
+    "hystrix": {
+        "openCircuitBreakers": [
+            "StoreIntegration::getStoresByLocationLink"
+        ],
+        "status": "CIRCUIT_OPEN"
+    },
+    "status": "UP"
+}
+----
+
+
+=== 3.4 Hystrix 指标流
+
+要想查看指标流信息,需要将spring-boot-starter-actuator添加到类路径,并开启 management.endpoints.web.exposure.include: hystrix.stream,访问/actuator/hystrix.stream,查看返回数据:
+[source,java]
+----
+ping: 
+
+data: {"type":"HystrixCommand","name":"hello","group":"HelloController","currentTime":1550715362864,"isCircuitBreakerOpen":true,"errorPercentage":0,"errorCount":0,"requestCount":0,"rollingCountBadRequests":0,"rollingCountCollapsedRequests":0,"rollingCountEmit":0,"rollingCountExceptionsThrown":0,"rollingCountFailure":0,"rollingCountFallbackEmit":0,"rollingCountFallbackFailure":0,"rollingCountFallbackMissing":0,"rollingCountFallbackRejection":0,"rollingCountFallbackSuccess":0,"rollingCountResponsesFromCache":0,"rollingCountSemaphoreRejected":0,"rollingCountShortCircuited":0,"rollingCountSuccess":0,"rollingCountThreadPoolRejected":0,"rollingCountTimeout":0,"currentConcurrentExecutionCount":0,"rollingMaxConcurrentExecutionCount":0,"latencyExecute_mean":0,"latencyExecute":{"0":0,"25":0,"50":0,"75":0,"90":0,"95":0,"99":0,"99.5":0,"100":0},"latencyTotal_mean":0,"latencyTotal":{"0":0,"25":0,"50":0,"75":0,"90":0,"95":0,"99":0,"99.5":0,"100":0},"propertyValue_circuitBreakerRequestVolumeThreshold":20,"propertyValue_circuitBreakerSleepWindowInMilliseconds":5000,"propertyValue_circuitBreakerErrorThresholdPercentage":50,"propertyValue_circuitBreakerForceOpen":false,"propertyValue_circuitBreakerForceClosed":false,"propertyValue_circuitBreakerEnabled":true,"propertyValue_executionIsolationStrategy":"THREAD","propertyValue_executionIsolationThreadTimeoutInMilliseconds":1000,"propertyValue_executionTimeoutInMilliseconds":1000,"propertyValue_executionIsolationThreadInterruptOnTimeout":true,"propertyValue_executionIsolationThreadPoolKeyOverride":null,"propertyValue_executionIsolationSemaphoreMaxConcurrentRequests":10,"propertyValue_fallbackIsolationSemaphoreMaxConcurrentRequests":10,"propertyValue_metricsRollingStatisticalWindowInMilliseconds":10000,"propertyValue_requestCacheEnabled":true,"propertyValue_requestLogEnabled":true,"reportingHosts":1,"threadPool":"HelloController"}
+----
+
+== 4. Circuit Breaker: Hystrix Dashboard 
+
+Hystrix的主要好处之一是它收集的关于每个HystrixCommand的指标信息。 Hystrix仪表板以高效的方式显示每个断路器的运行状况。
+
+image::../images/Hystrix.png[]
+
+
+== 5.Hystrix 超时和ribbon客户端
+
+当你使用Hystrix命令包装ribbon客户端的时候,你需要将hystrix的超时时间设置的大于ribbon的超时时间,包括失败发生的重试的时间.例如,Ribbon需要1s,重试设置为三次,那么hystrix的超时时间就必须大于3s.
+
+=== 5.1 引入Hystrix Dashboard 
+
+. group:org.springframework.cloud 
+. artifact:spring-cloud-starter-netflix-hystrix-dashboard
+
+要运行Hystrix仪表板，请使用@EnableHystrixDashboard注释Spring Boot主类。 然后访问/hystrix呈现仪表板,该页面的展示数据来自实例的/hystrix.stream端点。
+
+
+=== 5.2 Turbine
+
+查看单个实例的Hystrix数据在系统整体运行状况方面不是很有用。Turbine是一个应用程序，它将所有相关的/hystrix.stream端点聚合到一个组合的/turbine.stream中，以便在Hystrix仪表板中使用。
+
+运行Turbine需要使用@EnableTurbine注释来注释主类（例如，使用spring-cloud-starter-netflix-turbine来设置类路径）。https://github.com/Netflix/Turbine/wiki/Configuration-(1.x)[Turbine 1 wiki]中所有记录的配置属性均适用.唯一的区别是turbine.instanceUrlSuffix不需要前置端口，因为除非turbine.instanceInsertPort = false，否则会自动处理。
+
+
+NOTE: 默认情况下Turbine通过eureka查找注册实例的hostname和端口,然后根据/hystrix.stream端点来聚合数据.如果实例的元数据包含management.port，则使用它来代替/hystrix.stream端点的端口值。默认情况下，元数据中management.port的属性等于配置文件中management.port属性。 可以通过以下配置覆盖它：
+[source,yml]
+----
+eureka:
+  instance:
+    metadata-map:
+      management.port: ${management.port:8081}
+----
+
+属性`turbine.appConfig`是一组Eukeka serviceId,turbine通过这些serviceId来查找实例.turbine的组合路径是
+
+	http://my.turbine.server:8080/turbine.stream?cluster=CLUSTERNAME
+
+如果名称是default，则可以省略cluster参数。cluster参数必须与turbine.aggregator.clusterConfig中的条目匹配。
+
+Eureka的返回值大写,下面的例子是一个名为customers的应用在Eureka注册
+[source,yml]
+----
+turbine:
+  aggregator:
+    clusterConfig: CUSTOMERS
+  appConfig: customers
+----
+
+如果需要自定义Turbine应使用的集群名称（因为您不希望在turbine.aggregator.clusterConfig配置中存储集群名称），请提供TurbineClustersProvider类型的Bean。
+
+
+Spring Cloud提供了一个spring-cloud-starter-netflix-turbine，它具有运行Turbine服务器所需的所有依赖关系。 要添加Turbine，请创建一个Spring Boot应用程序并使用@EnableTurbine对其进行注释。
+
+
+=== 5.2.1 clusters端点
+
+在某些情况下，可能会知道在Turbine中配置了哪些clusters。为了支持这一点，您可以使用/clusters端点，它将返回所有已配置集群的JSON数组。
+
+[source,json]
+----
+[
+  {
+    "name": "RACES",
+    "link": "http://localhost:8383/turbine.stream?cluster=RACES"
+  },
+  {
+    "name": "WEB",
+    "link": "http://localhost:8383/turbine.stream?cluster=WEB"
+  }
+]
+----
+如果你想禁止该端点,只需要设置turbine.endpoints.clusters.enabled=false.
+
+=== 5.3 Turbine Stream
+
+在某些环境中（例如在PaaS设置中），从所有分布式Hystrix命令中提取度量标准的经典Turbine模型不起作用。在这种情况下，您可能希望让Hystrix命令将指标推送到Turbine。 Spring Cloud通过消息传递实现这一点。
+
+要在客户端上执行此操作，请添加spring-cloud-netflix-hystrix-stream和您选择的spring-cloud-starter-stream- *依赖项。 有关代理以及如何配置客户端凭据的详细信息，请参阅Spring Cloud Stream文档。 他被设计为开箱即用。
+
+
+在服务器端，创建一个Spring Boot应用程序并使用@EnableTurbineStream。 Turbine Stream服务器需要使用Spring Webflux，因此spring-boot-starter-webflux需要包含在您的项目中。默认情况下，在将spring-cloud-starter-netflix-turbine-stream添加到您的应用程序时，会包含spring-boot-starter-webflux。
+
+然后，您可以将Hystrix仪表板指向Turbine Stream Server而不是单独的Hystrix流。 如果Turbine Stream在myhost上的端口8989上运行，则将http://myhost:8989放入Hystrix仪表板的流输入字段中。 前缀是各自的serviceId，后跟一个点（.），然后是名称。
+
+
+Turbine Stream服务器还支持群集参数。 与Turbine服务器不同，Turbine Stream使用eureka serviceId作为集群名称，这些不可配置。
+
+如果Turbine Stream服务器在my.turbine.server上的端口8989上运行，并且您的环境中有两个eureka serviceIds:customers和 products，则您的Turbine Stream服务器上将提供以下URL。 default和empty cluster name将提供Turbine Stream服务器接收的所有指标。
+
+[source,bash]
+----
+http://my.turbine.sever:8989/turbine.stream?cluster=customers
+http://my.turbine.sever:8989/turbine.stream?cluster=products
+http://my.turbine.sever:8989/turbine.stream?cluster=default
+http://my.turbine.sever:8989/turbine.stream
+----
+
+因此，您可以将eureka serviceId用作Turbine仪表板（或任何兼容的仪表板）的群集名称。 您无需为Turbine Stream服务器配置任何属性，如turbine.appConfig，turbine.clusterNameExpression和turbine.aggregator.clusterConfig。
+
+NOTE: Turbine Stream服务器使用Spring Cloud Stream从配置的输入通道收集所有指标。 这意味着它不会从每个实例主动收集Hystrix指标。 它只能提供每个实例已经收集到输入通道中的指标。
+
+== 6.客户端负载均衡:Ribbon
+
+Ribbon是一个客户端负载均衡器，可以让您对HTTP和TCP客户端的行为进行大量控制。Feign已经使用了Ribbon，因此，如果您使用@FeignClient，此部分也适用。
+
+Ribbon中的一个核心概念是指定客户端。每个负载均衡器是联系远程服务的组件集合,该集合被开发人员指定具体的名称(例如@FeignClient).根据需要，Spring Cloud通过使用RibbonClientConfiguration为每个命名客户端创建一个新的集合作为ApplicationContext,该组件集合包括ILoadBalancer, RestClient和erverListFilter.
+
+=== 6.1 引入依赖
+. group:org.springframework.cloud
+. artifact:spring-cloud-starter-netflix-ribbon
+
+=== 6.2 自定义Ribbon客户端
+
+您可以使用 `<client>.ribbon>.*`等属性配置Ribbon客户端，这类似于直接使用Netflix API，但您可以使用Spring Boot配置文件。具体的属性字段可以参考
+https://github.com/Netflix/ribbon/blob/master/ribbon-core/src/main/java/com/netflix/client/config/CommonClientConfigKey.java[CommonClientConfigKey]
+
+Spring Cloud还允许您通过使用@RibbonClient声明其他配置（在RibbonClientConfiguration之上）来完全控制客户端，如以下示例所示：
+[source,java]
+----
+@Configuration
+@RibbonClient(name = "custom", configuration = CustomConfiguration.class)
+public class TestConfiguration {
+}
+----
+
+上面的例子中，客户端由RibbonClientConfiguration中已有的组件以及CustomConfiguration（后者通常覆盖前者）中的任何组件组成。
+
+NOTE: CustomConfiguration类必须是@Configuration类，但请注意它不在@ComponentScan中用于主应用程序上下文。否则将被所有@RibbonClients共享.
+
+下表显示了Spring Cloud Netflix默认为Ribbon提供的bean：
+
+|===
+
+| Bean Type	| Bean Name	| Class Name
+|IClientConfig|ribbonClientConfig|DefaultClientConfigImpl
+|IRule|ribbonRule|ZoneAvoidanceRule
+|IPing|ribbonPing|DummyPing
+|ServerList<Server>|ribbonServerList|ConfigurationBasedServerList
+|ServerListFilter<Server>|ribbonServerListFilter|ZonePreferenceServerListFilter
+|ILoadBalancer|ribbonLoadBalancer|ZoneAwareLoadBalancer
+|ServerListUpdater|ribbonServerListUpdater|PollingServerListUpdater
+
+|===
+
+创建其中一种类型的bean并将其置于@RibbonClient配置（例如上面的FooConfiguration）中，可以覆盖所描述的每个bean，如以下示例所示：
+[source,java]
+----
+@Configuration
+protected static class FooConfiguration {
+
+	@Bean
+	public ZonePreferenceServerListFilter serverListFilter() {
+		ZonePreferenceServerListFilter filter = new ZonePreferenceServerListFilter();
+		filter.setZone("myTestZone");
+		return filter;
+	}
+
+	@Bean
+	public IPing ribbonPing() {
+		return new PingUrl();
+	}
+
+}
+----
+
+前面示例中的include语句将NoOpPing替换为PingUrl，并提供自定义serverListFilter。
+
+=== 6.3自定义所有Ribbon客户端的默认值
+
+可以使用@RibbonClients为所有Ribbon客户端提供默认配置，如以下示例所示：
+[source,java]
+----
+@RibbonClients(defaultConfiguration = DefaultRibbonConfig.class)
+public class RibbonClientDefaultConfigurationTestsConfig {
+
+	public static class BazServiceList extends ConfigurationBasedServerList {
+
+		public BazServiceList(IClientConfig config) {
+			super.initWithNiwsConfig(config);
+		}
+
+	}
+
+}
+
+@Configuration
+class DefaultRibbonConfig {
+
+	@Bean
+	public IRule ribbonRule() {
+		return new BestAvailableRule();
+	}
+
+	@Bean
+	public IPing ribbonPing() {
+		return new PingUrl();
+	}
+
+	@Bean
+	public ServerList<Server> ribbonServerList(IClientConfig config) {
+		return new RibbonClientDefaultConfigurationTestsConfig.BazServiceList(config);
+	}
+
+	@Bean
+	public ServerListSubsetFilter serverListFilter() {
+		ServerListSubsetFilter filter = new ServerListSubsetFilter();
+		return filter;
+	}
+
+}
+----
+
+=== 6.4通过设置属性自定义Ribbon客户端
+
+从版本1.2.0开始，Spring Cloud Netflix现在支持设置与[Ribbon文档]的属性兼容来自定义Ribbon客户端。这使您可以在不同环境中的启动时更改行为。
+
+看下面的属性:
+
+. <clientName>.ribbon.NFLoadBalancerClassName: 实现ILoadBalancer
+. <clientName>.ribbon.NFLoadBalancerRuleClassName:实现IRule
+. <clientName>.ribbon.NFLoadBalancerPingClassName: 实现IPing
+. <clientName>.ribbon.NIWSServerListClassName: 实现ServerList
+. <clientName>.ribbon.NIWSServerListFilterClassName: 实现ServerListFilter
+
+NOTE: 这些属性中定义的类优先于使用@RibbonClient（configuration = MyRibbonConfig.class）定义的bean以及Spring Cloud Netflix提供的默认值。
+
+例如:
+[source,yml]
+----
+users:
+  ribbon:
+    NIWSServerListClassName: com.netflix.loadbalancer.ConfigurationBasedServerList
+    NFLoadBalancerRuleClassName: com.netflix.loadbalancer.WeightedResponseTimeRule
+----
+
+参考 https://github.com/Netflix/ribbon/wiki/Working-with-load-balancers[Ribbon文档] 查看详细的实现
+
+
+=== 6.5 Using Ribbon with Eureka
+
+当Eureka与Ribbon一起使用时（即两者都在类路径上），使用DiscoveryEnabledNIWSServerList的扩展名覆盖ribbonServerList，保存Eureka中的服务器列表。它还用NIWSDiscoveryPing替换IPing接口，NIWSDiscoveryPing委托Eureka确定服务器是否启动。默认情况下安装的ServerList是DomainExtractingServerList。 其目的是在不使用AWS AMI元数据的情况下使负载均衡器可以使用元数据（这是Netflix所依赖的）。默认情况下，服务器列表使用“zone”信息构建，如实例元数据中所提供的（设置客户端eureka.instance.metadataMap.zone属性）。如果缺少该标志，并且设置了approximateZoneFromHostname标志，则可以使用服务器主机名中的域名作为zone的代理。zone信息可用后，可以在ServerListFilter中使用。默认情况下，它用于在与客户端相同的zone中查找服务器，因为默认值为ZonePreferenceServerListFilter。默认情况下，客户端zone的确定方式与远程实例相同（即通过eureka.instance.metadataMap.zone）。
+
+=== 6.6 不在Eureka中使用Ribbon 
+
+Eureka是一种抽象远程服务发现的快捷方式，因此您无需在客户端中对其URL进行硬编码。 但是，如果您不想使用Eureka，Ribbon和Feign也可以使用。 假设您已为“stores”声明了@RibbonClient，并且Eureka未在使用中（甚至不在类路径中）。RIbbon客户端默认为已配置的服务器列表。您可以按如下方式提供配置：
+[source,yml]
+----
+stores:
+  ribbon:
+    listOfServers: example.com,google.com
+----
+
+=== 6.7 禁用Eureka使用Ribbon
+
+将ribbon.eureka.enabled属性设置为false ,Ribbon会禁用Eureka，如以下示例所示：
+[source,yml]
+----
+ribbon:
+  eureka:
+   enabled: false
+----
+
+=== 6.8 使用Ribbon API
+
+[source,java]
+----
+public class MyClass {
+    @Autowired
+    private LoadBalancerClient loadBalancer;
+
+    public void doStuff() {
+        ServiceInstance instance = loadBalancer.choose("stores");
+        URI storesUri = URI.create(String.format("http://%s:%s", instance.getHost(), instance.getPort()));
+        // ... do something with the URI
+    }
+}
+----
+
+=== 6.9缓存Ribbon配置
+
+每个命名的ribbon客户端都维护了一个相对于main context的child context,该context是懒加载初始化的.加载方式可以被更改,如:
+[source,yml]
+----
+ribbon:
+  eager-load:
+    enabled: true
+    clients: client1, client2, client3
+----
+
+=== 6.10 配置Hystrix 线程池
+
+如果将zuul.ribbonIsolationStrategy更改为THREAD，则Hystrix的线程隔离策略将用于所有路由。在这种情况下，HystrixThreadPoolKey设置RibbonCommand为默认值。这意味着所有路由的HystrixCommands都在同一个Hystrix线程池中执行。 可以使用以下配置更改此行为：
+[source,yml]
+----
+zuul:
+  threadPool:
+    useSeparateThreadPools: true
+----
+
+在是上面的配置,每个路由被分配单独Hystrix线程池执行HystrixCommands。在这种情况下，默认HystrixThreadPoolKey与每个路由的服务ID相同。 要向HystrixThreadPoolKey添加前缀，请将zuul.threadPool.threadPoolKeyPrefix设置为要添加的值，如以下示例所示：
+[sourcee,yml]
+----
+zuul:
+  threadPool:
+    useSeparateThreadPools: true
+    threadPoolKeyPrefix: zuulgw
+----
+
+=== 6.11如何为Ribbon的IRule提供key
+
+如果您需要提供自己的IRule实现来处理特殊的路由要求，如“canary”测试，请将一些信息传递给IRule的choose方法。
+
+.com.netflix.loadbalancer.IRule.java
+[source,java]
+----
+public interface IRule{
+    public Server choose(Object key);
+----
+
+您可以提供IRule实现用于选择目标服务器的一些信息，如以下示例所示：
+[source,java]
+----
+RequestContext.getCurrentContext()
+              .set(FilterConstants.LOAD_BALANCER_KEY, "canary-test");
+----
+
+可以将任何对象放入RequestContext中对应的FilterConstants.LOAD_BALANCER_KEY键，其传递给IRule实现的choose方法。必须在执行RibbonRoutingFilter之前执行前面示例中显示的代码。Zuul的预过滤器是最好的选择。 您可以通过预过滤器中的RequestContext访问HTTP标头和查询参数，因此可以使用它来确定传递给Ribbon的LOAD_BALANCER_KEY。 如果未在RequestContext中为LOAD_BALANCER_KEY设置任何值，则将null作为choose方法的参数传递。
+
+== 7.外部配置:Archaius
+
+Archaius是Netflix客户端配置库。 它是所有Netflix OSS组件用于配置的库。Archaius是Apache Commons Configuration项目的扩展。 它允许通过轮询源更改或允许源推送更改到客户端来更新配置。Archaius使用Dynamic <Type> Property类作为属性的句柄，例如:
+[source,java]
+----
+class ArchaiusTest {
+    DynamicStringProperty myprop = DynamicPropertyFactory
+            .getInstance()
+            .getStringProperty("my.prop");
+
+    void doSomething() {
+        OtherClass.someMethod(myprop.get());
+    }
+}
+----
+Archaius有自己的一组配置文件和加载优先级。 Spring应用程序通常不应直接使用Archaius，但仍然需要原生配置Netflix工具。Spring Cloud有一个Spring Environment Bridge，因此Archaius可以从Spring环境中读取属性。 此桥接器允许Spring Boot项目使用常规配置工具链，同时让他们按照文档（大多数情况下）配置Netflix工具。
+
+== 8.路由和过滤器:Zuul
+
+路由是微服务架构不可或缺的一部分。 例如，/可能映射到您的Web应用程序，/api/users映射到用户服务，/api/shop映射到商店服务。 Zuul是Netflix的基于JVM的路由器和服务器端负载均衡器。
+
+zuul的主要作用:
+. 认证
+. Insights(洞察)
+. 压力测试
+. Canary测试(生产上开放一部分功能给用户,主要用于新版测试)
+. 动态路由
+. 服务迁移
+. 负载均衡
+. 安全
+. 静态响应处理
+. 主动/主动流量管理
+
+Zuul的规则引擎允许规则和过滤器以任何JVM语言编写，内置支持Java和Groovy。
+
+=== 8.1 引入依赖
+
+. group:org.springframework.cloud 
+. artifact:spring-cloud-starter-netflix-zuul
+
+=== 8.2嵌入式Zuul反向代理
+
+Spring Cloud创建了一个嵌入式Zuul代理，以简化UI程序想要一个或多个后端服务进行代理调用的开发。
+
+在主类上添加@EnableZuulProxy启用代理.按照惯例，/users下的所有请求会转发给服务id为user的应用.zuul使用Ribbon转发请求.所有请求都在hystrix命令中执行，因此故障会被hystrix收集。 断路器打开后，代理不会尝试联系该服务。
+
+不对某些服务做代理,可以使用zuul.ignored-services指定服务id.如果某个服务被出现忽略列表中,但又被显示指定,则不会被忽略,例如:
+
+[source,yml]
+----
+ zuul:
+  ignoredServices: '*'
+  routes:
+    users: /myusers/**
+----
+
+上面的例子中,所有的服务都被忽略,除了users
+
+要扩充或更改代理路由，可以添加外部配置，如下所示：
+[source,yml]
+----
+ zuul:
+  routes:
+    users: /myusers/**
+----
+
+前面的示例意味着对/myusers的HTTP调用被转发到users服务（例如/myusers/101被转发到/101）。
+
+要对路由进行更细粒度的控制，可以单独指定路径和serviceId，如下所示：
+[source,yml]
+----
+ zuul:
+  routes:
+    users:
+      path: /myusers/**
+      serviceId: users_service
+----
+
+后端的位置可以指定为serviceId（用于发现服务）或url（用于物理位置），如以下示例所示：
+[source,yml]
+----
+ zuul:
+  routes:
+    users:
+      path: /myusers/**
+      url: http://example.com/users_service
+----
+
+这些简单的url-routes不会作为HystrixCommand执行，也不会使用Ribbon对多个URL进行负载均衡。要实现这些目标，您可以使用静态服务器列表指定serviceId，如下所示：
+[source,yml]
+----
+zuul:
+  routes:
+    echo:
+      path: /myusers/**
+      serviceId: myusers-service
+      stripPrefix: true
+
+hystrix:
+  command:
+    myusers-service:
+      execution:
+        isolation:
+          thread:
+            timeoutInMilliseconds: ...
+
+myusers-service:
+  ribbon:
+    NIWSServerListClassName: com.netflix.loadbalancer.ConfigurationBasedServerList
+    listOfServers: http://example1.com,http://example2.com
+    ConnectTimeout: 1000
+    ReadTimeout: 3000
+    MaxTotalHttpConnections: 500
+    MaxConnectionsPerHost: 100
+----
+
+另一种方法是指定服务路由并为serviceId配置Ribbon客户端（这样做需要在Ribbon中禁用Eureka支持 - 请参阅上面的更多信息），如以下示例所示：
+[source,yml]
+----
+zuul:
+  routes:
+    users:
+      path: /myusers/**
+      serviceId: users
+
+ribbon:
+  eureka:
+    enabled: false
+
+users:
+  ribbon:
+    listOfServers: example.com,google.com
+----
+
+您可以使用regexmapper在serviceId和路由之间提供约定。 它使用正则表达式命名组从serviceId中提取变量并将它们注入路由模式，如以下示例所示：
+[source,java]
+----
+@Bean
+public PatternServiceRouteMapper serviceRouteMapper() {
+    return new PatternServiceRouteMapper(
+        "(?<name>^.+)-(?<version>v.+$)",
+        "${version}/${name}");
+}
+----
+
+上面的例子说明myusers-v1的服务匹配路径为/v1/myusers/**的请求.接受任何正则表达式，但所有命名组必须同时出现在servicePattern和routePattern中。 如果servicePattern与serviceId不匹配，则使用默认行为。 在前面的示例中，myusers的serviceId映射到“/myusers/**”路由（未检测到版本）。默认情况下禁用此功能，仅适用于已发现的服务。
+
+要为所有映射添加前缀，请将zuul.prefix设置值，例如/api。 默认情况下，在转发请求之前，会从请求中删除代理前缀（您可以使用zuul.stripPrefix = false关闭此行为）。您还可以关闭特定于服务的前缀，如以下示例所示：
+[source,yml]
+----
+ zuul:
+  routes:
+    users:
+      path: /myusers/**
+      stripPrefix: false
+----
+
+NOTE: zuul.stripPrefix仅适用于zuul.prefix中设置的前缀。 它对给定路径的路径中定义的前缀没有任何影响。
+
+zuul.routes条目实际上绑定到ZuulProperties类型的对象。如果查看该对象的属性，可以看到它还具有可重试的标志。将该标志设置为true以使Ribbon客户端自动重试失败的请求。 当您需要修改使用Ribbon客户端配置的重试操作的参数时，也可以将该标志设置为true。
+
+默认情况下，X-Forwarded-Host标头会添加到转发的请求中。 要将其关闭，请设置zuul.addProxyHeaders = false。默认情况下，前缀路径被剥离，对后端的请求会添加X-Forwarded-Prefix标头（前面显示的示例中为/ myusers）。
+
+
+如果设置了默认路由（/），则具有@EnableZuulProxy的应用程序可以充当独立服务器。 例如，zuul.route.home：/会将所有流量（“/ **”）路由到“home”服务。
+
+
+如果需要更细粒度的忽略，则可以指定要忽略的特定模式。这些模式在路径定位过程开始时进行评估，这意味着前缀应包含在模式中以保证匹配。忽略的模式跨越所有服务并取代任何其他路由规范。 以下示例显示如何创建忽略的模式：
+[source,yml]
+----
+ zuul:
+  ignoredPatterns: /**/admin/**
+  routes:
+    users: /myusers/**
+----
+
+上面的示例表示所有请求（例如/myusers/101）都转发到用户服务上的/ 101。 但是，包括/admin/的请求除外。
+
+
+如果您需要路由保留其顺序，则需要使用YAML文件，因为使用属性文件时排序会丢失。 以下示例显示了这样的YAML文件：
+[source,yml]
+----
+ zuul:
+  routes:
+    users:
+      path: /myusers/**
+    legacy:
+      path: /**
+----
+
+如果您要使用属性文件，则legacy路径可能会在user路径前面结束，从而导致user路径无法访问。
+
+=== 8.3 Zuul Http Client
+
+Zuul使用的默认HTTP客户端现在由Apache HTTP Client支持，而不是过时的Ribbon RestClient。要使用RestClient或okhttp3.OkHttpClient，请分别设置ribbon.restclient.enabled = true或ribbon.okhttp.enabled = true。如果要自定义Apache HTTP客户端或OK HTTP客户端，请提供ClosableHttpClient或OkHttpClient类型的bean。
+
+=== 8.4 Cookie和敏感header
+
+您可以在同一系统中的服务之间共享标头，但您可能不希望敏感标头向下游泄漏到外部服务器。您可以在路由配置中指定忽略的标头列表。Cookie起着特殊的作用，因为它们在浏览器中具有明确定义，并且始终被视为敏感。如果您的代理的消费者是浏览器，那么cookie会给下游服务带来问题，因为它们都混杂起来（所有下游服务认为cookie都来自一个地方）。
+
+如果您对服务的设计非常小心（例如，如果只有一个下游服务设置了cookie），您可以让它们从后端一直流到调用者。此外，如果您的代理设置了cookie并且所有后端服务都属于同一系统，则可以很自然地简单地共享它们（例如，使用Spring Session将它们链接到某个共享状态）。因为cookie在被zuul转发的过程中不具有粘连性,所以我们可以在配置中设置敏感标头来保证统一cookie的请求能给转给同一台服务.
+
+可以将敏感标头配置为每个路由的逗号分隔列表，如以下示例所示：
+[source,yml]
+----
+ zuul:
+  routes:
+    users:
+      path: /myusers/**
+      sensitiveHeaders: Cookie,Set-Cookie,Authorization
+      url: https://downstream
+----
+
+sensitiveHeaders是黑名单，默认不为空。因此，要使Zuul发送所有标头（忽略的标头除外），您必须将其明确设置为空列表。如果要将cookie或授权标头传递给后端，则必须这样做。 以下示例显示了如何使用sensitiveHeaders：
+[source,yml]
+----
+ zuul:
+  routes:
+    users:
+      path: /myusers/**
+      sensitiveHeaders:
+      url: https://downstream
+----
+
+您还可以通过设置zuul.sensitiveHeaders来设置敏感标头。 如果在路由上设置了sensitiveHeaders，它将覆盖全局sensitiveHeaders设置。
+
+=== 8.5 忽略标头
+除路由敏感标头外，您还可以设置丢弃的标头（请求和响应）,设置名为zuul.ignoredHeaders的全局值。默认情况下，如果Spring Security不在类路径中，则它们为空。 否则，它们被初始化为一组众所周知的“安全”头文件（例如，涉及缓存），如Spring  要在Spring Security位于类路径上时不丢弃这些安全标头，可以将zuul.ignoreSecurityHeaders设置为false。
+
+=== 8.6 管理端点
+
+默认情况下，如果将@EnableZuulProxy与Spring Boot Actuator一起使用，则启用另外两个端点：
+. Routes
+. Filters
+
+==== 8.6.1 Routes 端点
+
+get /routes 返回路由信息,例如:
+[source,json]
+----
+{
+  /stores/**: "http://localhost:8081"
+}
+----
+
+可以通过将?format = details查询字符串添加到/routes来查看路由详细信息
+[source,json]
+----
+{
+  "/stores/**": {
+    "id": "stores",
+    "fullPath": "/stores/**",
+    "location": "http://localhost:8081",
+    "path": "/**",
+    "prefix": "/stores",
+    "retryable": false,
+    "customSensitiveHeaders": false,
+    "prefixStripped": true
+  }
+}
+----
+
+对/routes的POST请求,强制刷新现有路由（例如，当服务目录中有更改时）。 您可以通过将endpoints.routes.enabled设置为false来禁用此端点。
+
+NOTE: 路由应自动响应服务目录中的更改，但POST到/routes是一种强制立即发生的方法。
+
+==== 8.6.2 Filters 端点
+
+/filters 获取过滤器信息.
+
+
+=== 8.7扼杀模式和本地转发
+
+迁移现有应用程序或API时的一个常见模式是“扼杀”旧端点，慢慢用不同的实现替换它们。Zuul代理是一个有用的工具，因为您可以使用它来处理来自旧端点的客户端的所有流量，但将一些请求重定向到新的端点。
+
+以下示例显示“strangle”方案的配置详细信息：
+[source,yml]
+----
+ zuul:
+  routes:
+    first:
+      path: /first/**
+      url: http://first.example.com
+    second:
+      path: /second/**
+      url: forward:/second
+    third:
+      path: /third/**
+      url: forward:/3rd
+    legacy:
+      path: /**
+      url: http://legacy.example.com
+----
+在前面的示例中，我们扼杀了“legacy”应用程序，该应用程序映射到与其他模式之一不匹配的所有请求。 /first/**中的路径已被提取到具有外部URL的新服务中。 /second/**中的路径被转发，以便可以在本地处理它们（例如，使用正常的Spring @RequestMapping）。 /third/**中的路径也被转发但具有不同的前缀（/third/foo被转发到/3rd/foo）。
+
+=== 8.8 上传文件
+
+如果您使用@EnableZuulProxy，您可以使用代理路径上传文件，只要文件很小，它就可以工作。 对于大型文件，有一个替代路径绕过“/zuul/*”中的Spring DispatcherServlet（以避免多部分处理）。换句话说，如果你有zuul.routes.customers = /customers/**，那么你可以将大文件POST到/zuul/customers/*。 servlet路径通过zuul.servletPath外部化。如果代理路由有Ribbon负载平衡器，则极大文件也需要提升超时时间，如以下示例所示：
+[source,yml]
+----
+hystrix.command.default.execution.isolation.thread.timeoutInMilliseconds: 60000
+ribbon:
+  ConnectTimeout: 3000
+  ReadTimeout: 60000
+----
+
+请注意，要使用大型文件进行流式处理，您需要在请求中使用分块编码（默认情况下某些浏览器不会这样做），如以下示例所示：
+[source,bash]
+----
+$ curl -v -H "Transfer-Encoding: chunked" \
+    -F "file=@mylarge.iso" localhost:9999/zuul/simple/file
+----
+
+=== 8.9 查询字符串编码
+
+处理传入请求时，将对查询参数进行解码，以便它们可用于Zuul过滤器中的可能修改。然后对它们进行重新编码，在路由过滤器中重建后端请求。 如果（例如）它是使用Javascript的encodeURIComponent（）方法编码的，则结果可能与原始输入不同。虽然这在大多数情况下不会引起任何问题，但某些Web服务器可能会因复杂查询字符串的编码而变得挑剔。
+
+要强制查询字符串的原始编码，可以将特殊标志传递给ZuulProperties，以便使用HttpServletRequest :: getQueryString方法按原样获取查询字符串，如以下示例所示：
+[source,yml]
+----
+zuul:
+  forceOriginalQueryStringEncoding: true
+----
+
+=== 8.10 URI编码
+处理传入请求时，请求URI在将它们与路由匹配之前进行解码。 然后，在路由过滤器中重建后端请求时，将重新编码请求URI。 如果您的URI包含编码的“/”字符，这可能会导致一些意外的行为。
+
+要使用原始请求URI，可以将特殊标志传递给'ZuulProperties'，以便使用HttpServletRequest :: getRequestURI方法将URI视为原样，如以下示例所示：
+[source,yml]
+----
+ zuul:
+  decodeUrl: false
+----
+
+=== 8.11普通嵌入式Zuul
+
+如果您使用@EnableZuulServer（而不是@EnableZuulProxy），您还可以运行Zuul服务器而无需代理或有选择地切换代理平台的某些部分.您添加到应用程序的ZuulFilter类型bean都会自动安装（与@EnableZuulProxy一样），但不会自动添加任何代理过滤器。
+
+在这种情况下，仍然通过配置“zuul.routes。*”来指定进入Zuul服务器的路由，但是没有服务发现和代理。 因此，将忽略“serviceId”和“url”设置。 以下示例将“/ api / **”中的所有路径映射到Zuul过滤器链：
+[source,yml]
+----
+ zuul:
+  routes:
+    api: /api/**
+----
+
+=== 8.12 禁用Zuul Filters
+
+Zuul for Spring Cloud在代理和服务器模式下都默认启用了许多ZuulFilter bean.有关可以启用的过滤器列表，请参阅 https://github.com/spring-cloud/spring-cloud-netflix/tree/master/spring-cloud-netflix-zuul/src/main/java/org/springframework/cloud/netflix/zuul/filters[Zuul过滤器包]。
+
+
+如果要禁用一个，请设置zuul.<SimpleClassName>.<filterType>.disable = true。 按照惯例，过滤器后的包是Zuul过滤器类型。例如，要禁用org.springframework.cloud.netflix.zuul.filters.post.SendResponseFilter，请设置zuul.SendResponseFilter.post.disable = true。
+
+=== 8.13为路由提供Hystrix后备
+
+当Zuul中给定路径的电路跳闸时，您可以通过创建FallbackProvider类型的bean来提供回退响应。在此bean中，您需要指定回退所针对的路由ID，并提供ClientHttpResponse作为回退返回。 以下示例显示了一个相对简单的FallbackProvider实现：
+
+[source,java]
+----
+class MyFallbackProvider implements FallbackProvider {
+
+    @Override
+    public String getRoute() {
+        return "customers";
+    }
+
+    @Override
+    public ClientHttpResponse fallbackResponse(String route, final Throwable cause) {
+        if (cause instanceof HystrixTimeoutException) {
+            return response(HttpStatus.GATEWAY_TIMEOUT);
+        } else {
+            return response(HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    private ClientHttpResponse response(final HttpStatus status) {
+        return new ClientHttpResponse() {
+            @Override
+            public HttpStatus getStatusCode() throws IOException {
+                return status;
+            }
+
+            @Override
+            public int getRawStatusCode() throws IOException {
+                return status.value();
+            }
+
+            @Override
+            public String getStatusText() throws IOException {
+                return status.getReasonPhrase();
+            }
+
+            @Override
+            public void close() {
+            }
+
+            @Override
+            public InputStream getBody() throws IOException {
+                return new ByteArrayInputStream("fallback".getBytes());
+            }
+
+            @Override
+            public HttpHeaders getHeaders() {
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                return headers;
+            }
+        };
+    }
+}
+----
+
+以下示例显示了上一个示例的路由配置可能如何显示：
+[source,yml]
+----
+zuul:
+  routes:
+    customers: /customers/**
+----
+
+如果要为所有路由提供默认回退，可以创建FallbackProvider类型的bean并使getRoute方法返回*或null，如以下示例所示：
+[source,java]
+----
+class MyFallbackProvider implements FallbackProvider {
+    @Override
+    public String getRoute() {
+        return "*";
+    }
+
+    @Override
+    public ClientHttpResponse fallbackResponse(String route, Throwable throwable) {
+        return new ClientHttpResponse() {
+            @Override
+            public HttpStatus getStatusCode() throws IOException {
+                return HttpStatus.OK;
+            }
+
+            @Override
+            public int getRawStatusCode() throws IOException {
+                return 200;
+            }
+
+            @Override
+            public String getStatusText() throws IOException {
+                return "OK";
+            }
+
+            @Override
+            public void close() {
+
+            }
+
+            @Override
+            public InputStream getBody() throws IOException {
+                return new ByteArrayInputStream("fallback".getBytes());
+            }
+
+            @Override
+            public HttpHeaders getHeaders() {
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                return headers;
+            }
+        };
+    }
+}
+----
+
+=== 8.14 超时
+
+如果要为通过Zuul代理的请求配置套接字超时和读取超时，则有两种选择，具体取决于您的配置：
+. 如果Zuul使用服务发现，则需要使用ribbon.ReadTimeout和ribbon.SocketTimeout Ribbon属性配置这些超时。
+. 如果通过指定URL配置了Zuul路由，则需要使用zuul.host.connect-timeout-millis和zuul.host.socket-timeout-millis。
+
+=== 8.15 写入Location头
+如果Zuul面向Web应用程序，则当Web应用程序通过HTTP状态代码3XX重定向时，您可能需要重新编写Location标头。否则，浏览器会重定向到Web应用程序的URL而不是Zuul URL。您可以配置LocationRewriteFilter Zuul过滤器以将Location标头重新写入Zuul的URL。它还会添加剥离的全局和路由特定前缀。以下示例使用Spring配置文件添加过滤器：
+[source,java]
+----
+import org.springframework.cloud.netflix.zuul.filters.post.LocationRewriteFilter;
+...
+
+@Configuration
+@EnableZuulProxy
+public class ZuulConfig {
+    @Bean
+    public LocationRewriteFilter locationRewriteFilter() {
+        return new LocationRewriteFilter();
+    }
+}
+----
+=== 8.16启用跨域请求
+
+默认情况下，Zuul将所有跨源请求（CORS）路由到服务。 如果你想要Zuul来处理这些请求，可以通过提供自定义WebMvcConfigurer bean来完成：
+[source,java]
+----
+@Bean
+public WebMvcConfigurer corsConfigurer() {
+    return new WebMvcConfigurer() {
+        public void addCorsMappings(CorsRegistry registry) {
+            registry.addMapping("/path-1/**")
+                    .allowedOrigins("http://allowed-origin.com")
+                    .allowedMethods("GET", "POST");
+        }
+    };
+}
+----
+在上面的示例中，我们允许来自http://allowed-origin.com的GET和POST方法将跨源请求发送到以path-1开头的端点。 您可以使用/ **映射将CORS配置应用于特定路径模式或全局应用于整个应用程序。您可以通过此配置自定义属性：allowedOrigins，allowedMethods，allowedHeaders，exposedHeaders，allowCredentials和maxAge。
+
+=== 8.17指标
+
+对于路由请求时可能发生的任何故障，Zuul将在Actuator指标端点下提供指标。 可以通过点击/actuator/metrics来查看这些指标。度量标准的名称格式为ZUUL :: EXCEPTION：errorCause：statusCode。
+
+=== 8.18 Zuul开发人员指南
+
+==== 8.18.1 The Zuul Servlet
+
+==== 8.18.2 Zuul RequestContext
+
+==== 8.18.3 @EnableZuulProxy vs. @EnableZuulServer
+
+==== 8.18.4 @EnableZuulServer Filters
+
+==== 8.18.5 @EnableZuulProxy Filters
+
+==== 8.18.6 Custom Zuul Filter Examples
+
+==== 8.18.7 How Zuul Errors Work
+
+==== 8.18.8 Zuul Eager Application Context Loading
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+== 9. Polyglot support with Sidecar
+
+您是否想非JVM语言利用Eureka，Ribbon和Config Server？ Spring Cloud Netflix Sidecar的灵感来自Netflix Prana。它包含一个HTTP API，用于获取给定服务的所有实例（按主机和端口）。您还可以通过嵌入式Zuul代理代理服务调用，该代理从Eureka获取其路由信息。可以通过主机查找或Zuul代理直接访问Spring Cloud Config Server。 非JVM应用程序应实现健康检查接口，以便Sidecar可以向Eureka报告应用程序是启动还是关闭。
+
+要在项目中包含Sidecar，请使用组ID为org.springframework.cloud和工件ID或spring-cloud-netflix-sidecar的依赖项。要启用Sidecar，请使用@EnableSidecar创建Spring Boot应用程序。此注释包括@EnableCircuitBreaker，@EnableDiscoveryClient和@EnableZuulProxy。在与非JVM应用程序相同的主机上运行生成的应用程序。
+
+要配置sidecar，请将sidecar.port和sidecar.health-uri添加到application.yml。 sidecar.port属性是非JVM应用程序侦听的端口。 这样Sidecar可以正确地向Eureka注册应用程序。
+
+sidecar.secure-port-enabled选项提供了一种为流量启用安全端口的方法。 sidecar.health-uri是可在非JVM应用程序上访问的URI，它模仿Spring Boot运行状况指示器。 它应该返回类似于以下内容的JSON文档：
+[source,json]
+----
+{
+  "status":"UP"
+}
+----
+下面是样例配置:
+[source,yml]
+----
+server:
+  port: 5678
+spring:
+  application:
+    name: sidecar
+
+sidecar:
+  port: 8000
+  health-uri: http://localhost:8000/health.json
+----
+
+DiscoveryClient.getInstances()对应端点/hosts/{serviceId},下面是/hosts/customers返回的数据:
+[source,json]
+----
+[
+    {
+        "host": "myhost",
+        "port": 9000,
+        "uri": "http://myhost:9000",
+        "serviceId": "CUSTOMERS",
+        "secure": false
+    },
+    {
+        "host": "myhost2",
+        "port": 9000,
+        "uri": "http://myhost2:9000",
+        "serviceId": "CUSTOMERS",
+        "secure": false
+    }
+]
+----
+
+非JVM应用程序（如果sidecar在端口5678上）可以在http://localhost:5678/hosts/{serviceId}访问此API。
+
+Zuul代理自动将Eureka中已知的每个服务的路由添加到/<serviceId>，因此客户服务可在/customers处获得。 非JVM应用程序可以访问位于http://localhost:5678 /customers的customer服务（假设sidecar正在侦听端口5678）。
+
+如果配置服务器已在Eureka中注册，则非JVM应用程序可以通过Zuul代理访问它。如果ConfigServer的serviceId是configserver且Sidecar在端口5678上，则可以在http://localhost:5678/configserver上访问它。
+
+非JVM应用程序可以利用Config Server返回YAML文档的能力。 例如，调用http://sidecar.local.spring.io:5678/configserver/default-master.yml可能会导致YAML文档类似于以下内容：
+[source,yml]
+----
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://localhost:8761/eureka/
+  password: password
+info:
+  description: Spring Cloud Samples
+  url: https://github.com/spring-cloud-samples
+----
+
+要在使用HTTP时将运行状况检查请求设置为接受所有证书，请将sidecar.accept-all-ssl-certificates设置为true。
+
+== 10.重试失败请求
+
+Spring Cloud Netflix提供了多种方式来发出HTTP请求。您可以使用负载平衡的RestTemplate，Ribbon或Feign。无论您如何选择创建HTTP请求，总是有可能请求失败。 请求失败时，您可能希望自动重试请求。 要在使用Sping Cloud Netflix时这样做，您需要在应用程序的类路径中包含Spring Retry。 当存在Spring Retry时，负载平衡的RestTemplates，Feign和Zuul会自动重试任何失败的请求（假设您的配置允许这样做）。
+
+=== 10.1 10.1 BackOff策略
+
+默认情况下，重试请求时不使用退避策略。如果要配置退避策略，则需要创建类型为LoadBalancedRetryFactory的bean并覆盖给定服务的createBackOffPolicy方法，如以下示例所示：
+[source,java]
+----
+@Configuration
+public class MyConfiguration {
+    @Bean
+    LoadBalancedRetryFactory retryFactory() {
+        return new LoadBalancedRetryFactory() {
+            @Override
+            public BackOffPolicy createBackOffPolicy(String service) {
+                return new ExponentialBackOffPolicy();
+            }
+        };
+    }
+}
+----
+
+=== 10.2 配置
+
+将Ribbon与Spring Retry一起使用时，可以通过配置某些Ribbon属性来控制重试功能。例如:client.ribbon.MaxAutoRetries，client.ribbon.MaxAutoRetriesNextServer和client.ribbon.OkToRetryOnAllOperations属性。
+
+NOTE: 启用client.ribbon.OkToRetryOnAllOperations包括重试POST请求，由于请求正文的缓冲，POST请求会对服务器的资源产生影响。
+
+此外，您可能希望在响应中返回某些状态代码时重试请求。您可以通过设置clientName.ribbon.retryableStatusCodes属性列出您希望Ribbon客户端重试的响应代码，如以下示例所示：
+[source,yml]
+----
+clientName:
+  ribbon:
+    retryableStatusCodes: 404,502
+----
+
+您还可以创建类型为LoadBalancedRetryPolicy的bean，并实现retryableStatusCode方法以在给定状态代码的情况下重试请求。
+
+==== 10.2.1 Zuul
+
+您可以通过将zuul.retryable设置为false来关闭Zuul的重试功能。您还可以通过将zuul.routes.routename.retryable设置为false来逐个路由地禁用重试功能。
+
+== 11. HTTP Clients
+
+Spring Cloud Netflix会自动为您创建Ribbon，Feign和Zuul使用的HTTP客户端。 但是，您也可以根据需要自定义自己的HTTP客户端。 为此，如果使用的是OK HTTP，则可以创建OkHttpClient类型的bean，如果您使用的是Apache Http ,可以创建 ClosableHttpClient 。
+
+NOTE: 创建自己的HTTP客户端时，您还负责为这些客户端实施正确的连接管理策略。 不正确地执行此操作可能会导致资源管理问题。
+
+== 12.模块处于维护模式
+
+将模块置于维护模式意味着Spring Cloud团队将不再向模块添加新功能。我们将修复错误和安全问题，我们还将考虑社区的pull请求。
+
+我们打算继续支持这些模块至少一年时间.
+
+以下Spring Cloud Netflix模块和相应的starter将进入维护模式：
+
+. spring-cloud-netflix-archaius
+. spring-cloud-netflix-hystrix-contract
+. spring-cloud-netflix-hystrix-dashboard
+. spring-cloud-netflix-hystrix-stream
+. spring-cloud-netflix-hystrix
+. spring-cloud-netflix-ribbon
+. spring-cloud-netflix-turbine-stream
+. spring-cloud-netflix-turbine
+. spring-cloud-netflix-zuul
+
+NOTE: 这不包括Eureka和concurrency-limits模块。

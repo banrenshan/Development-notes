@@ -1,0 +1,909 @@
+= Jackson注解使用
+
+== 通用注解
+
+== @JsonProperty
+
+指定实体对象序列化后某个字段的名称
+. 注解在属性上
+[source,java]
+----
+public class Tea {
+    private int id;
+
+    @JsonProperty("teaName")
+    private String name;
+    private String from;
+----
+序列化的结果是:
+[source,json]
+----
+{
+  "id" : 1,
+  "from" : "杭州",
+  "teaName" : "龙井"
+}
+----
+
+上面的json串是可以被反序列化的,但是如果把teaName改成name,反序列化则无法识别抛出异常.这说明该注解作用在属性上同时影响序列化和反序列化.同样该注解在get set方法上的效果也是一样的,并不会因为作用在get set方法上就只影响序列化或反序列化.
+
+== @JsonFormat
+
+指定序列化后的日期格式,反序列化的字符串也需要时这样的格式,否则出错
+
+[source,java]
+----
+public class Product {
+    private int id;
+    private String name;
+
+    @JsonFormat(pattern = "YYYY-MM-dd hh:mm:ss")
+    private Date sallDate;
+----
+
+序列化后的结果是:
+
+[source,json]
+----
+{
+  "id" : 1,
+  "name" : "手机",
+  "sallDate" : "2018-09-12 02:29:10"
+}
+----
+
+如果把sallDate的值修改成其他日期格式,反序列化会出错,说明该注解同时作用于读写.
+
+
+== @JsonUnwrapped
+
+该注解用来指定读写的时候,json值应该扁平化还是被包裹,看下面的例子:
+
+[source,java]
+----
+public class UnwrappedUser {
+    public int id;
+ 
+    @JsonUnwrapped
+    public Name name;
+ 
+    public static class Name {
+        public String firstName;
+        public String lastName;
+    }
+}
+----
+
+序列化的结果是:
+
+[source,json]
+----
+{
+  "id" : 1,
+  "firstName" : "zhao",
+  "lastName" : "zhiqiang"
+}
+----
+
+反序列化的时候,同样不能包裹外围字段
+
+
+== @JsonView
+
+用来指定实体类中哪些字段参与当前的序列化和反序列化。这个功能可以使实体类中的属性以各种组合方式序列化和反序列化.
+
+[source,java]
+----
+public class User {
+    private int id;
+
+    @JsonView(View.NoPassword.class)
+    private String username;
+
+    @JsonView(View.NoUsername.class)
+    private String password;
+----
+
+[source,java]
+----
+public class View {
+
+    public static class NoPassword {
+
+    }
+
+    public static class NoUsername {
+
+    }
+}
+----
+
+[source,java]
+----
+    @Test
+    public void testSer() throws JsonProcessingException {
+        User user = new User();
+        user.setId(0);
+        user.setUsername("banrenshan");
+        user.setPassword("1234");
+
+        String s = mapper.writerWithView(View.NoPassword.class).writeValueAsString(user);
+        System.err.println(s);
+
+        s = mapper.writerWithView(View.NoUsername.class).writeValueAsString(user);
+        System.err.println(s);
+    }
+----
+
+结果如下:
+
+[source,json]
+----
+{
+  "id" : 0,
+  "username" : "banrenshan"
+}
+{
+  "id" : 0,
+  "password" : "1234"
+}
+----
+
+反序列化也是这样的,不在举例.思考一个问题,在spring中怎么优雅的使用这个功能呢?只需要在controller方法使用@JsonView注解就可以了.resttemplete怎么使用呢?spring RestTemplate官方文档有有说明.
+
+== @JsonManagedReference, @JsonBackReference
+
+这两个注解主要用来处理实体类之间的循环引用.我们先来看看不带这两个注解的情况
+
+[source,java]
+----
+        Person person=new Person();
+        person.setName("zhaozhiqiang");
+
+        Car car=new Car();
+        car.setBrand("奔驰");
+        car.setCode("520");
+        car.setName("德国奔驰");
+
+        car.setPerson(person);
+
+        List<Car> list=new ArrayList<>(); <1>
+        list.add(car);
+        person.setCars(list); <2>
+        
+        String s = mapper.writeValueAsString(person);
+        System.err.println(s);
+
+        String string = mapper.writeValueAsString(car);
+
+        System.err.println(string);
+
+        person.setCars(new ArrayList<Car>());
+
+    }
+----
+
+出错了, 我们试着把 <1> <2> 之间的代码注释掉,结果打印出了下面的字符串
+
+[source,json]
+----
+{
+  "name" : "zhaozhiqiang",
+  "cars" : null
+}
+{
+  "brand" : "奔驰",
+  "code" : "520",
+  "name" : "德国奔驰",
+  "person" : {
+    "name" : "zhaozhiqiang",
+    "cars" : null
+  }
+}
+
+----
+说明单向绑定的时候,还是能正常打印出字符串的,让我们试着加上注解:
+
+[source,java]
+----
+public class Person {
+
+    private String name;
+
+    @JsonManagedReference
+    private List<Car> cars;
+
+public class Car {
+
+    private String brand;
+    private String code;
+    private String name;
+
+    @JsonBackReference
+    private Person person;
+----
+
+[source,json]
+----
+{
+  "name" : "zhaozhiqiang",
+  "cars" : [ {
+    "brand" : "奔驰",
+    "code" : "520",
+    "name" : "德国奔驰"
+  } ]
+}
+{
+  "brand" : "奔驰",
+  "code" : "520",
+  "name" : "德国奔驰"
+}
+----
+@JsonManagedReference用来指定管理者,那么就会打印出json值, @JsonBackReference是被管理者,不会打印出json值.这两个注解不一定要一起使用,只使用一个也是可以的.反序列化的时候,该注解没有特别的作用.
+
+== @JsonIdentityInfo
+@JsonIdentityInfo用于指示在序列化/反序列化值时使用对象标识 - 例如，处理无限递归类型的问题。下面的例子,我们有一个与UserWithIdentity实体具有双向关系的ItemWithIdentity实体：
+
+[source,java]
+----
+@JsonIdentityInfo(
+  generator = ObjectIdGenerators.PropertyGenerator.class,
+  property = "id")
+public class ItemWithIdentity {
+    public int id;
+    public String itemName;
+    public UserWithIdentity owner;
+}
+
+@JsonIdentityInfo(
+  generator = ObjectIdGenerators.PropertyGenerator.class,
+  property = "id")
+public class UserWithIdentity {
+    public int id;
+    public String name;
+    public List<ItemWithIdentity> userItems;
+}
+
+ UserWithIdentity user = new UserWithIdentity(1, "John");
+    ItemWithIdentity item = new ItemWithIdentity(2, "book", user);
+    user.addItem(item);
+ 
+    String result = new ObjectMapper().writeValueAsString(item);
+
+----
+
+[source,json]
+----
+{
+    "id": 2,
+    "itemName": "book",
+    "owner": {
+        "id": 1,
+        "name": "John",
+        "userItems": [
+            2
+        ]
+    }
+}
+----
+
+== @JsonFilter
+
+用在类上,指定哪些属性可以被序列化.该注解支持嵌套过滤
+
+[source,java]
+----
+@JsonFilter("myFilter")
+public class BeanWithFilter {
+    public int id;
+    public String name;
+}
+----
+
+[source,java]
+----
+@Test
+public void whenSerializingUsingJsonFilter_thenCorrect()
+  throws JsonProcessingException {
+    BeanWithFilter bean = new BeanWithFilter(1, "My bean");
+ 
+    FilterProvider filters 
+      = new SimpleFilterProvider().addFilter(
+        "myFilter", 
+        SimpleBeanPropertyFilter.filterOutAllExcept("name"));
+ 
+    String result = new ObjectMapper()
+      .writer(filters)
+      .writeValueAsString(bean);
+ 
+    assertThat(result, containsString("My bean"));
+    assertThat(result, not(containsString("id")));
+}
+----
+
+[source,java]
+----
+public class BeanWithFilter {
+    private int id;
+
+    @JsonProperty("MyName")
+    private String name;
+
+    @JsonFilter("myFilter")
+    private Map map;
+
+
+
+        BeanWithFilter beanWithFilter = new BeanWithFilter();
+        beanWithFilter.setId(0);
+        beanWithFilter.setName("赵志强");
+
+        Map map = new HashMap();
+        map.put("age", 12);
+
+        beanWithFilter.setMap(map);
+
+        SimpleFilterProvider fl = new SimpleFilterProvider();
+        fl.addFilter("myFilter", SimpleBeanPropertyFilter.serializeAllExcept("age"));
+----
+上面的age属性没被过滤.该注解支持在类上和方法和属性上.注意,这个注解和@RawValue一起使用的时候是不起作用的.
+
+== 序列化注解
+
+=== @JsonAnyGetter
+
+该注解在序列化的时候会把map里面的key-value提升到java对象的属性中,参考下面的例子:
+
+[source,java]
+----
+public class ExtendableBean {
+    public String name;
+    private Map<String, String> properties;
+ 
+    @JsonAnyGetter
+    public Map<String, String> getProperties() {
+        return properties;
+    }
+}
+----
+
+[source,json]
+----
+{
+    "name":"My bean",
+    "attr2":"val2",
+    "attr1":"val1"
+}
+----
+
+=== @JsonGetter
+
+作用在属相的get方法上,用于指定序列化时字段的名称
+
+[source,java]
+----
+public class MyBean {
+    public int id;
+    private String name;
+ 
+    @JsonGetter("name")
+    public String getTheName() {
+        return name;
+    }
+}
+----
+
+[source,json]
+----
+{
+	"id":1,
+	"name":"zhaozhiqiang"
+}
+----
+
+=== @JsonPropertyOrder
+
+指定序列化时字段的顺序
+
+[source,java]
+----
+@JsonPropertyOrder({ "name", "id" })
+public class MyBean {
+    public int id;
+    public String name;
+}
+----
+
+=== @JsonRawValue
+
+将包含json字符串的字段以json对象的方式序列化
+
+[source,java]
+----
+public class RawBean {
+    public String name;
+ 
+    @JsonRawValue
+    public String json;
+}
+----
+
+[source,json]
+----
+{
+    "name":"My bean",
+    "json":{
+        "attr":false
+    }
+}
+----
+
+=== @JsonValue
+
+@JsonValue表示应该用于序列化整个实例的方法。
+
+[source,java]
+----
+public class JSONValueBean {
+
+    private int id;
+    private String name;
+
+    public int getId() {
+        return id;
+    }
+
+    public void setId(int id) {
+        this.id = id;
+    }
+
+    @JsonValue
+    public String getName() {
+        return name;
+    }
+----
+序列化的结果是:
+====
+赵志强
+====
+
+这个时候,序列化知识调用了getName方法,并没有json格式的输出.但是该注解应用在枚举上面,可能更符合我们的要求
+
+[source,java]
+----
+public enum TypeEnumWithValue {
+    TYPE1(1, "Type A"), TYPE2(2, "Type 2");
+ 
+    private Integer id;
+    private String name;
+ 
+    // standard constructors
+ 
+    @JsonValue
+    public String getName() {
+        return name;
+    }
+}
+----
+
+=== @JsonRootName
+如果启用了包装，则使用@JsonRootName注释来指定要使用的根包装器的名称。
+
+[source,java]
+----
+@JsonRootName(value = "user")
+public class UserWithRoot {
+    public int id;
+    public String name;
+}
+
+
+    ObjectMapper mapper = new ObjectMapper();
+    mapper.enable(SerializationFeature.WRAP_ROOT_VALUE); //需要启用这个特性
+    String result = mapper.writeValueAsString(user);
+----
+
+=== @JsonSerialize
+
+自定义某个类型的序列化器,下面是自定义的字符串的序列化器
+
+[source,java]
+----
+public class MySerialize extends StdSerializer<String> {
+
+    public MySerialize() {
+        this(null);
+    }
+
+    protected MySerialize(Class<String> t) {
+        super(t);
+    }
+
+    @Override
+    public void serialize(String s, JsonGenerator jsonGenerator, SerializerProvider serializerProvider) throws IOException {
+
+
+        JsonSer currentValue = (JsonSer) jsonGenerator.getCurrentValue();
+        if (currentValue.getId() == 0) {
+            jsonGenerator.writeString(s + "kkkk");
+
+        } else {
+            jsonGenerator.writeString(s);
+        }
+
+    }
+}
+----
+
+如果对象的id为0,序列化的时候指定值加上kkkk,否则正常序列化.
+
+== Json转化实体注解
+
+=== @JsonCreator
+@JsonCreator注释用于调整反序列化中使用的构造函数/工厂。当我们需要反序列化一些与我们需要获得的目标实体不完全匹配的JSON时，它非常有用。我们来看一个例子; 说我们需要反序列化以下JSON：
+
+[source,json]
+----
+{
+    "id":1,
+    "theName":"My bean"
+}
+----
+
+但是，我们的目标实体中没有theName字段 - 只有一个name字段。 现在,我们不想更改实体本身 - 我们只需要更多地控制解组过程 - 通过使用@JsonCreator注释构造函数并使用@JsonProperty注释：
+[source,java]
+----
+public class BeanWithCreator {
+    public int id;
+    public String name;
+ 
+    @JsonCreator
+    public BeanWithCreator(
+      @JsonProperty("id") int id, 
+      @JsonProperty("theName") String name) {
+        this.id = id;
+        this.name = name;
+    }
+}
+----
+
+=== @JacksonInject
+
+@JacksonInject用于指示将从注入而不是从JSON数据获取其值的属性。 
+
+[source,java]
+----
+public class BeanWithInject {
+    @JacksonInject
+    public int id;
+     
+    public String name;
+}
+----
+
+[source,java]
+----
+    String json = "{\"name\":\"My bean\"}";
+     
+    InjectableValues inject = new InjectableValues.Std()
+      .addValue(int.class, 1);
+
+    BeanWithInject bean = new ObjectMapper().reader(inject)
+      .forType(BeanWithInject.class)
+      .readValue(json);
+----
+
+
+=== @JsonAnySetter
+
+@JsonAnySetter允许您灵活地使用Map作为标准属性。 在反序列化时，JSON中的属性将简单地添加到map中。
+
+[source,java]
+----
+public class ExtendableBean {
+    public String name;
+    private Map<String, String> properties;
+ 
+    @JsonAnySetter
+    public void add(String key, String value) {
+        properties.put(key, value);
+    }
+}
+----
+
+[source,json]
+----
+{
+    "name":"My bean",
+    "attr2":"val2",
+    "attr1":"val1"
+}
+----
+
+
+=== @JsonSetter
+
+@JsonSetter是@JsonProperty的替代品 - 用于将方法标记为setter方法。
+
+当我们需要读取一些JSON数据但目标实体类与该数据不完全匹配时，这非常有用，因此我们需要调整该过程以使其适合。
+
+[source,java]
+----
+public class MyBean {
+    public int id;
+    private String name;
+ 
+    @JsonSetter("name")
+    public void setTheName(String name) {
+        this.name = name;
+    }
+}
+----
+
+[source,java]
+----
+    String json = "{\"id\":1,\"name\":\"My bean\"}";
+ 
+    MyBean bean = new ObjectMapper()
+      .readerFor(MyBean.class)
+      .readValue(json);
+----
+
+
+=== @JsonDeserialize
+@JsonDeserialize用于表示使用自定义反序列化器。
+
+[source,java]
+----
+public class Event {
+    public String name;
+ 
+    @JsonDeserialize(using = CustomDateDeserializer.class)
+    public Date eventDate;
+}
+----
+
+[source,java]
+----
+public class CustomDateDeserializer
+  extends StdDeserializer<Date> {
+ 
+    private static SimpleDateFormat formatter
+      = new SimpleDateFormat("dd-MM-yyyy hh:mm:ss");
+ 
+    public CustomDateDeserializer() { 
+        this(null); 
+    } 
+ 
+    public CustomDateDeserializer(Class<?> vc) { 
+        super(vc); 
+    }
+ 
+    @Override
+    public Date deserialize(
+      JsonParser jsonparser, DeserializationContext context) 
+      throws IOException {
+         
+        String date = jsonparser.getText();
+        try {
+            return formatter.parse(date);
+        } catch (ParseException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+----
+
+== 包含注解
+
+===  @JsonIgnoreProperties
+在类级别标记忽略的属性或属性列表。
+[source,java]
+----
+@JsonIgnoreProperties({ "id" })
+public class BeanWithIgnore {
+    public int id;
+    public String name;
+}
+----
+
+=== @JsonIgnore
+在属性级别标记被忽略掉的属性
+[source,java]
+----
+public class BeanWithIgnore {
+    @JsonIgnore
+    public int id;
+ 
+    public String name;
+}
+----
+
+=== @JsonIgnoreType
+@JsonIgnoreType标记在类型上,表明该类上的属性都会被忽略.
+[source,java]
+----
+public class User {
+    public int id;
+    public Name name;
+ 
+    @JsonIgnoreType
+    public static class Name {
+        public String firstName;
+        public String lastName;
+    }
+}
+----
+
+=== @JsonInclude
+@JsonInclude用于排除具有空/ null /默认值的属性。
+[source,java]
+----
+@JsonInclude(Include.NON_NULL)
+public class MyBean {
+    public int id;
+    public String name;
+}
+----
+
+. ALWAYS: 序列化全部字段
+. NON_NULL: 序列化化不为null的字段
+. NON_ABSENT: 
+. NON_EMPTY: 序列化不为空的字段
+. NON_DEFAULT, 不序列化值为默认值的字段,这个需要注意,假如你给某个字段设置了默认值,序列化之前修改该字段的值跟默认值一样,同样不会序列化输出,例如
+[source,java]
+----
+@JsonInclude(JsonInclude.Include.NON_DEFAULT)
+public class MyBean {
+    private int id;
+    private String name ="jjj";
+
+
+        MyBean bean = new MyBean();
+        bean.setId(2);
+        bean.setName("jjj");
+
+----
+上面的代码不会把MyBean的name字段序列化,除非设置name是jjj之外的值.
+. CUSTOM,
+[source,java]
+----
+public class MyValueFilter {
+
+    @Override
+    public boolean equals(Object obj) {
+        String s = String.valueOf(obj);
+        return s.equals("jjj");
+    }
+}
+@JsonInclude(value = JsonInclude.Include.CUSTOM, valueFilter = MyValueFilter.class)
+public class MyBean {
+    private int id;
+    private String name;
+
+    private String tName;
+
+----
+@JsonInclude注解指定了自定义的value过滤器,过滤器使用equal方法来实现值过滤.上面的代码会把属性值等于jjj的字段都过滤掉,序列化的时候不会输出这些字段.
+
+. USE_DEFAULTS:允许使用默认值序列化字段.
+
+=== @JsonAutoDetect
+
+@JsonAutoDetect用来覆盖默认机制,指定哪些属性可见
+[source,java]
+----
+@JsonAutoDetect(fieldVisibility = Visibility.ANY)
+public class PrivateBean {
+    private int id;
+    private String name;
+}
+----
+
+ . ANY :所有的属性都可以被序列化
+
+ . NON_PRIVATE:私有属性不能被序列化
+
+ . PROTECTED_AND_PUBLIC:public和protected属性可以被序列化
+
+ . PUBLIC_ONLY:只有公开属性可以被序列化
+
+ . NONE:所有属性都不能被序列化
+
+ . DEFAULT:表示默认可见性级别（无论是什么，取决于上下文）的值将被使用。 这通常意味着要使用继承的值（来自父可见性设置）。
+
+
+== 多态类型注解
+
+@JsonTypeInfo用于指示序列化中包含的类型信息的详细信息
+@JsonSubTypes用于指示带注释类型的子类型
+@JsonTypeName用于定义用于带注释的类的逻辑类型名称
+
+[source,java]
+----
+public class Zoo {
+    public Animal animal;
+ 
+    @JsonTypeInfo(
+      use = JsonTypeInfo.Id.NAME, 
+      include = As.PROPERTY, 
+      property = "type")
+    @JsonSubTypes({
+        @JsonSubTypes.Type(value = Dog.class, name = "dog"),
+        @JsonSubTypes.Type(value = Cat.class, name = "cat")
+    })
+    public static class Animal {
+        public String name;
+    }
+ 
+    @JsonTypeName("dog")
+    public static class Dog extends Animal {
+        public double barkVolume;
+    }
+ 
+    @JsonTypeName("cat")
+    public static class Cat extends Animal {
+        boolean likesCream;
+        public int lives;
+    }
+}
+----
+
+我们来分析一下,这个例子,序列化的Zoo的时候,打印出的JSON
+
+[source,json]
+----
+{
+    "animal": {
+        "type": "dog",
+        "name": "lacy",
+        "barkVolume": 0
+    }
+}
+----
+由于type属性的存在,我们反序列化的时候,知道animal应该序列化成dog,而不是cat.更不是animal,那样的会丢失barkVolume属性信息,这肯定不是我们所期望的
+
+==  @JacksonAnnotationsInside自定义注解
+
+该注解可以组合多个注解使用,看例子
+[source,java]
+----
+@Retention(RetentionPolicy.RUNTIME)
+    @JacksonAnnotationsInside
+    @JsonInclude(Include.NON_NULL)
+    @JsonPropertyOrder({ "name", "id", "dateCreated" })
+    public @interface CustomAnnotation {}
+----
+
+[source,java]
+----
+@CustomAnnotation
+public class BeanWithCustomAnnotation {
+    public int id;
+    public String name;
+    public Date dateCreated;
+}
+----
+
+== 混入
+
+json注解如果只是定义在我们写的类上是没有问题,但更多是时候,我们会使用别人提供的代码,我们是无法把这些注解添加在别人的代码,混入就是解决这个问题的
+
+[source,java]
+----
+@JsonIgnoreProperties("name")
+public class MixInBean {
+
+}
+
+        User user = new User();
+        user.setId(1);
+        user.setName("混入");
+
+        String string = mapper.addMixIn(User.class, MixInBean.class).writeValueAsString(user);
+----
+user在序列化的时候不会打印出name
+
+== 其他
+
+=== @JsonAppend

@@ -1,0 +1,289 @@
+= CyclicBarrier
+
+:imagesdir: ../images
+
+CyclicBarrier 的字面意思是可循环使用（Cyclic）的屏障（Barrier）。它要做的事情是，让一组线程到达一个屏障（也可以叫同步点）时被阻塞，直到最后一个线程到达屏障时，屏障才会开门，所有被屏障拦截的线程才会继续干活。CyclicBarrier默认的构造方法是CyclicBarrier(int parties)，其参数表示屏障拦截的线程数量，每个线程调用await方法告诉CyclicBarrier我已经到达了屏障，然后当前线程被阻塞。
+
+
+实例代码如下：
+
+[source,java]
+----
+public class CyclicBarrierTest {
+
+	static CyclicBarrier c = new CyclicBarrier(2);
+
+	public static void main(String[] args) {
+		new Thread(new Runnable() {
+
+			@Override
+			public void run() {
+				try {
+					c.await();
+				} catch (Exception e) {
+
+				}
+				System.out.println(1);
+			}
+		}).start();
+
+		try {
+			c.await();
+		} catch (Exception e) {
+
+		}
+		System.out.println(2);
+	}
+}
+----
+
+输出
+----
+2
+1
+----
+或者输出
+----
+1
+2
+----
+如果把new CyclicBarrier(2)修改成new CyclicBarrier(3)则主线程和子线程会永远等待，因为没有第三个线程执行await方法，即没有第三个线程到达屏障，所以之前到达屏障的两个线程都不会继续执行。
+
+CyclicBarrier还提供一个更高级的构造函数CyclicBarrier(int parties, Runnable barrierAction)，用于在线程到达屏障时，优先执行barrierAction，方便处理更复杂的业务场景。代码如下：
+
+[source,java]
+----
+public class CyclicBarrierTest2 {
+
+	static CyclicBarrier c = new CyclicBarrier(2, new A());
+
+	public static void main(String[] args) {
+		new Thread(new Runnable() {
+
+			@Override
+			public void run() {
+				try {
+					c.await();
+				} catch (Exception e) {
+
+				}
+				System.out.println(1);
+			}
+		}).start();
+
+		try {
+			c.await();
+		} catch (Exception e) {
+
+		}
+		System.out.println(2);
+	}
+
+	static class A implements Runnable {
+
+		@Override
+		public void run() {
+			System.out.println(3);
+		}
+
+	}
+
+}
+----
+输出
+----
+3
+1
+2
+----
+
+== CyclicBarrier的应用场景
+
+CyclicBarrier可以用于多线程计算数据，最后合并计算结果的应用场景。比如我们用一个Excel保存了用户所有银行流水，每个Sheet保存一个帐户近一年的每笔银行流水，现在需要统计用户的日均银行流水，先用多线程处理每个sheet里的银行流水，都执行完之后，得到每个sheet的日均银行流水，最后，再用barrierAction用这些线程的计算结果，计算出整个Excel的日均银行流水。
+
+== CyclicBarrier和CountDownLatch的区别
+CountDownLatch的计数器只能使用一次。而CyclicBarrier的计数器可以使用reset() 方法重置。所以CyclicBarrier能处理更为复杂的业务场景，比如如果计算发生错误，可以重置计数器，并让线程们重新执行一次。
+CyclicBarrier还提供其他有用的方法，比如getNumberWaiting方法可以获得CyclicBarrier阻塞的线程数量。isBroken方法用来知道阻塞的线程是否被中断。比如以下代码执行完之后会返回true。
+isBroken的使用代码如下：
+[source,java]
+----
+import java.util.concurrent.BrokenBarrierException;
+import java.util.concurrent.CyclicBarrier;
+
+public class CyclicBarrierTest3 {
+
+    static CyclicBarrier c = new CyclicBarrier(2);
+
+    public static void main(String[] args) throws InterruptedException, BrokenBarrierException {
+        Thread thread = new Thread(new Runnable() {
+
+            @Override
+            public void run() {
+                try {
+                    c.await();
+                } catch (Exception e) {
+                }
+            }
+        });
+        thread.start();
+        thread.interrupt();
+        try {
+            c.await();
+        } catch (Exception e) {
+            System.out.println(c.isBroken());
+        }
+    }
+}
+----
+
+输出
+----
+true
+----
+
+== 源码分析
+
+我们先来看几个重要的实例域
+[source,java]
+----
+    private final ReentrantLock lock = new ReentrantLock(); <1>
+    private final Condition trip = lock.newCondition(); <2>
+    private final int parties; <3>
+    private final Runnable barrierCommand; <4>
+    private Generation generation = new Generation(); <5>
+----
+
+<1> 所有方法都通过这个锁来同步。之所以不使用内置锁(synchronized)主要是因为需要抛出异常。此外这里需要的实际上是共享锁，而内置锁不能实现共享锁。
+<2> 主要用来实现多个线程之间的等待通信
+<3> 通过构造器传入的参数，表示总的等待线程的数量。
+<4> 当屏障正常打开后运行的代码，由最后一个调用await的线程来执行。
+<5> 当前的Generation。每当屏障失效或者开闸之后都会自动替换掉。从而实现重置的功能。
+
+
+最主要的方法是await方法:
+
+调用await()的线程会等待直到有足够数量的线程调用await——也就是开闸状态，
+	当最后一个线程到达
+
+或者出现下面的情况——也就是打破状态。
+
+. 有其他线程中断当前线程。则抛出interruptException
+. 指定了限时操作，并到达线程，则抛出TimeoutException
+. 如果barrier被重置，或者屏障处于打破状态，则抛出BrokenBarrierException
+
+什么样的情况会出现打破状态？当任意等待线程抛出BrokenBarrierException的时候会使得当前屏障处于打破状态。
+
+await方法是通过一个内部方法dowait来实现的。
+
+[source,java]
+----
+ private int dowait(boolean timed, long nanos)
+        throws InterruptedException, BrokenBarrierException,
+               TimeoutException {
+        final ReentrantLock lock = this.lock;
+        lock.lock();
+        try {
+            final Generation g = generation; 
+
+            if (g.broken) <1>
+                throw new BrokenBarrierException();
+
+            if (Thread.interrupted()) { <2>
+                breakBarrier();
+                throw new InterruptedException();
+            }
+
+            int index = --count; <3>
+            if (index == 0) {  // tripped <4>
+                boolean ranAction = false;
+                try {
+                    final Runnable command = barrierCommand;
+                    if (command != null)
+                        command.run();
+                    ranAction = true;
+                    nextGeneration();
+                    return 0;
+                } finally {
+                    if (!ranAction)
+                        breakBarrier(); <5>
+                }
+            }
+
+            // 一直循环,直到被打断,超时,broken
+            for (;;) {
+                try {
+                    if (!timed)
+                        trip.await();
+                    else if (nanos > 0L)
+                        nanos = trip.awaitNanos(nanos);
+                } catch (InterruptedException ie) {
+                    if (g == generation && ! g.broken) {
+                        breakBarrier();
+                        throw ie;
+                    } else {
+                        // We're about to finish waiting even if we had not
+                        // been interrupted, so this interrupt is deemed to
+                        // "belong" to subsequent execution.
+                        Thread.currentThread().interrupt();
+                    }
+                }
+
+				//从阻塞恢复之后，需要重新判断当前的状态。
+                if (g.broken)
+                    throw new BrokenBarrierException();
+
+                if (g != generation)
+                    return index;
+
+                if (timed && nanos <= 0L) {
+                    breakBarrier();
+                    throw new TimeoutException();
+                }
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+----
+
+<1> 如果当前Generation是处于打破状态则传播这个BrokenBarrierExcption
+<2> 如果当前线程被中断则使得当前generation处于打破状态，重置count。唤醒其他线程。这时候其他线程会传播BrokenBarrierException
+<3> 每个线程进来之后都会降低这个计数值
+<4> 如果当前状态将为0，则Generation处于开闸状态。运行存在的command，设置下一个Generation。也就是说每次开闸之后都进行了一次reset。
+<5> 如果运行command失败也会导致当前屏障被打破
+
+
+[source,java]
+----
+    private void nextGeneration() {
+        // signal completion of last generation
+        trip.signalAll();
+        // set up next generation
+        count = parties;
+        generation = new Generation();
+    }
+
+    private void breakBarrier() {
+        generation.broken = true;
+        count = parties;
+        trip.signalAll();
+    }
+
+----
+
+
+[source,java]
+----
+    public void reset() {
+        final ReentrantLock lock = this.lock;
+        lock.lock();
+        try {
+            breakBarrier();   // break the current generation
+            nextGeneration(); // start a new generation
+        } finally {
+            lock.unlock();
+        }
+    }
+----
+

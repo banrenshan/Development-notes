@@ -1,0 +1,618 @@
+= Spring boot注解驱动
+
+:toc: left
+:icons: font
+:sectanchors: 
+:toclevels: 4
+:source-highlighter: pygments
+:pygments-style: manni
+:source-linenums-option:
+
+== @Configuration
+
+表示一个类声明了一个或多个@Bean注解的方法，这些方法上的返回值被注册成容器管理的bean.
+
+[source,java]
+----
+@Configuration
+public class Config {
+
+    @Bean
+    public DataSource dataSource() {
+        return new DruidDataSource();
+    }
+}
+
+----
+上面的例子向容器中注册了DataSource的实例，通过 @Autowired可以获取该实例
+
+==  @Bean
+
+表示方法生成由Spring容器管理的bean。示例参考上面。
+
+[source,java]
+----
+
+	@AliasFor("name")
+	String[] value() default {}; <1>
+
+	@AliasFor("value")
+	String[] name() default {}; <2>
+
+	Autowire autowire() default Autowire.NO; <3>
+
+	
+	String initMethod() default "";
+
+	String destroyMethod() default AbstractBeanDefinition.INFER_METHOD;
+----
+
+<1> <2> 指定实例的名称
+
+<3> 使用未明
+
+== @ComponentScan
+
+配置组件扫描指令以与@Configuration类一起使用。该类会扫描被@Component注解的类(@Repository, @Service, @Controller都是在此注解上派生出来的)，然后生成实例注册到容器中
+
+下面是该注解的几种使用方式：
+
+. 基本使用
+[source,java]
+----
+@ComponentScan(basePackages = {"com.example.demo"})
+----
+
+[source,java]
+----
+@ComponentScan(basePackages = {"com.example.demo"}, includeFilters = {
+        @ComponentScan.Filter(type = FilterType.ANNOTATION, classes = Controller.class)
+}, useDefaultFilters = false)
+----
+
+扫描com.example.demo下面所有的@Controller注解，useDefaultFilters如果设为true，则会扫描@Service等其他注解
+
+
+[source,java]
+----
+@Configuration
+@ComponentScan(basePackages = {"com.example.demo"}, excludeFilters = {
+        @ComponentScan.Filter(type = FilterType.ANNOTATION, classes = Controller.class)
+})
+----
+
+扫描com.example.demo下面除@Controller注解外的其他@Component注解
+
+包过滤类型有以下几种：
+[source,java]
+----
+public enum FilterType {
+    ANNOTATION,  //注解
+
+	ASSIGNABLE_TYPE, //类
+
+	ASPECTJ, //
+	
+	REGEX, //正则表达式
+
+	CUSTOM //自定义
+}
+----
+
+我们来看看自定义怎么实现
+[source,java]
+----
+public class MyTypeFilter implements TypeFilter {
+    @Override
+    public boolean match(MetadataReader metadataReader, MetadataReaderFactory metadataReaderFactory) throws IOException {
+        AnnotationMetadata annotationMetadata = metadataReader.getAnnotationMetadata();//获取注解元数据
+        ClassMetadata classMetadata = metadataReader.getClassMetadata();//获取类元数据
+
+        if (annotationMetadata.hasAnnotation("com.example.demo.config.Tcomp") && classMetadata.getClassName().contains("TU")) {
+            return true;
+        }
+
+        return false;
+    }
+}
+----
+
+[source,java]
+----
+@ComponentScan(basePackages = {"com.example.demo.config"}, excludeFilters = {
+        @ComponentScan.Filter(type = FilterType.CUSTOM, classes = MyTypeFilter.class)
+}, useDefaultFilters = false)
+----
+
+== @ComponentScans
+
+组合多个@ComponentScan注解使用，在jdk1.8后支持重复注解，也就是说我们可以配置多个@ComponentScan注解，他们之间顺序执行，后一个使用前一个扫描的结果再过滤
+
+== @Scope
+
+用于指定容器管理示例的类型,例如是单例还是多个.类型有下面几种
+
+ . ConfigurableBeanFactory.SCOPE_PROTOTYPE
+ . ConfigurableBeanFactory.SCOPE_SINGLETON
+ . org.springframework.web.context.WebApplicationContext.SCOPE_REQUEST
+ . org.springframework.web.context.WebApplicationContext.SCOPE_SESSION
+
+SCOPE_SINGLETON模式下,在容器创建的时候就会创建组件实例,但是SCOPE_SINGLETON确实在每次调用的时候才会创建实例.
+
+== @Lazy
+
+指定bean是加载模式,默认情况下,bean会在容器启动的时候创建实例,如果指定该注解,则会在调用的时候创建实例.
+
+如果@Configuration类上存在@Lazy，则表示该@Configuration中的所有@Bean方法都应该被懒惰地初始化。
+
+==  @Conditional
+
+与@Bean注解一起使用,根据条件决定是否注册bean实例.
+
+[source,java]
+----
+@Configuration
+public class Config {
+
+
+    @Conditional(LinuxConditional.class)
+    @Bean
+    public User linux() {
+        User user = new User();
+        user.setId(1);
+        user.setName("linux");
+        return user;
+    }
+
+    @Conditional(WindowsConditional.class)
+    @Bean
+    public User windows() {
+        User user = new User();
+        user.setId(2);
+        user.setName("windows");
+        return user;
+    }
+}
+
+class LinuxConditional implements Condition {
+
+    @Override
+    public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
+        context.getBeanFactory();//获取容器
+        context.getRegistry();//获取bean注册信息
+        context.getResourceLoader();//获取资源加载器
+        //metadat获取改注解周围标注的其他注解信息
+        String property = context.getEnvironment().getProperty("os.name");
+        if (property.toLowerCase().contains("linux"))
+            return true;
+        return false;
+    }
+}
+
+class WindowsConditional implements Condition {
+
+    @Override
+    public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
+        String property = context.getEnvironment().getProperty("os.name");
+        if (property.toLowerCase().contains("windows"))
+            return true;
+        return false;
+    }
+}
+----
+
+== @Import
+被@Import的类,会向容器中注册实例,注册名是全类型名,而不是简写名,看下面的简单实例
+[source,java]
+---- 
+@Configuration
+@Import(DemoService.class)
+public class DemoConfig {
+ 
+}
+----
+
+上面的DemoService实例会被注册到容器当中.这种方式和@Bean相比有什么好处呢?我们有个多模块项目,其中有个common项目,其集成了mybatis的配置,如果我们其他模块想要使用这个功能,就可以通过@Import来启用mybatis的配置.(需要测试)
+
+
+[source,java]
+----
+public class MyConfig {
+
+    @Bean
+    public Dog getDog(){
+        return new Dog();
+    }
+
+    @Bean
+    public Cat getCat(){
+        return new Cat();
+    }
+
+}
+
+@Import(MyConfig.class)
+public class App {
+    
+}
+----
+
+import可以通过实现ImportSelector接口
+
+[source,java]
+----
+public class MyInportSelector implements ImportSelector {
+    @Override
+    public String[] selectImports(AnnotationMetadata importingClassMetadata <1>) {
+
+        return new String[]{
+                "com.example.demo.import2.UserDomian2" <2>
+        };
+    }
+}
+
+@Configuration
+@Import({UserDomian.class, MyInportSelector.class})
+public class Config {
+    
+}
+----
+
+<1> 获取类上的注解类型,Config类上的
+<2> 返回类型的全类名
+
+
+import实现ImportBeanDefinitionRegistrar接口
+
+[source,java]
+----
+@Configuration
+@Import({UserDomian.class, MyInportSelector.class, MyInportBeanDefinitionRegistar.class})
+public class Config {
+    
+}
+----
+
+[source,java]
+----
+public class MyInportBeanDefinitionRegistar implements ImportBeanDefinitionRegistrar {
+    @Override
+    public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata <1>, BeanDefinitionRegistry registry <2>) {
+
+        BeanDefinition definition = new RootBeanDefinition(UserDomin3.class);
+        registry.registerBeanDefinition("domian", definition);
+    }
+}
+----
+
+<1> 类上的注解信息,Config类上的
+<2> bean注册器
+
+== 实现FactoryBean接口注册实例
+
+[source,java]
+----
+public class UserFactoryBean implements FactoryBean<User> {
+    @Override
+    public User getObject() throws Exception { <1>
+
+        User user = new User();
+        user.setName("UserFactoryBean 实例");
+        return user;
+    }
+
+    @Override
+    public Class<?> getObjectType() { <2>
+        return User.class;
+    }
+
+    @Override
+    public boolean isSingleton() { <3>
+        return true;
+    }
+}
+
+----
+
+[source,java]
+----
+    @Bean
+    public UserFactoryBean userFactoryBean() {
+        return new UserFactoryBean();
+    }
+----
+
+<1> 创建注册bean的实例
+<2> 返回注册bean的类型
+<3> 设定创建的bean是否是单例
+
+
+[source,java]
+----
+        Object userFactoryBean = context.getBean("userFactoryBean"); <1>
+        System.err.println(userFactoryBean);
+
+        Object userFactoryBean2 = context.getBean("&userFactoryBean"); <2>
+        System.err.println(userFactoryBean2);
+----
+
+<1> 获取的的User实例
+<2> 获取的的UserFactoryBean实例
+
+
+== @Bean指定生命周期方法
+
+Bean的生命周期方法指的是bean的实例创建之后的初始化方法和bean销毁之前的回调方法
+[source,java]
+----
+public class Product {
+
+    public void init(){
+        System.err.println("产品的初始化方法");
+    }
+
+    public void destory(){
+        System.err.println("产品的销毁方法");
+    }
+
+    public Product() {
+        System.err.println("产品构造方法");
+    }
+}
+
+    @Bean(initMethod = "init",destroyMethod = "destory")
+    public Product product(){
+        return new Product();
+    }
+----
+
+== InitializingBean,DisposableBean指定生命周期
+
+实现InitializingBean,DisposableBean接口可以分别指定生命周期的初始化和销毁方法
+[source,java]
+----
+public class Category implements InitializingBean,DisposableBean {
+    @Override
+    public void destroy() throws Exception {
+        System.err.println("分类:销毁方法");
+    }
+
+    @Override
+    public void afterPropertiesSet() throws Exception {
+        System.err.println("分类初始化方法:afterPropertiesSet");
+    }
+}
+----
+
+== @PostConstruct和@PreDestroy指定生命周期
+
+[source,java]
+----
+public class Role {
+    public Role() {
+        System.err.println("role:创建实例");
+    }
+
+    @PostConstruct
+    public void init(){
+        System.err.println("role:初始化方法");
+    }
+
+    @PreDestroy
+    public void destory(){
+        System.err.println("role:销毁方法");
+    }
+}
+----
+
+== BeanPostProcessor
+
+
+实现BeanPostProcessor接口,可以在bean回调bean包装实例(spring会在执行new 方法创建bean对象之后调用BeanPostProcessor的生命周期方法执行bean包装)创建和之后的生命周期方法
+
+[source,java]
+----
+public class MyBeanPostProcessor implements BeanPostProcessor {
+
+    @Override
+    public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
+        System.err.println("beanName:" + beanName);
+        return bean;
+    }
+
+    @Override
+    public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
+        return bean;
+    }
+}
+   
+@Bean
+public MyBeanPostProcessor myBeanPostProcessor(){
+    return new MyBeanPostProcessor();
+}
+----
+
+通过程序运行可以看出,postProcessBeforeInitialization在bean包装实例化之前执行,postProcessAfterInitialization在bean包装实例化之后执行.需要注意的是,这个接口是对所有bean进行拦截,而不是像 @PostConstruct对单个bean做拦截.
+该机制可以对实例进行动态代理
+
+
+spring 使用该机制实现很多功能,下面是常用的功能列表:
+
+. ApplicationContextAwareProcessor :实现ApplicationContextAware,ApplicationEventPublisherAware,ResourceLoaderAware,EnvironmentAware等接口,可以将ApplicationContext注入到bean当中
+
+[source,java]
+----
+public class UserApplicationContextAware implements ApplicationContextAware {
+
+    private ApplicationContext applicationContext;
+
+    @Override
+    public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
+        this.applicationContext = applicationContext;
+    }
+}
+----
+
+. BeanValidationPostProcessor : bean属性合法性校验
+. AutowiredAnnotationBeanPostProcessor :实现@Autowire等注解的自动注入
+
+== @Value
+
+实现输入注入的功能,可以直接注入字符串,外部属性和el表达式等,外部输入格式是@Value("${key}"),el表达式是@Value("#{key}")
+
+== @PropertySource
+
+导入外部属性文件到系统变量中
+[source,java]
+----
+@PropertySource("classpath:/my.properties")
+@Configuration
+public class Config {
+    
+}
+
+String name = context.getEnvironment().getProperty("name"); //也可以通过@Value引入属性
+
+----
+上面的例子是导入类路径下面的配置,也可以导入文件路径下面的配置文件.
+
+== 自动注入
+
+@Autowire注解默认情况下是根据类型自动注入的,但是如果有两个相同的类型的情况下,应该如何处理呢?,看下面的例子:
+
+[source,java]
+----
+@Configuration
+@ComponentScan
+public class InjectConfig {
+
+    @Bean
+    public Brand brand() {
+        return new Brand("惠普");
+    }
+
+    @Bean
+    public Brand brand2() {
+        return new Brand("戴尔");
+    }
+}
+----
+
+上面注册了两个brand实例,当我们按照下面的方式注入的时候
+
+[source,java]
+----
+    @Autowired
+    private Brand brand;
+----
+
+获取的是"惠普",如果把brand改成brand2,获取的是"戴尔".想一下,如果我们把上面的代码改成这样的:
+
+[source,java]
+----
+@Configuration
+@ComponentScan
+public class InjectConfig {
+
+    @Bean
+    public Brand brand() {
+        return new Brand("惠普");
+    }
+}
+
+    @Autowired
+    private Brand brand2;
+----
+
+此时仍然可以注入成功,说明自动装配的时候,先按照类型自动装配,如果存在多个类型,则按照bean name注入.
+
+
+有的时候,我们想明确限定注册的bean实例的名称,可以通过@Qualifier实现
+
+[source,java]
+----
+    @Qualifier("brand2")
+    @Autowired
+    private Brand brand;
+----
+
+有的时候,我们注册了相同类型的多个实例,但是有大量的类依赖某个实例,个别类依赖另一个实例,这个时候我们可以指定首选类型
+
+[source,java]
+----
+    @Primary
+    @Bean
+    public Brand brand2() {
+        return new Brand("戴尔");
+    }
+
+    @Bean
+    public Brand brand() {
+        return new Brand("惠普");
+    }
+
+    @Autowired
+    private Brand brand;
+----
+
+上面的代码注入的戴尔实例.
+
+
+@Autowire注解不仅可以作用在属性上,还可以作用在方法和构造函数上,例如:
+
+[source,java]
+----
+
+    @Autowired
+    public void setBrand(Brand brand) {
+        this.brand = brand;
+    }
+
+    public void setBrand(@Autowired Brand brand) {
+        this.brand = brand;
+    }
+
+    @Autowired
+    public Product(Brand brand) { //构造函数上可以省略注解
+        this.brand = brand;
+    }
+
+    public Product(@Autowired Brand brand) {
+        this.brand = brand;
+    }
+
+----
+
+除了@Autowire注解,spring还提供了@Resource和@Inject注解来自动注入.
+
+== 实现Aware接口来注入spring 系统组件
+
+系统里面有很多实现Aware接口来实现接口注入功能,例如AutowiredAnnotationBeanPostProcessor解析@Autowire注解实现组件的自动注入等.
+
+[source,java]
+----
+@Component
+public class MyAware implements BeanNameAware, ApplicationContextAware, EmbeddedValueResolverAware {
+    @Override
+    public void setBeanName(String s) {
+        System.err.println("注册的bean名称:" + s);
+    }
+
+    @Override
+    public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
+        System.err.println("注入容器实例");
+    }
+
+    @Override
+    public void setEmbeddedValueResolver(StringValueResolver resolver) {
+        System.err.println("注入属性解析器");
+        String s = resolver.resolveStringValue("系统名称:${os.name}");
+        System.err.println(s);
+    }
+}
+----
+
+== @Profile
+该注解可以作用在类上和@Configuration或者作用在方法上和@Bean注解一起使用.
+
+作用在方法上表明只有指定的profile才注册bean实例,作用在类上,表明只有指定的profile才注册配置类的所有注册方法.

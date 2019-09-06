@@ -1,0 +1,268 @@
+= spring官方文档
+赵志强
+:icons: font
+:source-highlighter: highlightjs
+:toclevels: 5
+:toc-title: 目录
+:toc: left
+:sectnums:
+
+== Resources
+
+===  介绍
+不幸的是，Java的标准java.net.URL类和各种URL前缀的标准处理程序不足以满足所有对低级资源的访问。例如，没有标准化的URL实现可用于访问需要从类路径或与ServletContext相关的资源。尽管可以为专门的URL前缀注册新的处理程序（类似于诸如http：前缀之类的现有处理程序），但这通常相当复杂，并且URL界面仍然缺少某些期望的功能，例如被指向的资源是否存在。
+
+===  Resource接口
+Spring的资源接口旨在成为抽象访问低级资源的更强大的接口。
+[source,java]
+----
+public interface Resource extends InputStreamSource {
+
+    boolean exists();
+
+    boolean isOpen();
+
+    URL getURL() throws IOException;
+
+    File getFile() throws IOException;
+
+    Resource createRelative(String relativePath) throws IOException;
+
+    String getFilename();
+
+    String getDescription();
+
+}
+----
+[source,java]
+----
+public interface InputStreamSource {
+
+    InputStream getInputStream() throws IOException;
+
+}
+----
+来自资源接口的一些最重要的方法是：
+* getInputStream（）：定位并打开资源，返回一个InputStream来读取资源。 预计每次调用都会返回一个新的InputStream。 主叫方有责任关闭该流。
+* exists（）：返回一个布尔值，指示该资源是否实际存在于物理形式中。
+* isOpen（）：返回一个布尔值，指示此资源是否表示具有打开流的句柄。如果为true，则不能多次读取InputStream，并且只能读取一次，然后关闭以避免资源泄漏。除了InputStreamResource之外，对于所有通常的资源实现都将是false。
+* getDescription（）：返回此资源的描述，用于处理资源时的错误输出。 这通常是完全限定的文件名或资源的实际URL。
+
+其他方法允许您获取表示资源的实际URL或File对象（如果底层实现兼容并支持该功能）。
+
+资源抽象被广泛用于Spring本身，作为许多方法签名的参数类型。在某些Spring API中的其他方法（例如各种ApplicationContext实现的构造函数）需要一个String，它可以使用未修饰或简单形式创建适合该上下文实现的资源，或者通过String路径上的特殊前缀来允许调用者指定必须创建和使用特定的资源实现。虽然Resource接口在Spring中用得非常多，但在您自己的代码中，作为一个通用工具类来访问资源，即使您的代码不知道或关心spring的其他部分。虽然这会将代码耦合到Spring，但实际上它只是将它与此小组实用程序类相耦合，这些实用程序类可用作URL的更强大的替代品，可视为与您将用于此目的的任何其他库相当。
+
+值得注意的是，资源抽象并不取代功能：它尽可能包装它。 例如，UrlResource包装一个URL，并使用包装的URL来完成其工作。
+
+===  内置的Resource实现
+在Spring中有很多资源实现是直接提供的。
+
+====  UrlResource
+UrlResource封装了一个java.net.URL，可用于访问通常可通过URL访问的任何对象，如文件，HTTP目标，FTP目标等。所有URL都具有标准化的字符串表示形式，例如 适当的标准化前缀用于表示来自另一个URL类型。 这包括file：用于访问文件系统路径，http：用于通过HTTP协议访问资源，ftp：用于通过FTP访问资源等。
+
+UrlResource是由Java代码使用UrlResource构造函数显式创建的，但是当您调用一个API方法时，通常会隐式创建UrlResource，该方法需要一个String参数来表示路径。 对于后一种情况，JavaBean PropertyEditor最终将决定创建哪种类型的资源。如果路径字符串包含一些众所周知的（就是它）前缀，例如classpath:,它将为该前缀创建适当的专用资源。但是，如果它不能识别前缀，它会认为这只是一个标准的URL字符串，并且会创建一个UrlResource。
+
+====  ClassPathResource
+这个类代表了一个应该从classpath中获取资源。 这使用线程上下文类加载器或给定的类加载器或给定的类来加载资源。
+
+如果类路径资源驻留在文件系统中，则此资源实现支持解析为java.io.File，但不适用于驻留在jar中并且尚未扩展到文件系统的类路径资源。 为了解决这个问题，各种资源实现总是支持解析为java.net.URL。
+
+ClassPathResource是由Java代码使用ClassPathResource构造函数显式创建的，但是当您调用一个带有String参数的API方法时，通常会隐式创建它。对于后一种情况，JavaBeans PropertyEditor将识别字符串路径上的特殊前缀classpath：并在此情况下创建一个ClassPathResource。
+
+====  FileSystemResource
+这是java.io.File句柄的资源实现。 它显然支持解析为文件，以及URL。
+
+====  ServletContextResource
+这是ServletContext资源的实现，解释相关Web应用程序根目录中的相对路径。
+
+这总是支持流访问和URL访问，但只有当Web应用程序归档文件被展开并且资源物理上位于文件系统上时才允许访问java.io.File。不管它是否被扩展，并在文件系统中这样，或者直接从JAR或其他地方访问，如DB（可以想象）实际上都依赖于Servlet容器。
+
+====  InputStreamResource
+
+给定InputStream的资源实现。 只有在没有特定的资源实现适用的情况下才能使用。 特别是，如果可能的话，首选ByteArrayResource或任何基于文件的资源实现。
+
+与其他Resource实现相比，这是已打开资源的描述符 - 因此从isOpen（）返回true。 如果您需要将资源描述符保存在某处，或者您需要多次读取流，请不要使用它。
+
+====  ByteArrayResource
+这是给定字节数组的一个资源实现。 它为给定的字节数组创建一个ByteArrayInputStream。
+
+从任何给定的字节数组中加载内容是很有用的，而不必求助于一次性的InputStreamResource。
+
+===  ResourceLoader
+
+实现ResourceLoader接口可以获取资源实例对象的引用。
+----
+public interface ResourceLoader {
+
+    Resource getResource(String location);
+  }
+----
+
+所有的应用程序上下文都实现了ResourceLoader接口，因此所有的应用程序上下文都可以用来获取Resource实例。
+当您在特定的应用程序上下文中调用getResource（），并且指定的位置路径没有特定的前缀时，您将返回适合该特定应用程序上下文的资源类型。 例如，假设以下代码片段针对ClassPathXmlApplicationContext实例执行：
+[source,java]
+----
+Resource template = ctx.getResource("some/resource/path/myTemplate.txt");
+----
+返回将是一个ClassPathResource; 如果对FileSystemXmlApplicationContext实例执行相同的方法，则会返回FileSystemResource。 对于WebApplicationContext，您将返回一个ServletContextResource，等等。
+
+因此，您可以以适合特定应用程序上下文的方式加载资源。
+
+另一方面，通过指定特殊的classpath:前缀来强制使用ClassPathResource，而不管应用程序上下文类型如何。
+----
+Resource template = ctx.getResource("classpath:some/resource/path/myTemplate.txt");
+----
+同样，可以通过指定任何标准的java.net.URL前缀来强制使用UrlResource：
+----
+Resource template = ctx.getResource("file:///some/resource/path/myTemplate.txt");
+----
+----
+Resource template = ctx.getResource("http://myhost.com/resource/path/myTemplate.txt");
+----
+下表总结了将字符串转换为资源的策略：
+|===
+|Prefix|实例|说明
+|classpath:|classpath:com/myapp/config.xml|从类路径加载。
+|file:|	file:///data/config.xml|从文件系统加载为URL。
+|http:|http://myserver/logo.png|加载为网址。
+|(none)|/data/config.xml|取决于底层的ApplicationContext。
+|===
+
+===  ResourceLoaderAware接口
+ResourceLoaderAware接口是一个特殊的标记接口，用于标识期望通过ResourceLoader引用提供的对象。
+[source,java]
+----
+public interface ResourceLoaderAware {
+
+    void setResourceLoader(ResourceLoader resourceLoader);
+}
+----
+当一个类实现了ResourceLoaderAware并且被部署到一个应用上下文中时（作为一个Spring管理的bean），它被应用上下文识别为ResourceLoaderAware。然后，应用程序上下文将调用setResourceLoader（ResourceLoader），将自身作为参数提供（请记住，Spring中的所有应用程序上下文实现ResourceLoader接口）。
+
+当然，由于ApplicationContext是一个ResourceLoader，bean也可以实现ApplicationContextAware接口并直接使用提供的应用程序上下文来加载资源，但通常情况下，最好使用专用的ResourceLoader接口（如果需要的话）。 该代码只会耦合到资源加载接口，该接口可以被认为是一个实用接口，而不是整个Spring ApplicationContext接口。
+
+从Spring 2.5开始，可以依靠ResourceLoader的自动装配来替代实现ResourceLoaderAware接口。“传统”构造函数和byType自动装配模式（如自动装配协作者中所述）现在可以分别为构造函数参数或setter方法参数提供ResourceLoader类型的依赖关系。 为了获得更大的灵活性（包括自动装配字段和多个参数方法的能力），请考虑使用新的基于注释的自动装配功能。在这种情况下，只要有问题的字段，构造函数或方法携带@Autowired注释，ResourceLoader就会自动装入字段，构造函数参数或方法参数，该参数需要ResourceLoader类型。 有关更多信息，请参阅@Autowired。
+
+===  Resources as dependencies[NO]
+如果bean本身要通过某种动态过程来确定和提供资源路径，那么bean可能有意义使用ResourceLoader接口来加载资源。 考虑加载某种模板的例子，其中需要的特定资源取决于用户的角色。
+什么使注入这些属性变得微不足道的是，所有应用程序上下文都注册并使用一个特殊的JavaBeans PropertyEditor，它可以将String路径转换为Resource对象。因此，如果myBean具有Resource类型的模板属性，则可以使用该资源的简单字符串进行配置，如下所示：
+
+[source,java]
+----
+<bean id="myBean" class="...">
+    <property name="template" value="some/resource/path/myTemplate.txt"/>
+</bean>
+----
+请注意，资源路径没有前缀，因此应用上下文本身将用作ResourceLoader，资源本身将根据上下文的确切类型通过ClassPathResource，FileSystemResource或ServletContextResource（根据需要）加载。
+
+如果需要强制使用特定的资源类型，则可以使用前缀。 以下两个示例显示如何强制ClassPathResource和UrlResource（后者用于访问文件系统文件）。
+----
+<property name="template" value="classpath:some/resource/path/myTemplate.txt">
+----
+----
+<property name="template" value="file:///some/resource/path/myTemplate.txt"/>
+----
+
+===  Application contexts和Resource paths
+====  构建应用程序上下文
+应用程序上下文构造函数（针对特定应用程序上下文类型）通常需要一个字符串或字符串数组作为资源的位置路径，以构成上下文定义的XML文件。
+
+当这样的位置路径没有前缀时，从该路径构建并用于加载bean定义的特定资源类型取决于并适合于特定的应用程序上下文。 例如，如果您按照以下方式创建ClassPathXmlApplicationContext：
+----
+ApplicationContext ctx = new ClassPathXmlApplicationContext("conf/appContext.xml");
+----
+由于将使用ClassPathResource，因此将从类路径加载bean定义。 但是，如果您创建FileSystemXmlApplicationContext，如下所示：
+----
+ApplicationContext ctx =
+    new FileSystemXmlApplicationContext("conf/appContext.xml");
+----
+bean定义将从文件系统位置加载，在这种情况下，相对于当前工作目录。
+请注意，在位置路径中使用特殊类路径前缀或标准URL前缀将覆盖为加载定义而创建的默认类型的资源。 所以这个FileSystemXmlApplicationContext
+----
+ApplicationContext ctx =
+    new FileSystemXmlApplicationContext("classpath:conf/appContext.xml");
+----
+实际上会从类路径中加载它的bean定义。 但是，它仍然是一个FileSystemXmlApplicationContext。 如果随后将其用作ResourceLoader，则任何前缀不固定的路径仍将被视为文件系统路径。
+
+===== 构造ClassPathXmlApplicationContext实例 - 快捷方式
+ClassPathXmlApplicationContext公开了许多构造函数以实现方便的实例化。 其基本思想是只提供一个字符串数组，它只包含XML文件本身的文件名（没有前导路径信息），另一个也提供一个Class; ClassPathXmlApplicationContext将从提供的类中派生路径信息。
+
+有一个例子希望能够说清楚。 考虑一下这样的目录布局：
+----
+com/
+  foo/
+    services.xml
+    daos.xml
+    MessengerService.class
+----
+由'services.xml'和'daos.xml'中定义的bean组成的ClassPathXmlApplicationContext实例可以像这样被实例化
+----
+ApplicationContext ctx = new ClassPathXmlApplicationContext(
+    new String[] {"services.xml", "daos.xml"}, MessengerService.class);
+----
+有关各种构造函数的详细信息，请参阅ClassPathXmlApplicationContext javadocs。
+
+====  应用程序上下文构造器资源路径中的通配符
+
+应用程序上下文构造函数值中的资源路径可能是一个简单的路径（如上所示），它具有到目标资源的一对一映射，或者可以包含特殊的“classpath *：”前缀和/或内部Ant-样式正则表达式（使用Spring的PathMatcher实用程序进行匹配）。 后者都是有效的通配符
+
+此机制的一个用途是在执行组件式应用程序组装时。 所有组件都可以将上下文定义片段“发布”到众所周知的位置路径，并且当最终应用程序上下文使用通过classpath *：前缀的相同路径创建时，所有组件片段将自动被选取。
+
+===== Ant-style风格
+
+当路径位置包含Ant样式时，例如：
+----
+/WEB-INF/*-context.xml
+com/mycompany/**/applicationContext.xml
+file:C:/some/path/*-context.xml
+classpath:com/mycompany/**/applicationContext.xml
+----
+解析器遵循更复杂的过程来尝试解析通配符。 它为直到最后一个非通配符段的路径生成一个资源，并从中获取一个URL。如果此URL不是jar：URL或特定于容器的变体（例如，WebLogic中的zip，WebSphere中的wsjar等），则从中获取java.io.File，并通过遍历文件系统来解析通配符。 在jar URL的情况下，解析器要么从中获取java.net.JarURLConnection，要么手动解析jar URL，然后遍历jar文件的内容来解析通配符。
+
+===== 其他有关通配符的说明
+请注意，除非实际目标文件驻留在文件系统中，否则classpath*:与Ant样式模式结合使用时，只能在模式启动之前至少有一个根目录可靠地工作。这意味着classpath*:*.xml这样的模式可能不会从jar文件的根文件中检索文件，而只能从扩展目录的根文件中检索文件。
+
+Spring检索类路径条目的能力来源于JDK的ClassLoader.getResources（）方法，该方法仅返回传入的空字符串的文件系统位置（指示要搜索的潜在根）。Spring会评估URLClassLoader运行时配置和jar文件中的“java.class.path”清单，但这并不保证会导致可移植行为。
+
+使用classpath:和Ant样式模式：如果要在多个类路径位置中使用要搜索的根包，则无法保证资源能够找到匹配的资源。 这是因为资源如
+----
+com/mycompany/package1/service-context.xml
+----
+可能只在一个位置，但是当一条路径如
+----
+classpath:com/mycompany/**/service-context.xml
+----
+用于尝试解决它，解析器将处理由getResource（“com/mycompany”）;返回的（第一个）URL。如果此基础程序包节点存在于多个类加载程序位置中，则实际的最终资源可能不在其下。因此，最好在这种情况下使用具有相同Ant样式的“classpath *：`”，它将搜索包含根包的所有类路径位置。
+
+====  FileSystemResource附加说明
+
+未附加到FileSystemApplicationContext（即FileSystemApplicationContext不是实际的ResourceLoader）的FileSystemResource将按照您的预期处理绝对路径和相对路径。 相对路径是相对于当前工作目录的，而绝对路径是相对于文件系统的根。
+
+但是，为了向后兼容（历史）原因，当FileSystemApplicationContext是ResourceLoader时会发生变化。FileSystemApplicationContext只是强制所有附加的FileSystemResource实例将所有位置路径视为相对，无论它们是否以一个前导斜杠开始。 实际上，这意味着以下内容是等同的：
+----
+ApplicationContext ctx =
+    new FileSystemXmlApplicationContext("conf/context.xml");
+----
+----
+ApplicationContext ctx =
+    new FileSystemXmlApplicationContext("/conf/context.xml");
+----
+如下所示：（尽管它们有所不同，但一种情况是相对的，另一种是绝对的）。
+----
+FileSystemXmlApplicationContext ctx = ...;
+ctx.getResource("some/resource/path/myTemplate.txt");
+----
+----
+FileSystemXmlApplicationContext ctx = ...;
+ctx.getResource("/some/resource/path/myTemplate.txt");
+----
+在实践中，如果需要真正的绝对文件系统路径，最好放弃使用FileSystemResource/FileSystemXmlApplicationContext的绝对路径，并通过使用file:URL前缀强制使用UrlResource。
+----
+// actual context type doesn't matter, the Resource will always be UrlResource
+ctx.getResource("file:///some/resource/path/myTemplate.txt");
+----
+----
+// force this FileSystemXmlApplicationContext to load its definition via a UrlResource
+ApplicationContext ctx =
+    new FileSystemXmlApplicationContext("file:///conf/context.xml");
+----

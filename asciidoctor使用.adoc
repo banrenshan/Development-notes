@@ -1,0 +1,407 @@
+= asciidoctor笔记
+赵志强；
+:source-highlighter: highlightjs
+:toc: left
+:toclevels: 3
+:icons: font
+:sectanchors: 
+
+== 段落
+
+=== 正常段落
+
+段落在AsciiDoc中不需要任何特殊的标记。
+段落只是一行或多行连续文本。
+
+要开始一个新段落，请至少将其分隔一行。
+
+=== 换行
+
+加号在行尾强制换行 +
+这是新的一行
+
+[%hardbreaks]
+这是强制换行指令
+这是新的一行
+
+加上空行之后
+就退出了强制换行
+
+=== 段落缩进
+
+尊敬的领导：
+
+	你好，今天我要请假，可以吗？（缩进的段落会有背景底色）
+
+== 警告
+
+TIP: 这是提示...
+
+IMPORTANT: 这很重要...
+
+WARNING: 这是警告...
+
+CAUTION: 请确认...
+
+
+[NOTE]
+====
+多行的警告框.
+
+.A list
+- one
+- two
+- three
+Another paragraph.
+====
+
+
+== 领导段落
+[.lead]
+领导段落，字体会被放大
+
+这个字体是不是比领导段落小点啊
+
+[[format]]
+== 格式化文本
+
+_italic phrase_
+
+__i__talic le__tt__ers
+
+*bold phrase*
+
+**b**old le**tt**ers
+
+*_bold italic phrase_*
+
+**__b__**old italic le**__tt__**ers
+
+`monospace phrase` and le``tt``ers
+
+`_monospace italic phrase_` and le``__tt__``ers
+
+`*monospace bold phrase*` and le``**tt**``ers
+
+`*_monospace bold italic phrase_*` and le``**__tt__**``ers
+
+Werewolves are #allergic to cinnamon#.
+
+Do werewolves believe in [small]#small print#?
+
+[big]##O##nce upon an infinite loop.
+
+^super^script phrase
+
+~sub~script phrase
+
+'`single curved quotes`'
+
+"`double curved quotes`"
+
+Olaf's desk was a mess.
+
+All of the werewolves`' desks were a mess.
+
+Olaf had been with the company since the `'60s.
+
+== 分割线
+
+上面
+
+'''
+
+下面
+
+== 分页符
+
+<<<
+
+== 列表
+
+* Edgar Allen Poe
+* Sheri S. Tepper
+* Bill Bryson
+
+'''
+
+* level 1
+** level 2
+*** level 3
+**** level 4
+***** level 5
+* level 1
+
+'''
+
+- [*] checked
+- [x] also checked
+- [ ] not checked
+- normal list item
+
+'''
+
+. Step 1
+. Step 2
+. Step 3
+
+'''
+
+
+. Step 1
+. Step 2
+.. Step 2a
+.. Step 2b
+. Step 3
+
+'''
+
+
+. level 1
+.. level 2
+... level 3
+.... level 4
+..... level 5
+. level 1
+
+'''
+
+
+first term:: definition of first term
+section term:: definition of second term
+
+'''
+
+
+first term::
+definition of first term
+section term::
+definition of second term
+
+
+'''
+
+[qanda]
+What is Asciidoctor?::
+ An implementation of the AsciiDoc processor in Ruby.
+What is the answer to the Ultimate Question?:: 42
+
+
+'''
+
+Operating Systems::
+ Linux:::
+ . Fedora
+ * Desktop
+ . Ubuntu
+ * Desktop
+ * Server
+ BSD:::
+ . FreeBSD
+ . NetBSD
+Cloud Providers::
+ PaaS:::
+ . OpenShift
+ . CloudBees
+ IaaS:::
+ . Amazon EC2
+ . Rackspace
+
+== 超链接
+
+*外部链接*
+
+http://asciidoctor.org - automatic!
+
+http://asciidoctor.org[Asciidoctor]
+
+https://github.com/asciidoctor[Asciidoctor @ *GitHub*]
+
+'''
+
+*内部链接*
+
+link:index.html[Docs]
+
+== 锚点
+
+[[bookmark-a]]这是一个锚点，别人可以跳转到这里
+
+anchor:bookmark-b[]这是一个锚点，别人可以跳转到这里
+
+== 引用
+
+<<_列表>>跳转到列表部分,列表是标题
+
+<<format,格式化文本>>跳转到格式化文本，格式化文本地方有锚点
+
+== 图片
+
+参考原始文档
+
+== 代码块
+
+....
+这是一个简单的代码块，输出文本和输入文本完全一致
+....
+
+
+.代码块标题
+----
+这是一个带标题的代码块
+----
+
+[source,ruby]
+.语法高亮的代码块
+----
+require 'sinatra'
+get '/hi' do
+ "Hel
+----
+
+[source,ruby]
+----
+require 'sinatra' // <1>
+get '/hi' do // <2>
+ "Hello World!" // <3>
+end
+----
+<1> Library import
+<2> URL mapping
+<3> Content for response
+
+[source,xml]
+----
+<section>
+ <title>Section Title</title> <!--1-->
+</section>
+----
+<1> The section title is required.
+
+
+== 边框
+
+.边框
+****
+这是一个带边框的代码块
+****
+
+== 大段引用
+
+[quote, Abraham Lincoln, Soldiers' National Cemetery Dedication]
+____
+Four score and seven years ago our fathers brought forth
+on this continent a new nation...
+____
+[quote, Albert Einstein]
+A person who never made a mistake never tried anything new.
+____
+A person who never made a mistake never tried anything new.
+____
+
+"I hold it that a little rebellion now and then is a good thing,
+and as necessary in the political world as storms in the physical."
+-- Thomas Jefferson, Papers of Thomas Jefferson: Volume 11
+
+[, Richard M. Nixon]
+""
+When the President does it, that means that it's not illegal.
+""
+
+== 表格
+
+.带标题的表格
+|===
+|Name of Column 1 |Name of Column 2 |Name of Column 3 
+
+|Cell in column 1, row 1
+|Cell in column 2, row 1
+|Cell in column 3, row 1
+
+|Cell in column 1, row 2
+|Cell in column 2, row 2
+|Cell in column 3, row 2
+|===
+
+*设定等宽的表格*
+
+[%header,cols=2*] 
+|===
+|Name of Column 1
+|Name of Column 2
+
+|Cell in column 1, row 1
+|Cell in column 2, row 1
+
+|Cell in column 1, row 2
+|Cell in column 2, row 2
+|===
+
+*带标题行的表格*
+[cols="1,1,2", options="header"] 
+.Applications
+|===
+|Name
+|Category
+|Description
+
+|Firefox
+|Browser
+|Mozilla Firefox is an open-source web browser.
+It's designed for standards compliance,
+performance, portability.
+
+|Arquillian
+|Testing
+|An innovative and highly extensible testing platform.
+Empowers developers to easily create real, automated tests.
+|===
+
+
+*宽度不等的表格*
+[cols="2,2,5a"]
+|===
+|Firefox
+|Browser
+|Mozilla Firefox is an open-source web browser.
+
+It's designed for:
+
+* standards compliance
+* performance
+* portability
+
+http://getfirefox.com[Get Firefox]!
+|===
+
+*合并单元格*
+[cols="e,m,^,>s", width="25%"]
+|===
+|1 >s|2 |3 |4
+^|5 2.2+^.^|6 .3+<.>m|7
+^|8
+|9 2+>|10
+|===
+
+== 脚注
+
+A statement.footnote:[Clarification about this statement.]
+
+A bold statement.footnoteref:[disclaimer,Opinions are my own.]
+
+Another bold statement.footnoteref:[disclaimer]
+
+
+== 有用的文档属性
+
+|===
+
+|属性名称|属性值|说明
+|source-highlighter|highlightjs|设置代码高亮
+|toc|left,right,auto|索引列表显示位置
+|toclevels|数字|索引列表显示的标题登记
+|icons|font|显示小图标，例如警告框上的图标
+|source-linenums-option|空|代码块显示行号
+|toc-title||索引标题的名称
+|===
+

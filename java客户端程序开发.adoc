@@ -1,0 +1,92 @@
+= java客户端程序开发
+
+:toc: left
+:icons: font
+:imagesdir: ../images
+
+
+== 系统托盘的实现
+
+[source,java]
+----
+
+	private void enableTray(final Stage stage) {
+
+		// 定义弹出菜单
+		PopupMenu popupMenu = new PopupMenu();
+		java.awt.MenuItem openItem = new java.awt.MenuItem("显示");
+		java.awt.MenuItem hideItem = new java.awt.MenuItem("最小化");
+		java.awt.MenuItem quitItem = new java.awt.MenuItem("退出");
+		popupMenu.add(openItem);
+		popupMenu.add(hideItem);
+		popupMenu.add(quitItem);
+		
+		
+		SystemTray tray = SystemTray.getSystemTray(); //1.获取系统托盘
+		BufferedImage image = ImageIO.read(this.getClass().getResourceAsStream("trayicon.png"));
+		trayIcon = new TrayIcon(image, "show tray", popupMenu); //2.创建应用托盘
+		tray.add(trayIcon); //3.添加应用到系统托盘中
+		
+		//下面是给托盘添加相应的事件
+		trayIcon.addMouseListener(sj); 
+		openItem.addActionListener(acl);
+		quitItem.addActionListener(acl);
+		hideItem.addActionListener(acl);
+
+	}
+
+}
+
+----
+
+https://blog.csdn.net/u010061897/article/details/13292247?ABstrategy=codes_snippets_optimize_v3[参考]
+
+==  打包java程序为exe(idea)
+
+Project Structure -> Artifacts -> 点击 `+` 号选择 `JavaFx Apllication` 下的 `from module XXX`,然后修改下面的内容
+
+image::20180203163330333.png[] 
+
+
+然后选择 build -> build Artifacts -> rebuild . 然后打开下图的目录,查看生成的信息:
+
+image::20180203163555169.png[]
+
+此时生成的exe并不是安装版本的exe(双击exe直接运行程序),而是解压后的程序,我们需要Inno Setup打包这个目录
+
+image::20181207172828.png[]
+
+image::20181207172958.png[]
+
+image::20181207173025.png[]
+注意,不要出现中文
+
+image::20181207173126.png[]
+选择exe安装时候,选择的默认路径
+
+image::20181207173202.png[]
+这一步比较重要,上一排选择可执行的exe文件,就是上面javafx生成的exe,下一排把除exe之外的所有的目录以及文件添加上,注意保持这些文件和exe的层级关系
+
+剩下的只需要下一步就好了.
+
+== spring boot和javafx使用
+
+1.maven引入
+[source,xml]
+----
+        <dependency>
+            <groupId>de.roskenet</groupId>
+            <artifactId>springboot-javafx-support</artifactId>
+            <version>2.1.6</version>
+        </dependency>
+
+         <plugin>
+                <groupId>com.zenjava</groupId>
+                <artifactId>javafx-maven-plugin</artifactId>
+                <version>8.8.3</version>
+                <configuration>
+                    <mainClass>cn.zhao.FileserverApplication</mainClass>
+                    <vendor>Spartajet</vendor>
+                </configuration>
+         </plugin>
+----

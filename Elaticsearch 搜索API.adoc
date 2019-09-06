@@ -1,0 +1,1247 @@
+= Elaticsearch 搜索API
+
+Elaticsearch关于搜索的API大多数支持多索引操作,除了 Explian API.
+
+**路由**
+当执行搜索时,该命令会被传递到所有索引分片上.要想将该命令指定特定分片上,可以指定routing url参数.例如创建下面文档:
+[source,shell]
+----
+POST /twitter/_doc?routing=kimchy
+{
+    "user" : "kimchy",
+    "postDate" : "2009-11-15T14:12:12",
+    "message" : "trying out Elasticsearch"
+}
+----
+
+如果我们想搜索特定的user,我们可以指定路由,只有相关的分片会执行搜索命令:
+[source,shell]
+----
+POST /twitter/_search?routing=kimchy
+{
+    "query": {
+        "bool" : {
+            "must" : {
+                "query_string" : {
+                    "query" : "some query string here"
+                }
+            },
+            "filter" : {
+                "term" : { "user" : "kimchy" }
+            }
+        }
+    }
+}
+----
+routing参数值可以是逗号分隔的多个值,这会将命令转发到匹配的分片上.
+
+**副本选择**
+作为以循环方式发送到数据副本的替代方法，您可以启用副本选择。这允许协调节点根据许多标准将请求发送到被认为“最佳”的副本上：
+
+. 协调节点和包括相关数据副本之间的请求链接时间.
+. 在包含相关数据的副本节点的执行搜索的时间.
+. 包含数据的节点上的搜索线程池的队列大小.
+
+可以通过将动态集群设置cluster.routing.use_adaptive_replica_selection从false更改为true来启用此功能：
+[source,shell]
+----
+PUT /_cluster/settings
+{
+    "transient": {
+        "cluster.routing.use_adaptive_replica_selection": true
+    }
+}
+----
+
+**统计组**
+搜索可以与统计组相关联，统计组维护每个组的统计聚合。稍后可以使用indices stats API专门检索它。例如，这是一个搜索正文请求，它将请求与两个不同的组相关联：
+[source,shell]
+----
+POST /_search
+{
+    "query" : {
+        "match_all" : {}
+    },
+    "stats" : ["group1", "group2"]
+}
+----
+
+**全局搜索超时时间**
+
+作为请求正文搜索的一部分，单个搜索可能会超时。 由于搜索请求可以源自许多源，因此Elasticsearch具有全局搜索超时的动态集群级设置，该设置适用于未在请求正文中设置超时的所有搜索请求。这些请求将在指定时间后使用Search Cancellation中的下一节中描述的机制取消。因此，关于超时响应的相同警告适用。
+
+设置键为search.default_search_timeout，可以使用“群集更新设置”端点进行设置。 默认值为无全局超时。将此值设置为-1会将全局搜索超时重置为无超时。
+
+**搜索取消**
+可以使用标准任务取消机制取消搜索。 默认情况下，正在运行的搜索仅检查它是否在段边界上被取消，因此取消可能会被大段延迟。 通过将动态集群级别设置search.low_level_cancellation设置为true，可以提高搜索取消响应性。但是，它带来了更频繁的取消检查的额外开销，这在大型快速运行的搜索查询中是显而易见的。更改此设置仅影响更改后开始的搜索。
+
+**搜索并发性和并行性**
+默认情况下，Elasticsearch不会根据请求命中的分片数拒绝任何搜索请求。 虽然Elasticsearch将优化协调节点上的搜索执行，但大量分片会对CPU和内存产生重大影响。以这样的方式组织数据通常是一个更好的主意，即更少的大分片。 如果您要配置软限制，可以更新action.search.shard_count.limit群集设置，以拒绝搜索过多分片的搜索请求。
+
+请求参数max_concurrent_shard_requests可用于控制搜索API将为请求执行的最大并发分片请求数。 此参数应用于保护单个请求不会使群集过载（例如，默认请求将命中群集中的所有索引，如果每个节点的分片数量很高，则可能导致分片请求被拒绝）。此默认值基于群集中的数据节点数，但最多为256个。
+
+
+== 搜索
+
+搜索API允许您执行搜索查询并返回与查询匹配的搜索结果。可以使用简单的查询字符串作为参数或使用请求主体来提供查询。
+
+所有搜索API都可以跨多个索引应用，并支持多索引语法。例如，我们可以搜索twitter索引中的所有文档：
+[source,shell]
+----
+GET /twitter/_search?q=user:kimchy
+----
+
+我们还可以跨多个索引搜索具有特定tag的所有文档（例如，当每个user有一个索引时）：
+[source,shell]
+----
+GET /kimchy,elasticsearch/_search?q=tag:wow
+----
+
+或者我们可以使用_all搜索所有可用的索引：
+[source,shell]
+----
+GET /_all/_search?q=tag:wow
+----
+
+== URI搜索
+
+可以通过提供请求参数纯粹使用URI来执行搜索请求。 使用此模式执行搜索时，并非所有搜索选项都会暴露，但它可以方便快速“curl test”。 这是一个例子：
+[source,shell]
+----
+GET twitter/_search?q=user:kimchy
+----
+下面是响应结果:
+[source,json]
+----
+{
+    "timed_out": false,
+    "took": 62,
+    "_shards":{
+        "total" : 1,
+        "successful" : 1,
+        "skipped" : 0,
+        "failed" : 0
+    },
+    "hits":{
+        "total" : 1,
+        "max_score": 1.3862944,
+        "hits" : [
+            {
+                "_index" : "twitter",
+                "_type" : "_doc",
+                "_id" : "0",
+                "_score": 1.3862944,
+                "_source" : {
+                    "user" : "kimchy",
+                    "date" : "2009-11-15T14:12:12",
+                    "message" : "trying out Elasticsearch",
+                    "likes": 0
+                }
+            }
+        ]
+    }
+}
+----
+
+uri中的请求参数包括:
+
+|===
+|q|查询字符串(映射到query_string查询)
+|df|在查询中未定义field前缀时使用的默认field。
+|analyzer|查询时使用的分词器
+|analyze_wildcard|是否应解析通配符和前缀查询。默认false
+|batched_reduce_size|应在协调节点上减少的分片结果数。 如果请求中潜在的分片数量很大，则应将此值用作保护机制，以减少每个搜索请求的内存开销。
+|default_operator|默认被应用的操作,可以是and和or(默认)
+|lenient|如果设置为true将导致忽略基于格式的失败（如向数字字段提供文本）。 默认为false。
+|explain|对于每个命中，包含如何计算命中得分的解释。
+|_source|设置为false以禁用_source字段的检索。 您还可以使用_source_includes＆_source_excludes检索部分文档（有关详细信息，请参阅请求正文文档）
+|stored_fields|每个匹配的文档的选择性存储字段，逗号分隔。 不指定任何值将导致不返回任何字段。
+|sort|排序执行。 可以是fieldName或fieldName:asc/fieldName:desc的形式。 fieldName可以是文档中的实际字段，也可以是特殊的_score名称，表示基于分数的排序。可以有几个排序参数（顺序很重要）。
+|track_scores|排序时，设置为true以便仍然跟踪分数并将其作为每个匹配的一部分返回。
+|track_total_hits|设置为false以禁用跟踪与查询匹配的匹配总数。 （有关详细信息，请参阅索引排序）。 默认为true。
+|timeout|搜索超时，将搜索请求限制在指定的时间值内执行， 默认为无超时。
+|terminate_after|在达到查询执行将提前终止时，为每个分片收集的最大文档数。 如果设置，响应将有一个boolean字段terminate_early以指示查询执行是否实际终止了。 默认为no terminate_after。
+|from|从命中的索引开始返回。 默认为0。
+|to|要返回的命中数。 默认为10。
+|search_type|要执行的搜索操作的类型。可以是dfs_query_then_fetch或query_then_fetch。 默认为query_then_fetch。有关可以执行的不同搜索类型的更多详细信息，请参阅搜索类型。
+|allow_partial_search_results|如果请求将产生部分结果，则设置为false以返回整体故障。默认为true，这将在超时或部分失败的情况下允许部分结果。 可以使用集群级别设置search.default_allow_partial_results来控制此默认值。
+|===
+
+== 请求体搜索
+
+搜索请求可以在其主体内使用搜索DSL来执行。 这是一个例子：
+[source,shell]
+----
+GET /twitter/_search
+{
+    "query" : {
+        "term" : { "user" : "kimchy" }
+    }
+}
+----
+
+NOTE: terminate_after始终在post_filter之后应用，并在分片上收集到足够的命中时停止查询以及聚合执行。 虽然聚合的文档计数可能不会反映响应中的hits.total，因为聚合是在后过滤之前应用的。
+
+如果我们只想知道是否有任何与特定查询匹配的文档，我们可以将大小设置为0以表示我们对搜索结果不感兴趣。 此外，我们可以将terminate_after设置为1，以指示只要找到第一个匹配的文档（每个分片），就可以终止查询执行。
+[source,shell]
+----
+GET /_search?q=message:number&size=0&terminate_after=1
+----
+
+响应将不包含任何匹配，因为大小设置为0. hits.total将等于0，表示没有匹配的文档，或大于0意味着至少有与查询匹配的文档数量 。 此外，如果查询提前终止，则terminate_early标志将在响应中设置为true。
+[source,json]
+----
+{
+  "took": 3,
+  "timed_out": false,
+  "terminated_early": true,
+  "_shards": {
+    "total": 1,
+    "successful": 1,
+    "skipped" : 0,
+    "failed": 0
+  },
+  "hits": {
+    "total": 1,
+    "max_score": 0.0,
+    "hits": []
+  }
+}
+----
+
+响应中的took包含此请求处理所需的毫秒数，在节点收到查询后快速开始，直到完成所有与搜索相关的工作并且在将上述JSON返回给客户端之前。 这意味着它包括在线程池中等待的时间，在整个集群中执行分布式搜索以及收集所有结果。
+
+**from/size**
+可以使用from和size参数完成结果的分页。from参数定义要获取的第一个结果的偏移量。size参数允许您配置要返回的最大命中数。
+[source,shell]
+----
+GET /_search
+{
+    "from" : 0, "size" : 10,
+    "query" : {
+        "term" : { "user" : "kimchy" }
+    }
+}
+----
+
+**sort**
+
+允许您在特定字段上添加一个或多个排序。 每种类型也可以反序。 排序是在每个字段级别定义的，_score的特殊字段名称按分数排序，_doc按索引顺序排序。
+假如有下面索引:
+[source,shell]
+----
+PUT /my_index
+{
+    "mappings": {
+        "_doc": {
+            "properties": {
+                "post_date": { "type": "date" },
+                "user": {
+                    "type": "keyword"
+                },
+                "name": {
+                    "type": "keyword"
+                },
+                "age": { "type": "integer" }
+            }
+        }
+    }
+}
+----
+可以按照下面的方式排序:
+[source,shell]
+----
+GET /my_index/_search
+{
+    "sort" : [
+        { "post_date" : {"order" : "asc"}},
+        "user",
+        { "name" : "desc" },
+        { "age" : "desc" },
+        "_score"
+    ],
+    "query" : {
+        "term" : { "user" : "kimchy" }
+    }
+}
+----
+
+**排序模式选项**
+Elasticsearch支持按数组或多值字段进行排序。mode选项控制选择哪个数组值以对其所属的文档进行排序。mode选项可以具有以下值：
+|===
+|min|选取最小值
+|max|选取最大值
+|sum|选取所有值的和,仅适用于基于数字的数组字段
+|avg|选取所有值的平均值,仅适用于基于数字的数组字段
+|media|选取所有值的中位数,仅适用于基于数字的数组字段
+|===
+
+下面的实例中,price字段有多个值,然后根据平均值进行排序:
+[source,shell]
+----
+PUT /my_index/_doc/1?refresh
+{
+   "product": "chocolate",
+   "price": [20, 4]
+}
+
+POST /_search
+{
+   "query" : {
+      "term" : { "product" : "chocolate" }
+   },
+   "sort" : [
+      {"price" : {"order" : "asc", "mode" : "avg"}}
+   ]
+}
+----
+
+**嵌套字段排序**
+Elasticsearch还支持按一个或多个嵌套对象内的字段进行排序。 嵌套字段支持的排序具有嵌套排序选项，具有以下属性：
+. path:定义哪个嵌套对象排序.实际的排序字段必须是此嵌套对象中的直接字段。 按嵌套字段排序时，此字段是必填字段。
+. filter:嵌套路径内的内部对象应匹配的过滤器，以便通过其字段排序。常见的情况是在嵌套过滤器或查询中重复查询/过滤。默认情况下，没有nested_filter处于活动状态。
+. max_children:选择排序值时每个根文档要考虑的最大子项数。 默认为无限制。
+. nested:与顶级嵌套相同，但适用于当前嵌套对象中的另一个嵌套路径。
+
+下面的例子中,offer是嵌套属性,path需要被指定,否则Elasticsearch不知道需要捕获哪些嵌套级别排序值:
+[source,shell]
+----
+POST /_search
+{
+   "query" : {
+      "term" : { "product" : "chocolate" }
+   },
+   "sort" : [
+       {
+          "offer.price" : {
+             "mode" :  "avg",
+             "order" : "asc",
+             "nested": {
+                "path": "offer",
+                "filter": {
+                   "term" : { "offer.color" : "blue" }
+                }
+             }
+          }
+       }
+    ]
+}
+----
+
+在下面的例子中,parent和child字段是nested.nested_path需要被指定:
+[source,shell]
+----
+POST /_search
+{
+   "query": {
+      "nested": {
+         "path": "parent",
+         "query": {
+            "bool": {
+                "must": {"range": {"parent.age": {"gte": 21}}},
+                "filter": {
+                    "nested": {
+                        "path": "parent.child",
+                        "query": {"match": {"parent.child.name": "matt"}}
+                    }
+                }
+            }
+         }
+      }
+   },
+   "sort" : [
+      {
+         "parent.child.age" : {
+            "mode" :  "min",
+            "order" : "asc",
+            "nested": {
+               "path": "parent",
+               "filter": {
+                  "range": {"parent.age": {"gte": 21}}
+               },
+               "nested": {
+                  "path": "parent.child",
+                  "filter": {
+                     "match": {"parent.child.name": "matt"}
+                  }
+               }
+            }
+         }
+      }
+   ]
+}
+----
+
+缺少的参数指定应如何处理缺少排序字段的文档：缺失值可以设置为_last，_first或自定义值（将用于缺少的文档作为排序值）。 默认为_last。
+[source,shell]
+----
+GET /_search
+{
+    "sort" : [
+        { "price" : {"missing" : "_last"} }
+    ],
+    "query" : {
+        "term" : { "product" : "chocolate" }
+    }
+}
+----
+
+默认情况下，如果没有与字段关联的映射，搜索请求将失败。unmapped_type选项允许您忽略没有映射但不按其排序的字段。此参数的值用于确定要发出的排序值。 以下是如何使用它的示例：
+[source,shell]
+----
+GET /_search
+{
+    "sort" : [
+        { "price" : {"unmapped_type" : "long"} }
+    ],
+    "query" : {
+        "term" : { "product" : "chocolate" }
+    }
+}
+----
+
+如果查询的任何索引没有价格映射，那么Elasticsearch将处理它，好像存在long类型的映射，此索引中的所有文档都没有该字段的值。
+
+**基于脚本的排序**
+[source,shell]
+----
+GET /_search
+{
+    "query" : {
+        "term" : { "user" : "kimchy" }
+    },
+    "sort" : {
+        "_script" : {
+            "type" : "number",
+            "script" : {
+                "lang": "painless",
+                "source": "doc['field_name'].value * params.factor",
+                "params" : {
+                    "factor" : 1.1
+                }
+            },
+            "order" : "asc"
+        }
+    }
+}
+----
+
+在字段上排序时，不计算分数。通过将track_scores设置为true，仍将计算和跟踪分数。
+[source,shell]
+----
+GET /_search
+{
+    "track_scores": true,
+    "sort" : [
+        { "post_date" : {"order" : "desc"} },
+        { "name" : "desc" },
+        { "age" : "desc" }
+    ],
+    "query" : {
+        "term" : { "user" : "kimchy" }
+    }
+}
+----
+排序时，相关的排序字段值将加载到内存中。这意味着每个分片应该有足够的内存来包含它们。对于基于字符串的类型，不应分析/标记化排序的字段。对于数字类型，如果可能，建议将类型显式设置为较窄的类型（如short，integer和float）。
+
+== source filtering
+
+默认情况下,返回_source的全部内容,除非你执行stored_feilds参数或者禁用_source.
+下面的列子禁用_source:
+[source,shell]
+----
+GET /_search
+{
+    "_source": false,
+    "query" : {
+        "term" : { "user" : "kimchy" }
+    }
+}
+----
+
+_source还接受一个或多个通配符模式来控制应该返回_source的哪些部分：
+[source,shell]
+----
+GET /_search
+{
+    "_source": "obj.*",
+    "query" : {
+        "term" : { "user" : "kimchy" }
+    }
+}
+----
+[source,shell]
+----
+GET /_search
+{
+    "_source": [ "obj1.*", "obj2.*" ],
+    "query" : {
+        "term" : { "user" : "kimchy" }
+    }
+}
+----
+最后，为了完全控制，您可以指定包含和排除模式：
+[source,shell]
+----
+GET /_search
+{
+    "_source": {
+        "includes": [ "obj1.*", "obj2.*" ],
+        "excludes": [ "*.description" ]
+    },
+    "query" : {
+        "term" : { "user" : "kimchy" }
+    }
+}
+----
+
+== feilds
+
+允许为搜索匹配所代表的每个文档选择性地加载特定的存储字段。
+[source,shell]
+----
+GET /_search
+{
+    "stored_fields" : ["user", "postDate"],
+    "query" : {
+        "term" : { "user" : "kimchy" }
+    }
+}
+----
+空数组将仅返回每个匹配的_id和_type，例如：
+[source,shell]
+----
+GET /_search
+{
+    "stored_fields" : [],
+    "query" : {
+        "term" : { "user" : "kimchy" }
+    }
+}
+----
+如果请求的字段没有被store,将被忽略.
+
+从文档本身获取的存储字段值始终作为数组返回。相反，像_routing这样的元数据字段永远不会作为数组返回。
+
+此外，只能通过字段选项返回叶字段。因此无法返回对象字段，此类请求将失败。
+
+脚本字段也可以自动检测并用作字段，因此可以使用_source.obj1.field1之类的内容，但不推荐使用，因为obj1.field1也可以使用。
+
+禁用stored字段
+[source,shell]
+----
+GET /_search
+{
+    "stored_fields": "_none_",
+    "query" : {
+        "term" : { "user" : "kimchy" }
+    }
+}
+----
+
+== Script Fields
+允许给返回的字段应用脚本:
+[source,shell]
+----
+GET /_search
+{
+    "query" : {
+        "match_all": {}
+    },
+    "script_fields" : {
+        "test1" : {
+            "script" : {
+                "lang": "painless",
+                "source": "doc['price'].value * 2"
+            }
+        },
+        "test2" : {
+            "script" : {
+                "lang": "painless",
+                "source": "doc['price'].value * params.factor",
+                "params" : {
+                    "factor"  : 2.0
+                }
+            }
+        }
+    }
+}
+----
+脚本字段可以处理未存储的字段（在上述情况下为my_field_name），并允许返回要返回的自定义值（脚本的评估值）。
+
+脚本字段还可以访问实际的_source文档，并使用params ['_ source']提取要从中返回的特定元素。 这是一个例子：
+[source,shell]
+----
+GET /_search
+    {
+        "query" : {
+            "match_all": {}
+        },
+        "script_fields" : {
+            "test1" : {
+                "script" : "params['_source']['message']"
+            }
+        }
+    }
+----
+
+理解doc['my_field'].value和params['_ source']['my_field']之间的区别非常重要。 第一个，使用doc关键字，将导致该字段的术语被加载到内存（缓存），这将导致更快的执行，但更多的内存消耗。 此外，doc [...]符号仅允许简单的值字段（您不能从中返回json对象），并且仅对非分析或基于单个术语的字段有意义。 但是，如果可能的话，使用doc仍然是从文档中访问值的推荐方法，因为每次使用时都必须加载和解析_source。 使用_source非常慢。
+
+==  doc value Field
+允许返回doc value代表的字段:
+[source,shell]
+----
+GET /_search
+{
+    "query" : {
+        "match_all": {}
+    },
+    "docvalue_fields" : [
+        {
+            "field": "my_ip_field", <1>
+            "format": "use_field_mapping" <2> 
+        },
+        {
+            "field": "my_date_field",
+            "format": "epoch_millis"  <3>
+        }
+    ]
+}
+----
+<1> feild的名称
+<2> 特殊的use_field_mapping格式告诉Elasticsearch使用映射中的格式
+<3> 日期字段可以使用自定义格式
+
+可以使用通配符:
+[source,shell]
+----
+GET /_search
+{
+    "query" : {
+        "match_all": {}
+    },
+    "docvalue_fields" : [
+        {
+            "field": "*field", 
+            "format": "use_field_mapping" 
+        }
+    ]
+}
+----
+
+== post filter
+
+在已经计算了聚合之后，post_filter将应用于搜索请求最后的搜索命中。 其目的最好用例子解释：
+想象一下，你正在销售具有以下特性的衬衫：
+[source,shell]
+----
+PUT /shirts
+{
+    "mappings": {
+        "_doc": {
+            "properties": {
+                "brand": { "type": "keyword"},
+                "color": { "type": "keyword"},
+                "model": { "type": "keyword"}
+            }
+        }
+    }
+}
+
+PUT /shirts/_doc/1?refresh
+{
+    "brand": "gucci",
+    "color": "red",
+    "model": "slim"
+}
+----
+
+想象一下，用户指定了两个过滤器：color:red和brand:gucci,你只想在搜索结果中向他们展示Gucci制作的红色衬衫。通常你会用bool查询执行此操作：
+[source,shell]
+----
+GET /shirts/_search
+{
+  "query": {
+    "bool": {
+      "filter": [
+        { "term": { "color": "red"   }},
+        { "term": { "brand": "gucci" }}
+      ]
+    }
+  }
+}
+----
+但是，您还希望使用分面导航来显示用户可以单击的其他选项列表。 也许你有一个model字段，允许用户将他们的搜索结果限制为red Gucci t-shirts 或 dress-shirts.
+[source,shell]
+----
+GET /shirts/_search
+{
+  "query": {
+    "bool": {
+      "filter": [
+        { "term": { "color": "red"   }},
+        { "term": { "brand": "gucci" }}
+      ]
+    }
+  },
+  "aggs": {
+    "models": {
+      "terms": { "field": "model" } <1>
+    }
+  }
+}
+----
+
+<1> 返回Gucci最受欢迎的红色衬衫款式
+
+但也许您还想告诉用户其他颜色有多少Gucci衬衫可供选择。 如果您只是在颜色字段上添加术语聚合，则只会返回红色，因为您的查询仅返回Gucci的红色衬衫。
+
+相反，您希望在聚合期间包含所有颜色的衬衫，然后仅将颜色过滤器应用于搜索结果。 这是post_filter的目的：
+[source,shell]
+----
+GET /shirts/_search
+{
+  "query": {
+    "bool": {
+      "filter": {
+        "term": { "brand": "gucci" }  <1>
+      }
+    }
+  },
+  "aggs": {
+    "colors": {
+      "terms": { "field": "color" } <2>
+    },
+    "color_red": {
+      "filter": {
+        "term": { "color": "red" }  <3>
+      },
+      "aggs": {
+        "models": {
+          "terms": { "field": "model" }  <4>
+        }
+      }
+    }
+  },
+  "post_filter": {  <5>
+    "term": { "color": "red" }
+  }
+}
+----
+
+<1> 发现gucci的衬衫,不管颜色
+<2> 返回gucci流行的颜色
+<3> color_red agg将模型子聚合限制为红色Gucci衬衫。
+<4> 
+<5> 最后，post_filter从搜索匹配中删除红色以外的颜色。
+
+== 高亮
+
+== 再评分
+
+再评分通过对query和post_filter阶段筛选的靠前的文档进行再评分,提高查询精度,使用二次算法避免了对索引的所有文档评分.
+
+在每个分片返回其结果之前，对每个分片执行rescore请求，以由处理整个搜索请求的节点进行排序。
+
+目前，rescore API只有一个实现：查询rescorer，它使用查询来调整评分。 将来，可以提供替代的重组，例如，成对的rescorer。
+
+查询rescorer仅对查询和post_filter阶段返回的Top-K结果执行第二个查询。 可以通过window_size参数控制每个分片上将检查的文档数，默认为10。
+
+默认情况下，原始查询和rescore查询的分数线性组合，以生成每个文档的最终_score。 可以分别使用query_weight和rescore_query_weight来控制原始查询和rescore查询的相对重要性。 两者都默认为1。
+[source,shell]
+----
+POST /_search
+{
+   "query" : {
+      "match" : {
+         "message" : {
+            "operator" : "or",
+            "query" : "the quick brown"
+         }
+      }
+   },
+   "rescore" : {
+      "window_size" : 50,
+      "query" : {
+         "rescore_query" : {
+            "match_phrase" : {
+               "message" : {
+                  "query" : "the quick brown",
+                  "slop" : 2
+               }
+            }
+         },
+         "query_weight" : 0.7,
+         "rescore_query_weight" : 1.2
+      }
+   }
+}
+----
+
+可以使用score_mode控制分数组合的方式：
+
+|===
+|total|累加原始分数和rescore查询分数。 默认。
+|multiply|将原始分数乘以rescore查询分数。对函数查询重新分析很有用。
+|avg|平均原始分数和rescore查询分数。
+|max|取最大原始分数和rescore查询分数。
+|min|取最小原始分数和rescore查询分数。
+|===
+
+也可以按顺序执行多个rescore：
+[source,shell]
+----
+POST /_search
+{
+   "query" : {
+      "match" : {
+         "message" : {
+            "operator" : "or",
+            "query" : "the quick brown"
+         }
+      }
+   },
+   "rescore" : [ {
+      "window_size" : 100,
+      "query" : {
+         "rescore_query" : {
+            "match_phrase" : {
+               "message" : {
+                  "query" : "the quick brown",
+                  "slop" : 2
+               }
+            }
+         },
+         "query_weight" : 0.7,
+         "rescore_query_weight" : 1.2
+      }
+   }, {
+      "window_size" : 10,
+      "query" : {
+         "score_mode": "multiply",
+         "rescore_query" : {
+            "function_score" : {
+               "script_score": {
+                  "script": {
+                    "source": "Math.log10(doc.likes.value + 2)"
+                  }
+               }
+            }
+         }
+      }
+   } ]
+}
+
+----
+
+第一个得到查询的结果，然后第二个得到第一个的结果，等等。第二个rescore将“看到”第一个rescore完成的排序，所以可以在第一个rescore上使用一个大窗口 将文档拉入第二个rescore的较小窗口。
+
+== 搜索类型
+执行分布式搜索时可以执行不同的执行路径。需要将分布式搜索操作分散到所有相关分片，然后收集所有结果。在执行分散/聚集类型执行时，有几种方法可以执行此操作，特别是使用搜索引擎。
+
+执行分布式搜索时的一个问题是从每个分片中检索多少结果。 例如，如果我们有10个分片，则第一个分片可能会保存从0到10的最相关结果，其他分片结果排在其下方。 因此，在执行请求时，我们需要从所有分片中获取0到10的结果，对它们进行排序，然后如果我们想要确保正确的结果，则返回结果。
+
+另一个与搜索引擎相关的问题是，每个分片都独立存在。 当在特定分片上执行查询时，它不考虑来自其他分片的术语频率和其他搜索引擎信息。 如果我们想要支持准确的排名，我们需要首先从所有分片中收集术语频率以计算全局术语频率，然后使用这些全局频率在每个分片上执行查询。
+
+此外，由于需要对结果进行排序，获取大型文档集，甚至滚动它，同时保持正确的排序行为可能是非常昂贵的操作。对于大型结果集滚动，如果返回文档的顺序不重要，最好按_doc排序
+
+Elasticsearch非常灵活，允许控制基于每个搜索请求执行的搜索类型。可以通过在查询字符串中设置search_type参数来配置类型。类型是：
+. query then fetch:参数值query_then_fetch,请求分两个阶段处理。在第一阶段，查询将转发到所有涉及的分片。每个分片执行搜索并生成该分片的本地结果排序列表。 每个分片都向协调节点返回足够的信息，以允许它合并并将分片级别结果重新排序为具有最大长度大小的全局排序结果集。在第二阶段期间，协调节点仅从相关分片请求文档内容（以及突出显示的片段，如果有的话）。如果您未在请求中指定search_type，则这是默认设置
+
+. dfs,query then fetch:参数值dfs_query_then_fetch,与“query then fetch”相同，除了初始分散阶段，其进行并计算分布式术语频率以获得更准确的评分。
+
+== Scoll
+
+当搜索请求返回单页结果,scoll api可以根据此请求更多的数据(甚至全部),这跟数据库中的游标有点相似.
+
+滚动不是用于实时用户请求，而是用于处理大量数据，例如，为了将一个索引的内容重新索引到具有不同配置的新索引中。
+
+为了使用scrolling,初始搜索请求应指定查询字符串中的scroll参数,该参数告诉elastic保持"search context"的存活时间.
+[source,shell]
+----
+POST /twitter/_search?scroll=1m
+{
+    "size": 100,
+    "query": {
+        "match" : {
+            "title" : "elasticsearch"
+        }
+    }
+}
+----
+
+上述请求的结果包括_scroll_id，应将其传递给滚动API以检索下一批结果。
+[source,shell]
+----
+POST /_search/scroll <1>
+{
+    "scroll" : "1m",  <2>
+    "scroll_id" : "DXF1ZXJ5QW5kRmV0Y2gBAAAAAAAAAD4WYm9laVYtZndUQlNsdDcwakFMNjU1QQ==" <3> 
+}
+----
+<1>  可以使用GET或POST，URL不应包含索引名称,这是在原始搜索请求中指定的。
+<2> scroll参数告诉Elasticsearch将搜索上下文再保持1分钟。
+<3> scroll_id 
+
+size参数允许您配置每批结果返回的最大命中数。 每次调用滚动API都会返回下一批结果，直到没有剩余的结果返回，即命中数组为空。
+
+NOTE: 初始搜索请求和每个后续滚动请求均返回_scroll_id。 虽然_scroll_id可能会在请求之间发生变化，但它并不总是会发生变化-无论如何，只应使用最近收到的_scroll_id。
+
+== countAPI
+查询匹配到的文档数
+[source,shell]
+----
+PUT /twitter/_doc/1?refresh
+{
+    "user": "kimchy"
+}
+
+GET /twitter/_doc/_count?q=user:kimchy
+
+GET /twitter/_doc/_count
+{
+    "query" : {
+        "term" : { "user" : "kimchy" }
+    }
+}
+----
+
+响应结果:
+[source,json]
+----
+{
+    "count" : 1,
+    "_shards" : {
+        "total" : 5,
+        "successful" : 5,
+        "skipped" : 0,
+        "failed" : 0
+    }
+}
+----
+== validate API
+validate API允许用户在不执行的情况下验证可能昂贵的查询。
+
+创建下面索引:
+[source,shell]
+----
+PUT twitter/_doc/_bulk?refresh
+{"index":{"_id":1}}
+{"user" : "kimchy", "post_date" : "2009-11-15T14:12:12", "message" : "trying out Elasticsearch"}
+{"index":{"_id":2}}
+{"user" : "kimchi", "post_date" : "2009-11-15T14:12:13", "message" : "My username is similar to @kimchy!"}
+----
+发送验证请求:
+[source,shell]
+----
+GET twitter/_validate/query?q=user:foo
+----
+响应如下:
+[source,shell]
+----
+{"valid":true,"_shards":{"total":1,"successful":1,"failed":0}}
+----
+
+查询信息也可能在请求体中:
+[source,shell]
+----
+GET twitter/_doc/_validate/query
+{
+  "query" : {
+    "bool" : {
+      "must" : {
+        "query_string" : {
+          "query" : "*:*"
+        }
+      },
+      "filter" : {
+        "term" : { "user" : "kimchy" }
+      }
+    }
+  }
+}
+----
+如果查询无效，则valid将为false。 这里查询无效，因为Elasticsearch知道post_date字段应该是动态映射的日期，并且foo没有正确解析为日期：
+[source,shell]
+----
+GET twitter/_doc/_validate/query
+{
+  "query": {
+    "query_string": {
+      "query": "post_date:foo",
+      "lenient": false
+    }
+  }
+}
+----
+响应如下:
+[source,json]
+----
+{"valid":false,"_shards":{"total":1,"successful":1,"failed":0}}
+----
+可以指定explain参数以获取有关查询失败原因的更详细信息：
+[source,shell]
+----
+GET twitter/_doc/_validate/query?explain=true
+{
+  "query": {
+    "query_string": {
+      "query": "post_date:foo",
+      "lenient": false
+    }
+  }
+}
+----
+响应如下:
+[source,json]
+----
+{
+  "valid" : false,
+  "_shards" : {
+    "total" : 1,
+    "successful" : 1,
+    "failed" : 0
+  },
+  "explanations" : [ {
+    "index" : "twitter",
+    "valid" : false,
+    "error" : "twitter/IAEc2nIXSSunQA_suI0MLw] QueryShardException[failed to create query:...failed to parse date field [foo]"
+  } ]
+}
+----
+
+查询有效时，解释默认为该查询的字符串表示形式。 将重写设置为true时，解释会更详细地显示将要执行的实际Lucene查询。
+[source,shell]
+----
+GET twitter/_doc/_validate/query?rewrite=true
+{
+  "query": {
+    "more_like_this": {
+      "like": {
+        "_id": "2"
+      },
+      "boost_terms": 1
+    }
+  }
+}
+----
+[source,json]
+----
+{
+   "valid": true,
+   "_shards": {
+      "total": 1,
+      "successful": 1,
+      "failed": 0
+   },
+   "explanations": [
+      {
+         "index": "twitter",
+         "valid": true,
+         "explanation": "((user:terminator^3.71334 plot:future^2.763601 plot:human^2.8415773 plot:sarah^3.4193945 plot:kyle^3.8244398 plot:cyborg^3.9177752 plot:connor^4.040236 plot:reese^4.7133346 ... )~6) -ConstantScore(_uid:tweet#2)) #(ConstantScore(_type:_doc))^0.0"
+      }
+   ]
+}
+----
+
+默认情况下，请求仅在单个分片上执行，该分片是随机选择的。 查询的详细说明可能取决于正在命中哪个分片，因此可能会因请求而异。 因此，在查询重写的情况下，应使用all_shards参数从所有可用分片获取响应。
+[source,shell]
+----
+GET twitter/_doc/_validate/query?rewrite=true&all_shards=true
+{
+  "query": {
+    "match": {
+      "user": {
+        "query": "kimchy",
+        "fuzziness": "auto"
+      }
+    }
+  }
+}
+----
+响应
+[source,json]
+----
+{
+  "valid": true,
+  "_shards": {
+    "total": 5,
+    "successful": 5,
+    "failed": 0
+  },
+  "explanations": [
+    {
+      "index": "twitter",
+      "shard": 0,
+      "valid": true,
+      "explanation": "user:kimchy~2"
+    },
+    {
+      "index": "twitter",
+      "shard": 1,
+      "valid": true,
+      "explanation": "user:kimchy~2"
+    },
+    {
+      "index": "twitter",
+      "shard": 2,
+      "valid": true,
+      "explanation": "(user:kimchi)^0.8333333"
+    },
+    {
+      "index": "twitter",
+      "shard": 3,
+      "valid": true,
+      "explanation": "user:kimchy"
+    },
+    {
+      "index": "twitter",
+      "shard": 4,
+      "valid": true,
+      "explanation": "user:kimchy~2"
+    }
+  ]
+}
+----
+
+==  explain api
+explain api说明特定文档的分数计算规则。无论文档是否与特定查询匹配，这都可以提供有用的反馈。
+[source,shell]
+----
+GET /twitter/_doc/0/_explain
+{
+      "query" : {
+        "match" : { "message" : "elasticsearch" }
+      }
+}
+----
+响应:
+[source,json]
+----
+{
+   "_index": "twitter",
+   "_type": "_doc",
+   "_id": "0",
+   "matched": true,
+   "explanation": {
+      "value": 1.6943599,
+      "description": "weight(message:elasticsearch in 0) [PerFieldSimilarity], result of:",
+      "details": [
+         {
+            "value": 1.6943599,
+            "description": "score(doc=0,freq=1.0 = termFreq=1.0\n), product of:",
+            "details": [
+               {
+                  "value": 1.3862944,
+                  "description": "idf, computed as log(1 + (docCount - docFreq + 0.5) / (docFreq + 0.5)) from:",
+                  "details": [
+                     {
+                        "value": 1.0,
+                        "description": "docFreq",
+                        "details": []
+                     },
+                     {
+                        "value": 5.0,
+                        "description": "docCount",
+                        "details": []
+                      }
+                   ]
+               },
+                {
+                  "value": 1.2222223,
+                  "description": "tfNorm, computed as (freq * (k1 + 1)) / (freq + k1 * (1 - b + b * fieldLength / avgFieldLength)) from:",
+                  "details": [
+                     {
+                        "value": 1.0,
+                        "description": "termFreq=1.0",
+                        "details": []
+                     },
+                     {
+                        "value": 1.2,
+                        "description": "parameter k1",
+                        "details": []
+                     },
+                     {
+                        "value": 0.75,
+                        "description": "parameter b",
+                        "details": []
+                     },
+                     {
+                        "value": 5.4,
+                        "description": "avgFieldLength",
+                        "details": []
+                     },
+                     {
+                        "value": 3.0,
+                        "description": "fieldLength",
+                        "details": []
+                     }
+                  ]
+               }
+            ]
+         }
+      ]
+   }
+}
+----
+
+== Profile API
+
+== Field Capabilities API
+
+检索多个索引之间的字段功能。默认情况下，API在所有索引上执行：
+[source,shell]
+----
+GET _field_caps?fields=rating
+----
+请求也可以被限定到具体的索引
+[source,shell]
+----
+GET twitter/_field_caps?fields=rating
+----
+也可以通过请求体的方式执行
+[source,shell]
+----
+POST _field_caps
+{
+   "fields" : ["rating"]
+}
+----
+
+**响应信息**
+[source,shell]
+----
+GET _field_caps?fields=rating,title
+----
+[source,json]
+----
+{
+    "fields": {
+        "rating": { <1>
+            "long": {
+                "searchable": true,
+                "aggregatable": false,
+                "indices": ["index1", "index2"],
+                "non_aggregatable_indices": ["index1"] <2>
+            },
+            "keyword": {
+                "searchable": false,
+                "aggregatable": true,
+                "indices": ["index3", "index4"],
+                "non_searchable_indices": ["index4"] <3>
+            }
+        },
+        "title": { <4>
+            "text": {
+                "searchable": true,
+                "aggregatable": false
+
+            }
+        }
+    }
+}
+----
+<1> rating字段在索引index1和index2上面被定义为long类型,在index3和index4是keyword
+<2> rating在index1上不支持聚合
+<3> rating在index4上不支持搜索
+<4> title在所有索引上被定义为text.

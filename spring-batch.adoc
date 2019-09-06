@@ -1,0 +1,871 @@
+= spring-batch
+
+== 1.介绍
+
+在企业级应用环境中,很多关键业务操作需要执行批处理任务,这些任务包括:
+
+. 无需用户交互即可有效处理大批量数据,例如基于时间的事件(月末计算,通知)
+. 定期在非常大的数据集上重复应用复杂的业务规则(例如，保险收益确定或费率调整)
+. 从外部或者内部系统中接受信息,并把这些信息进行格式化,验证和处理后以事务的方式存储到记录系统中.
+
+Spring Batch是一个轻量级，全面的批处理框架，旨在开发对企业系统日常运营至关重要的强大批处理应用程序。Spring Batch构建在Spring Framework上，同时使开发人员可以在必要时轻松访问和利用更高级的企业服务。Spring Batch不是一个调度框架。商业和开源领域都有许多优秀的企业调度程序（例如Quartz，Tivoli，Control-M等）。它旨在与调度程序一起使用，而不是替换调度程序。
+
+Spring Batch提供了可复用的功能，这些功能对于处理大量记录至关重要，包括记录/跟踪，事务管理，作业处理统计，作业重启，跳过和资源管理。它还提供更高级的技术服务和功能，通过优化和分区技术实现极高容量和高性能的批处理作业。Spring Batch可用于用例:简单用例,例如将文件读入数据库或运行存储过程,复杂用例,例如在数据库之间移动大量数据，转换它等等。
+
+=== 1.1 背景
+
+=== 1.2 使用场景
+
+一般的典型批处理程序：
+
+. 从数据库，文件或队列中读取大量记录。
+. 以某种方式处理数据。
+. 以修改的形式写回数据。
+
+Spring Batch自动执行此基本批处理迭代，提供处理类似事务的功能，通常在脱机环境中处理，无需任何用户交互。批处理作业是大多数IT项目的一部分，Spring Batch是唯一提供强大的企业级解决方案的开源框架。
+
+
+== 概念
+
+image::../images/spring-batch-reference-model.png[]
+
+上图囊括spring-batch的核心概念,一个job(作业)有多个step(步骤),每个step只有一个ItemReader,ItemProcessor和ItemWriter,job需要被JobLauncher加载执行,job的执行信息以及元数据被JobRepository存储. 
+
+=== Job
+
+本节描述了与批处理作业概念相关的构造型。Job是一个封装整个批处理过程的实体。与其他spring项目一样,可以使用java或者基于XML的方式配置job.job是在配置的顶层,如下图:
+image::../images/job-heirarchy.png[]
+
+在Spring Batch中，Job只是Step实例的容器。它以一定的顺序组合多个step，并允许为所有step配置全局属性，例如可重启性。job的配置包括:
+
+. job的名称
+. Step实例的定义和顺序
+. job是否支持重启
+
+Spring Batch以SimpleJob类的形式提供了Job接口的默认简单实现，它在Job之上创建了一些标准功能。使用基于java的配置时，可以使用一组构建器来实例化Job，如以下示例所示：
+[source,java]
+----
+@Bean
+public Job footballJob() {
+    return this.jobBuilderFactory.get("footballJob")
+                     .start(playerLoad())
+                     .next(gameLoad())
+                     .next(playerSummarization())
+                     .end()
+                     .build();
+}
+----
+
+==== JobInstance
+
+JobInstance是job运行的时候产生的概念,每次job运行的时候会产生一个JobInstance.例如上的'EndOfDay'job,7月1号运行的时候,生成一个JobInstance,7月2号运行的时候,又产生一个JobInstance.如果7月1号的JobInstance运行失败了,它会在7月2号继续运行(运行时需要的数据必须和7月1号的一致,没有因为失败延时一天而造成运行结果和原本的不一致).因此每个JobInstance有多个JobExecution(在下文中介绍).
+
+JobInstance的定义绝对不会影响要加载的数据。完全取决于ItemReader实现来确定如何加载数据。但是，使用相同的JobInstance决定是否使用先前执行的'state'（即ExecutionContext）。使用新的JobInstance意味着“从头开始”，并且使用现有实例通常意味着“从您离开的地方开始”。
+
+==== JobParameters
+
+在讨论了JobInstance以及它与Job之间的区别之后，我们要问的一个问题是：“一个JobInstance如何区别于另一个？” 答案是：JobParameters。JobParameters对象包含一组用于启动批处理作业的参数。它们可以在运行期间用于识别或甚至用作参考数据，如下图所示：
+
+image::../images/job-stereotypes-parameters.png[]
+
+如上图，有两个实例，一个传入1月1日，另一个1月2日，实际上只有一个Job，但它有两个JobParameter对象：一个以01-01-2017的作业参数启动，另一个以参数01-02-2017启动。因此，可以定义为：JobInstance= Job +JobParameters。这允许开发人员有效地控制JobInstance定义，因为它们控制传入的参数。
+
+==== JobExecution
+
+JobExecution指的是单次尝试运行Job的概念。 执行可能以失败或成功结束，但除非执行成功完成，否则与给定执行相对应的JobInstance不被视为完成。
+
+使用前面描述的EndOfDay作业作为示例，考虑第一次运行失败的01-01-2017的JobInstance。 如果使用与第一次运行（01-01-2017）相同的识别作业参数再次运行，则会创建新的JobExecution。 但是，仍然只有一个JobInstance。
+
+job定义了作业的内容和执行方式,JobInstance将JobExecution分组并用于重启,JobExecution存储了任务执行的信息和一些控制属性,如下表:
+
+|===
+
+|属性|描述
+|Status|BatchStatus对象,job执行的状态,开始运行时BatchStatus#STARTED,执行失败BatchStatus#FAILED,执行成功BatchStatus#COMPLETED
+|startTime|java.util.Date对象,job启动时间
+|endTime|java.util.Date对象,job结束时间
+|exitStatus|ExitStatus,job运行结果,这是最重要的，因为它包含一个返回给调用者的退出代码
+|createTime|一个java.util.Date，表示首次保存JobExecution时的当前系统时间。 该作业可能尚未启动（因此没有启动时间），但它始终具有createTime，这是框架管理作业级ExecutionContexts所需的。
+|lastUpdated|表示JobExecution最后一次持久化的java.util.Date。 如果作业尚未启动，则此字段为空。
+|executionContext|“属性包”包含需要在executions之间持久化的用户数据。
+|failureExceptions|执行作业期间遇到的异常列表。如果在作业失败期间遇到多个异常，这些可能很有用。
+|===
+
+这些属性很重要，因为它们是持久的，可用于确定job执行的状态。 例如，如果01-01的EndOfDay作业在晚上9:00执行而在9:30失败，则在批处理元数据表中进行以下输入：
+
+.BATCH_JOB_INSTANCE
+|===
+|JOB_INST_ID|JOB_NAME
+|1|EndOfDayJob
+|2|EndOfDayJob
+|===
+
+.BATCH_JOB_EXECUTION_PARAMS
+|===
+|JOB_EXECUTION_ID|TYPE_CD|KEY_NAME|DATE_VAL|IDENTIFYING
+|1|DATE|schedule.Date|2017-01-01 00:00:00|TRUE
+|2|DATE|schedule.Date|2017-01-01 00:00:00|TRUE
+|3|DATE|schedule.Date|2017-01-02 00:00:00|TRUE
+|===
+
+.BATCH_JOB_EXECUTION
+|===
+|JOB_EXEC_ID|JOB_INST_ID|START_TIME|END_TIME|STATUS
+|1|1|2017-01-01 21:00|2017-01-01 21:30|FAILED
+|2|1|2017-01-02 21:00|2017-01-02 21:30|COMPLETED
+|3|2|2017-01-01 21:31|2017-01-02 22:30|COMPLETED
+|===
+
+NOTE: 为清晰起见和格式化，列名可能已缩写或删除。
+
+=== Step
+
+Step是一个域对象，它封装了批处理作业流程中的独立阶段。因此，每个Job完全由一个或多个步骤组成。Step包含定义和控制实际批处理所需的所有信息.这是必然是一个模糊的描述，因为任何给定Step的内容由编写Job的开发人员自行决定,Step可以像开发者所希望的那样简单或复杂。一个简单的Step可能会将文件中的数据加载到数据库中，几乎不需要代码（取决于所使用的实现）。更复杂的step可能具有复杂的业务规则，这些规则作为批处理的一部分被应用。与Job一样，Step具有单独StepExecution(关联唯一的JobExecution)，如下图所示：
+
+image::../images/jobHeirarchyWithSteps.png[]
+
+==== StepExecution
+
+StepExecution表示执行Step的单次尝试。每次运行Step时都会创建一个新的StepExecution，类似于JobExecution。如果Step B之前的Step A执行失败,则Step B不会执行.StepExecution 只有在Step执行后才会被创建.
+
+Step执行有StepExecution对象实例表示.每个StepExecution都包含对其相应Step的引用以及JobExecution和事务相关的数据，例如提交和回滚计数以及开始和结束时间。另外,每个StepExecution还包含ExecutionContext(其中包含开发人员需要在批处理运行中保留的任何数据，例如重新启动所需的统计信息或状态信息).下面列出StepExecution的属性:
+
+|===
+|属性|描述
+|Status|BatchStatus对象,job执行的状态,开始运行时BatchStatus#STARTED,执行失败BatchStatus#FAILED,执行成功BatchStatus#COMPLETED
+|startTime|java.util.Date对象,job启动时间
+|endTime|java.util.Date对象,job结束时间
+|exitStatus|ExitStatus,job运行结果,这是最重要的，因为它包含一个返回给调用者的退出代码
+|createTime|一个java.util.Date，表示首次保存JobExecution时的当前系统时间。 该作业可能尚未启动（因此没有启动时间），但它始终具有createTime，这是框架管理作业级ExecutionContexts所需的。
+|lastUpdated|表示JobExecution最后一次持久化的java.util.Date。 如果作业尚未启动，则此字段为空。
+|executionContext|“属性包”包含需要在executions之间持久化的用户数据。
+|readCount|已成功读取的条目数。
+|writeCount|已成功写入的条目数
+|commitCount|已为此执行提交的事务数。
+|rollbackCount|已回退Step控制的业务事务的次数。
+|readSkipCount|读取失败，导致跳过的条目数。
+|processSkipCount|处理失败,导致的跳过数
+|filterCount|ItemProcessor过滤的数目
+|writeSkipCount|写失败导致的跳过数
+|===
+
+== ExecutionContext
+
+ExecutionContext表示由框架持久化和控制的键/值对的集合，以便开发人员存储StepExecution对象或JobExecution对象的持久化状态.主要的用途是方便重启.使用平面文件输入作为示例，在处理单个行时，框架会定期在提交点处保留ExecutionContext,这样做允许ItemReader存储其状态，以防在运行期间发生致命错误或断电。所需要的只是将当前读取的行数放入上下文中，如下例所示，框架将完成其余的工作：
+[source,java]
+----
+executionContext.putLong(getKey(LINES_READ_COUNT), reader.getPosition());
+----
+
+使用EndOfDay示例作为示例，假设有一个步骤“loadData”将文件加载到数据库中。 在第一次失败运行后，元数据表将类似于以下示例：
+
+
+.BATCH_JOB_INSTANCE
+|===
+|JOB_INST_ID|JOB_NAME
+|1|EndOfDayJob
+|===
+
+.BATCH_JOB_EXECUTION_PARAMS
+|===
+|JOB_EXECUTION_ID|TYPE_CD|KEY_NAME|DATE_VAL|IDENTIFYING
+|1|DATE|schedule.Date|2017-01-01 00:00:00|TRUE
+|===
+
+.BATCH_JOB_EXECUTION
+|===
+|JOB_EXEC_ID|JOB_INST_ID|START_TIME|END_TIME|STATUS
+|1|1|2017-01-01 21:00|2017-01-01 21:30|FAILED
+|===
+
+.BATCH_STEP_EXECUTION
+|===
+|STEP_EXEC_ID|JOB_EXEC_ID|STEP_NAME|START_TIME|END_TIME|STATUS
+|1|1|loadData|2017-01-01 21:00|2017-01-01 21:30|FAILED
+|===
+
+.BATCH_STEP_EXECUTION_CONTEXT
+|===
+|STEP_EXEC_ID|SHORT_CONTEXT
+|1|{piece.count=40321}
+|===
+
+在前面的例子中，Step运行了30分钟并处理了40,321个'pieces'，这将表示此场景中文件中的行。此值在框架每次提交之前更新，并且可以包含多行对应ExecutionContext中的条目。
+
+在提交之前得到通知需要实现StepListener(或ItemStream），本指南后面将对此进行更详细的讨论。与前面的示例一样，假设作业在第二天重新启动。 重新启动时，将从数据库重新构建上次运行的ExecutionContext中的值。打开ItemReader时，它可以检查上下文中是否有任何存储状态并从那里初始化自身，如下例所示：
+[source,java]
+----
+if (executionContext.containsKey(getKey(LINES_READ_COUNT))) {
+    log.debug("Initializing for restart. Restart data is: " + executionContext);
+
+    long lineCount = executionContext.getLong(getKey(LINES_READ_COUNT));
+
+    LineReader reader = getReader();
+
+    Object record = "";
+    while (reader.getPosition() < lineCount && record != null) {
+        record = readLine();
+    }
+}
+----
+
+在这种情况下，在上面的代码运行之后，当前行是40,322，允许Step从它停止的位置再次开始。ExecutionContext还可用于保存本身运行的统计信息。例如，如果平面文件包含跨多行存在的处理订单，则可能需要存储已处理的订单数量（这与读取的行数有很大不同），以便可以在Step结束的时候发送电子邮件(改邮件包含总共处理的订单数)。框架为开发人员存储它，以便使用JobInstance正确地对其进行范围化.
+
+要知道是否应该使用现有的ExecutionContext可能非常困难。例如上面的EndOfDay例子,当01-01的JobInstance再次运行的时候,运行到Step的时候,会从数据库中加载ExecutionContext然后应用到Step上.反过来,01-02,框架意识到是一个新的JobInstance,所以会将空的上下文传递给Step. 同样要注意的是，在任何给定时间，每个StepExecution都只存在一个ExecutionContext。使用ExecutionContext客户端应该小心，因为这会创建一个共享键空间。因此，在放入值时应小心，以确保不会覆盖任何数据。但是，Step在上下文中绝对不存储任何数据，因此无法对框架产生负面影响。
+
+同样重要的是要注意每个JobExecution至少有一个ExecutionContext，每个StepExecution都有一个ExecutionContext。例如，请考虑以下代码段：
+[source,java]
+----
+ExecutionContext ecStep = stepExecution.getExecutionContext();
+ExecutionContext ecJob = jobExecution.getExecutionContext();
+----
+
+如评论中所述，ecStep不等于ecJob。它们是两个不同的ExecutionContexts。 限制为Step保存在Step中的每个提交点，job保存在每个Step执行之间。
+
+=== JobRepository
+
+JobRepository是上面提到的所有Stereotypes的持久性机制。它为JobLauncher，Job和Step实现提供CRUD操作。首次启动Job时，将从存储库中获取JobExecution，并且在执行过程中，StepExecution和JobExecution实现将通过将它们传递到存储库来保留。
+
+使用Java配置时，@ EnableBatchProcessing注释将JobRepository提供为自动配置的组件之一。
+
+=== JobLauncher
+
+JobLauncher表示一个简单的接口，用于使用给定的JobParameters集启动Job，如以下示例所示：
+[source,java]
+----
+public interface JobLauncher {
+
+public JobExecution run(Job job, JobParameters jobParameters)
+            throws JobExecutionAlreadyRunningException, JobRestartException,
+                   JobInstanceAlreadyCompleteException, JobParametersInvalidException;
+}
+----
+
+也实现了从JobRepository获取有效的JobExecution并执行Job。
+
+=== Item Reader
+
+ItemReader 抽象从输入中获取条目的过程,一次读取一项(例如文件中一次读入一行),当获取的项为null时,说明输入已经被读完.
+
+===  Item Writer
+
+ItemWrite抽象了输出的过程,一次可以输出多个条目.通常，ItemWriter不知道它接下来应该接收的输入(输出源)，并且只知道在其当前调用中传递的项。
+
+=== Item Processor
+
+ItemProcessor是一个抽象，表示项目的业务处理。当ItemReader读取一个项目，而ItemWriter写入它们时，ItemProcessor提供一个转换或应用其他业务处理的访问点。 如果在处理项目时，确定该项目无效，则返回null表示不应该写出该项目。
+
+== 配置并运行Job
+
+=== 配置job
+
+Job接口有多种实现，但构建器会抽象出配置上的差异。
+[source,java]
+----
+@Bean
+public Job footballJob() {
+    return this.jobBuilderFactory.get("footballJob")
+                     .start(playerLoad())
+                     .next(gameLoad())
+                     .next(playerSummarization())
+                     .end()
+                     .build();
+}
+----
+
+
+上面的示例说明了一个由三个Step实例组成的Job。 与作业相关的构建器还可以包含有助于并行化（Split），声明性流控制（Decision）和流定义外部化（Flow）的其他元素。
+
+==== 重启
+
+执行批处理作业时的一个关键问题是Job重新启动时的行为。如果特定JobInstance已存在JobExecution，则启动Job将被视为“重新启动”.理想情况下，所有工作都应该能够在他们中断的地方启动，但有些情况下这是不可能的。如果job永远不重新启动，则可将重新启动的属性可能设置为“false”：
+
+[source,java]
+----
+@Bean
+public Job footballJob() {
+    return this.jobBuilderFactory.get("footballJob")
+                     .preventRestart()
+                     ...
+                     .build();
+}
+----
+换句话说，将restartable设置为false意味着“此作业不支持再次启动”。 重新启动不可重新启动的作业将导致抛出JobRestartException.
+
+====  拦截Job执行
+
+执行Job的过程中，允许我们在其生命周期中发布各种事件以便可以执行自定义代码。SimpleJob允许在适当的时候调用JobListener：
+[source,java]
+----
+public interface JobExecutionListener {
+
+    void beforeJob(JobExecution jobExecution);
+
+    void afterJob(JobExecution jobExecution);
+
+}
+----
+
+JobListeners可以通过Job上的listeners元素添加到SimpleJob：
+[source,java]
+----
+@Bean
+public Job footballJob() {
+    return this.jobBuilderFactory.get("footballJob")
+                     .listener(sampleListener())
+                     ...
+                     .build();
+}
+----
+
+应该注意的是，无论Job的成功与否，都会调用afterJob。如果需要确定成功或失败，可以从JobExecution获得：
+[source,java]
+----
+public void afterJob(JobExecution jobExecution){
+    if( jobExecution.getStatus() == BatchStatus.COMPLETED ){
+        //job success
+    }
+    else if(jobExecution.getStatus() == BatchStatus.FAILED){
+        //job failure
+    }
+}
+----
+
+NOTE : 可以使用@BeforeJob和@AfterJob来绑定事件
+
+==== JobParametersValidator
+
+在XML命名空间中声明的Job或使用AbstractJob的任何子类可以选择在运行时为JobParameters声明验证器。当您需要声明作业启动时所有必需参数时，这非常有用。 DefaultJobParametersValidator可用于约束简单强制参数和可选参数的组合，对于更复杂的约束，您可以自己实现接口。
+
+[source,java]
+----
+@Bean
+public Job job1() {
+    return this.jobBuilderFactory.get("job1")
+                     .validator(parametersValidator())
+                     ...
+                     .build();
+}
+----
+
+=== java 配置
+
+基于java的配置有两个组件：@EnableBatchProcessing注释和两个构建器。@EnableBatchProcessing的工作方式与Spring系列中的其他@Enable *注解类似。 在这种情况下，@EnableBatchProcessing提供了用于构建批处理作业的基本配置。 在此基本配置中，除了可用于自动装配的多个bean之外，还会创建一个StepScope实例：
+
+. JobRepository - bean名称"jobRepository"
+. JobLauncher - bean名称"jobLauncher"
+. JobRegistry - bean名称"jobRegistry"
+. PlatformTransactionManager -  bean名称"transactionManager"
+. JobBuilderFactory -  bean名称 "jobBuilders"
+. StepBuilderFactory -  bean名称 "stepBuilders"
+
+此配置的核心接口是BatchConfigurer。 默认实现提供了上面提到的bean，并且需要将DataSource作为要提供的上下文中的bean。JobRepository将使用此数据源。 您可以通过创建BatchConfigurer接口的自定义实现来自定义任何这些bean。通常，扩展DefaultBatchConfigurer（如果未找到则使用BatchConfigurer）并覆盖所需的getter就足够了。以下示例显示如何提供自定义事务管理器：
+[source,java]
+----
+@Bean
+public BatchConfigurer batchConfigurer() {
+        return new DefaultBatchConfigurer() {
+                @Override
+                public PlatformTransactionManager getTransactionManager() {
+                        return new MyTransactionManager();
+                }
+        };
+}
+----
+
+使用基本配置后，用户可以使用提供的构建器工厂来配置作业。下面是通过JobBuilderFactory和StepBuilderFactory配置的两步作业的示例。
+[source,java]
+----
+@Configuration
+@EnableBatchProcessing
+@Import(DataSourceConfiguration.class)
+public class AppConfig {
+
+    @Autowired
+    private JobBuilderFactory jobs;
+
+    @Autowired
+    private StepBuilderFactory steps;
+
+    @Bean
+    public Job job(@Qualifier("step1") Step step1, @Qualifier("step2") Step step2) {
+        return jobs.get("myJob").start(step1).next(step2).build();
+    }
+
+    @Bean
+    protected Step step1(ItemReader<Person> reader,
+                         ItemProcessor<Person, Person> processor,
+                         ItemWriter<Person> writer) {
+        return steps.get("step1")
+            .<Person, Person> chunk(10)
+            .reader(reader)
+            .processor(processor)
+            .writer(writer)
+            .build();
+    }
+
+    @Bean
+    protected Step step2(Tasklet tasklet) {
+        return steps.get("step2")
+            .tasklet(tasklet)
+            .build();
+    }
+}
+----
+
+===  配置JobRepository
+
+如前所述，JobRepository用于Spring Batch中各种持久化域对象的基本CRUD操作，例如JobExecution和StepExecution。许多主要框架组件都需要它，例如JobLauncher，Job和Step。
+
+使用java配置时，会为您提供JobRepository。如果提供了数据源，则提供基于JDBC的数据源，如果没有，则提供基于Map的数据源。但是，您可以通过BatchConfigurer接口的实现自定义JobRepository的配置。
+[source,java]
+----
+@Override
+protected JobRepository createJobRepository() throws Exception {
+    JobRepositoryFactoryBean factory = new JobRepositoryFactoryBean();
+    factory.setDataSource(dataSource);
+    factory.setTransactionManager(transactionManager);
+    factory.setIsolationLevelForCreate("ISOLATION_SERIALIZABLE");
+    factory.setTablePrefix("BATCH_");
+    factory.setMaxVarCharLength(1000);
+    return factory.getObject();
+}
+----
+
+除dataSource和transactionManager外，不需要上面列出的任何配置选项。如果未设置，将使用上面显示的默认值。出于展示目的，它们在上面显示。 max varchar length默认为2500，这是示例模式脚本中长VARCHAR列的长度
+
+==== JobRepository的事务配置
+
+如果使用命名空间或提供的FactoryBean，将在存储库周围自动创建事务切面。 这是为了确保批处理元数据（包括失败后重新启动所需的状态）正确保留。create* method属性中的隔离级别是单独指定的，以确保在启动作业时，如果两个进程同时尝试启动同一作业，则只有一个成功。该方法的默认隔离级别是SERIALIZABLE，这是非常激进的：READ_COMMITTED也可以正常工作;如果两个进程以这种方式不会发生冲突，READ_UNCOMMITTED也可以。但是，由于对create*方法的调用非常短，因此只要数据库平台支持SERIALIZED，就不太可能导致问题。 但是，这可以被覆盖：
+[source,java]
+----
+// This would reside in your BatchConfigurer implementation
+@Override
+protected JobRepository createJobRepository() throws Exception {
+    JobRepositoryFactoryBean factory = new JobRepositoryFactoryBean();
+    factory.setDataSource(dataSource);
+    factory.setTransactionManager(transactionManager);
+    factory.setIsolationLevelForCreate("ISOLATION_REPEATABLE_READ");
+    return factory.getObject();
+}
+----
+如果未使用命名空间或工厂bean，则使用AOP配置存储库的事务行为也很重要：
+[source,java]
+----
+@Bean
+public TransactionProxyFactoryBean baseProxy() {
+        TransactionProxyFactoryBean transactionProxyFactoryBean = new TransactionProxyFactoryBean();
+        Properties transactionAttributes = new Properties();
+        transactionAttributes.setProperty("*", "PROPAGATION_REQUIRED");
+        transactionProxyFactoryBean.setTransactionAttributes(transactionAttributes);
+        transactionProxyFactoryBean.setTarget(jobRepository());
+        transactionProxyFactoryBean.setTransactionManager(transactionManager());
+        return transactionProxyFactoryBean;
+}
+----
+
+==== 更改表前缀
+
+JobRepository的另一个可修改属性是元数据表的表前缀。 默认情况下，它们都以BATCH_开头。 BATCH_JOB_EXECUTION和BATCH_STEP_EXECUTION是两个例子。但是，有可能会修改此前缀。如果需要在表名称前添加模式名称，或者多个表需要在同一个模式下，则需要更改表前缀：
+[source,java]
+----
+// This would reside in your BatchConfigurer implementation
+@Override
+protected JobRepository createJobRepository() throws Exception {
+    JobRepositoryFactoryBean factory = new JobRepositoryFactoryBean();
+    factory.setDataSource(dataSource);
+    factory.setTransactionManager(transactionManager);
+    factory.setTablePrefix("SYSTEM.TEST_");
+    return factory.getObject();
+}
+----
+
+鉴于上述更改，对元数据表的每个查询都将以“SYSTEM.TEST_”作为前缀。BATCH_JOB_EXECUTION将被修改为SYSTEM.TEST_JOB_EXECUTION。
+
+==== 内存存储库
+
+在某些情况下，您可能不希望将域对象持久保存到数据库中。一个原因可能是速度;在每个提交点存储域对象需要额外的时间。另一个原因可能是您不需要为特定工作保留状态。因此，Spring批处理提供了作业存储库的Map版本：
+[source,java]
+----
+// This would reside in your BatchConfigurer implementation
+@Override
+protected JobRepository createJobRepository() throws Exception {
+    JobRepositoryFactoryBean factory = new JobRepositoryFactoryBean();
+    factory.setDataSource(dataSource);
+    factory.setTransactionManager(transactionManager);
+    factory.setIsolationLevelForCreate("ISOLATION_REPEATABLE_READ");
+    return factory.getObject();
+}
+----
+
+请注意，内存存储库是易失性的，因此不允许在JVM实例之间重新启动。它也不能保证同时启动具有相同参数的两个作业实例，并且不适合在多线程作业或本地分区Step中使用。因此，如果需要这些功能，就需要使用存储库的数据库版本。
+
+但是它确实需要定义事务管理器，因为存储库中存在回滚语义，并且因为业务逻辑可能仍然是事务性的（例如RDBMS访问）。 出于测试目的，许多人发现ResourcelessTransactionManager很有用。
+
+
+==== 存储库中的非标准数据库类型
+
+如果您使用的数据库平台不在受支持的平台列表中，那么如果SQL变量足够接近，您可以使用其中一种受支持的类型。为此，您可以使用原始JobRepositoryFactoryBean而不是命名空间快捷方式，并使用它将数据库类型设置为最接近的匹配：
+[source,java]
+----
+// This would reside in your BatchConfigurer implementation
+@Override
+protected JobRepository createJobRepository() throws Exception {
+    JobRepositoryFactoryBean factory = new JobRepositoryFactoryBean();
+    factory.setDataSource(dataSource);
+    factory.setDatabaseType("db2");
+    factory.setTransactionManager(transactionManager);
+    return factory.getObject();
+}
+----
+
+如果未指定，JobRepositoryFactoryBean将尝试从DataSource自动检测数据库类型。平台之间的主要区别主要在于主键自增的策略，因此通常也可能需要覆盖incrementmenterFactory（使用Spring Framework中的一个标准实现）。
+
+如果即使这样做不起作用，或者你没有使用RDBMS，那么唯一的选择可能是实现SimpleJobRepository所依赖的各种Dao接口，并以正常的Spring方式手动连接一个。
+
+=== 配置JobLauncher
+
+使用@EnableBatchProcessing时，会为您提供开箱即用的JobRegistry。 本节介绍如何配置您自己的。
+
+JobLauncher接口的最基本实现是SimpleJobLauncher。它唯一需要的依赖是JobRepository，以获得执行：
+[source,java]
+----
+@Override
+protected JobLauncher createJobLauncher() throws Exception {
+        SimpleJobLauncher jobLauncher = new SimpleJobLauncher();
+        jobLauncher.setJobRepository(jobRepository);
+        jobLauncher.afterPropertiesSet();
+        return jobLauncher;
+}
+----
+获得JobExecution后，它将传递给Job的execute方法，最终将JobExecution返回给调用者：
+
+iamge::../images/job-launcher-sequence-sync.png[]
+
+序列很简单，从调度程序启动时效果很好。 但是，尝试从HTTP请求启动时会出现问题。在这种情况下，启动需要异步完成，以便SimpleJobLauncher立即返回给调用者。这是因为在长时间运行的进程（如批处理）所需的时间内保持HTTP请求保持打开是不好的做法。 下面是一个示例序列：
+
+image::../images/job-launcher-sequence-async.png[]
+
+通过配置TaskExecutor，可以轻松配置SimpleJobLauncher以允许此方案：
+[source,java]
+----
+@Bean
+public JobLauncher jobLauncher() {
+        SimpleJobLauncher jobLauncher = new SimpleJobLauncher();
+        jobLauncher.setJobRepository(jobRepository());
+        jobLauncher.setTaskExecutor(new SimpleAsyncTaskExecutor());
+        jobLauncher.afterPropertiesSet();
+        return jobLauncher;
+}
+----
+
+spring TaskExecutor接口的任何实现都可用于控制作业异步执行的方式。
+
+=== 运行Job
+
+启动批处理作业至少需要两件事：要启动的作业和JobLauncher.两者都可以包含在相同的上下文或不同的上下文中。例如，如果从命令行启动作业，则将为每个作业实例化一个新的JVM，因此每个作业都将拥有自己的JobLauncher。但是，如果从HttpRequest范围内的Web容器内运行，通常会有一个JobLauncher，配置为异步作业启动，多个请求将被调用以启动其作业。
+
+
+==== 从命令行启动Job
+
+对于想要从企业调度程序运行其作业的用户，命令行是主要接口。这是因为大多数调度程序（Quartz除外，除非使用NativeJob）直接与操作系统进程一起工作，主要是使用shell脚本启动。除了shell脚本之外，还有许多方法可以启动Java进程，例如Perl，Ruby，甚至是诸如ant或maven之类的“构建工具”。但是，由于大多数人都熟悉shell脚本，因此本示例将重点介绍它们。
+
+因为启动作业的脚本必须启动Java虚拟机，所以需要一个带有main方法的类作为主要入口点。Spring Batch提供CommandLineJobRunner实现此目的.重要的是要注意，这只是引导应用程序的一种方法，但是有很多方法可以启动Java进程，并且这个类绝不应该被视为确定的。CommandLineJobRunner有四个作用:
+
+. 加载适当的ApplicationContext
+. 将命令行参数解析为JobParameters
+. 根据参数找到适当的作业
+. 使用应用程序上下文中提供的JobLauncher启动作业。
+
+所有这些任务都只使用传入的参数完成。以下是必需的参数：
+
+|===
+|jobPath|将用于创建ApplicationContext的XML文件的位置。此文件应包含运行完整作业所需的所有内容
+|jobName|要运行的作业的名称。
+|===
+
+这些参数必须首先传入jobPath，然后jobName。之后的所有参数都被视为JobParameters，并且必须采用'name = value'的格式：
+	java CommandLineJobRunner io.spring.EndOfDayJobConfiguration endOfDay schedule.date(date)=2007/05/05
+
+在大多数情况下，您可能希望使用清单在jar中声明主类，但为简单起见，该类是直接使用的。
+
+. io.spring.EndOfDayJobConfiguration:完全限定类名的Job配置类
+. endOfDay:job的名称
+. schedule.date(date)=2007/05/05:改值会被转化成JobParameters
+
+下面是完整的配置类:
+[source,java]
+----
+@Configuration
+@EnableBatchProcessing
+public class EndOfDayJobConfiguration {
+
+    @Autowired
+    private JobBuilderFactory jobBuilderFactory;
+
+    @Autowired
+    private StepBuilderFactory stepBuilderFactory;
+
+    @Bean
+    public Job endOfDay() {
+        return this.jobBuilderFactory.get("endOfDay")
+                                    .start(step1())
+                                    .build();
+    }
+
+    @Bean
+    public Step step1() {
+        return this.stepBuilderFactory.get("step1")
+                                    .tasklet((contribution, chunkContext) -> null)
+                                    .build();
+    }
+}
+----
+
+这个例子过于简单了，因为在Spring Batch中运行批处理作业有很多要求，但它有助于显示CommandLineJobRunner的两个主要要求：Job和JobLauncher.
+
+
+从命令行启动批处理作业时，通常使用企业调度程序。大多数调度程序都相当愚蠢，只能在进程级别工作。这意味着他们只知道某些操作系统进程，例如他们正在调用的shell脚本。在这种情况下，知道作业成功或失败通信的唯一方法是通过返回代码.返回码是由进程返回到调度程序的数字，指示运行的结果。在最简单的情况下：0表示成功，1表示失败。现实场景中可能很复杂,JobA调用JobB返回4,调用JobB却返回5.这种类型的行为是在调度程序级别配置的，但重要的是，诸如Spring Batch之类的处理框架提供了一种返回特定批处理作业的“退出代码”的数字表示的方法。在Spring Batch中，它封装在ExitStatus中，第5章将对此进行更详细的介绍。出于讨论退出代码的目的，唯一需要知道的是ExitStatus具有由框架（或开发人员）设置的退出代码属性，并作为JobLauncher返回的JobExecution的一部分返回。CommandLineJobRunner使用ExitCodeMapper接口将此字符串值转换为数字：
+[source,java]
+----
+public interface ExitCodeMapper {
+
+    public int intValue(String exitCode);
+
+}
+----
+ExitCodeMapper的基本契约是，给定一个字符串退出代码，将返回一个数字表示。作业运行器使用的默认实现是SimpleJvmExitCodeMapper，它返回0表示完成，1表示一般错误，2表示任何作业运行器错误，例如无法在提供的上下文中找到作业。如果需要比上面3个值更复杂的东西，则必须提供ExitCodeMapper接口的自定义实现。由于CommandLineJobRunner是创建ApplicationContext的类，因此无法“连接在一起”，因此必须自动连接需要覆盖的任何值。这意味着如果在BeanFactory中找到ExitCodeMapper的实现，则会在创建上下文后将其注入到运行器中。要提供自己的ExitCodeMapper，需要做的就是将实现声明为根级别bean，并确保它是由运行器加载的ApplicationContext的一部分。
+
+
+==== 从web容器启动Job
+
+历史上，如上所述，已经从命令行启动诸如批处理作业的离线处理。但是，在很多情况下，从HttpRequest启动是一个更好的选择。许多此类用例包括报告，临时作业运行和Web应用程序支持。因为按定义--批处理作业长时间运行，所以最重要的问题是确保以异步方式启动作业：
+
+image::../images/launch-from-request.png[]
+
+在这种情况下，控制器是一个Spring MVC控制器.控制器使用已配置为异步启动的JobLauncher启动作业，该作业立即返回JobExecution。Job可能仍在运行，但是，这种非阻塞行为允许控制器立即返回，这在处理HttpRequest时是必需的。
+[source,java]
+----
+@Controller
+public class JobLauncherController {
+
+    @Autowired
+    JobLauncher jobLauncher;
+
+    @Autowired
+    Job job;
+
+    @RequestMapping("/jobLauncher.html")
+    public void handle() throws Exception{
+        jobLauncher.run(job, new JobParameters());
+    }
+}
+----
+
+=== 高级元数据使用
+
+到目前为止，已经讨论了JobLauncher和JobRepository接口。 它们共同代表了简单的作业启动和批处理域对象的基本CRUD操作：
+image::../images/job-repository.png[]
+
+JobLauncher使用JobRepository创建新的JobExecution对象并运行它们。 Job和Step实现稍后使用相同的JobRepository在作业运行期间执行相同执行的基本更新。基本操作足以满足简单场景，但在具有数百个批处理作业和复杂调度要求的大型批处理环境中，需要更高级的元数据访问：
+
+iamge::../images/job-repository-advanced.png[]
+JobExplorer和JobOperator接口（将在下面讨论）添加了用于查询和控制元数据的附加功能。
+
+==== 查询存储库
+任何高级功能之前的最基本需求是能够在存储库中查询现有执行。 JobExplorer界面提供此功能：
+[source,java]
+----
+public interface JobExplorer {
+
+    List<JobInstance> getJobInstances(String jobName, int start, int count);
+
+    JobExecution getJobExecution(Long executionId);
+
+    StepExecution getStepExecution(Long jobExecutionId, Long stepExecutionId);
+
+    JobInstance getJobInstance(Long instanceId);
+
+    List<JobExecution> getJobExecutions(JobInstance jobInstance);
+
+    Set<JobExecution> findRunningJobExecutions(String jobName);
+}
+----
+从上面的方法签名可以看出，JobExplorer是JobRepository的只读版本，就像JobRepository一样，它可以通过工厂bean轻松配置：
+[source,java]
+----
+@Override
+public JobExplorer getJobExplorer() throws Exception {
+        JobExplorerFactoryBean factoryBean = new JobExplorerFactoryBean();
+        factoryBean.setDataSource(this.dataSource);
+        return factoryBean.getObject();
+}
+----
+在本章的前面部分提到，可以修改JobRepository的表前缀以允许不同的版本或模式。因为JobExplorer使用相同的表，所以它也需要能够设置前缀：
+[source,java]
+----
+@Override
+public JobExplorer getJobExplorer() throws Exception {
+        JobExplorerFactoryBean factoryBean = new JobExplorerFactoryBean();
+        factoryBean.setDataSource(this.dataSource);
+        factoryBean.setTablePrefix("SYSTEM.");
+        return factoryBean.getObject();
+}
+...
+----
+==== JobRegistry
+JobRegistry（及其父接口JobLocator）不是必需的，但如果要跟踪上下文中可用的作业，它可能很有用。当在其他地方（例如在子上下文中）创建作业时，它对于在应用程序上下文中集中收集作业也是有用的。自定义JobRegistry实现还可用于操作已注册作业的名称和其他属性。框架只提供了一个实现，它基于从作业名称到作业实例的简单映射。
+
+使用@EnableBatchProcessing时，会为您提供开箱即用的JobRegistry。 如果您想配置自己的：
+[source,java]
+----
+@Override
+@Bean
+public JobRegistry jobRegistry() throws Exception {
+        return new MapJobRegistry();
+}
+...
+----
+有两种方法可以自动填充JobRegistry：使用bean后处理器和使用注册器生命周期组件。以下各节介绍了这两种机制。
+**JobRegistryBeanPostProcessor**
+这是一个bean后处理器，可以在创建时注册所有作业：
+[source,java]
+----
+@Bean
+public JobRegistryBeanPostProcessor jobRegistryBeanPostProcessor() {
+    JobRegistryBeanPostProcessor postProcessor = new JobRegistryBeanPostProcessor();
+    postProcessor.setJobRegistry(jobRegistry());
+    return postProcessor;
+}
+----
+尽管不是严格必要的，但是示例中的后处理器已经被赋予id，以便它可以被包括在子上下文中（例如，作为父bean定义）并且使得在那里创建的所有作业也被自动注册。
+
+**AutomaticJobRegistrar**
+这是一个生命周期组件，可以创建子上下文并在创建时从这些上下文中注册作业。这样做的一个优点是，虽然子上下文中的作业名称仍然必须在注册表中是全局唯一的，但它们的依赖项可以具有“自然”名称。因此，例如，您可以创建一组XML配置文件，每个文件只有一个Job，但都具有相同bean名称的ItemReader的不同定义，例如 “读者”。如果所有这些文件都被导入到同一个上下文中，那么读者定义会相互冲突并相互覆盖，但是使用自动注册器可以避免这种情况。这样可以更轻松地集成由应用程序的单独模块提供的作业。
+[source,java]
+----
+@Bean
+public AutomaticJobRegistrar registrar() {
+
+    AutomaticJobRegistrar registrar = new AutomaticJobRegistrar();
+    registrar.setJobLoader(jobLoader());
+    registrar.setApplicationContextFactories(applicationContextFactories());
+    registrar.afterPropertiesSet();
+    return registrar;
+
+}
+----
+
+==== JobOperator
+
+如前所述，JobRepository在元数据上提供CRUD操作，JobExplorer提供对元数据的只读操作。 但是，这些操作在一起使用以执行常见的监视任务（例如停止，重新启动或汇总作业）时非常有用，这通常由批处理操作员执行。 Spring Batch通过JobOperator接口提供这些类型的操作：
+[source,java]
+----
+public interface JobOperator {
+
+    List<Long> getExecutions(long instanceId) throws NoSuchJobInstanceException;
+
+    List<Long> getJobInstances(String jobName, int start, int count)
+          throws NoSuchJobException;
+
+    Set<Long> getRunningExecutions(String jobName) throws NoSuchJobException;
+
+    String getParameters(long executionId) throws NoSuchJobExecutionException;
+
+    Long start(String jobName, String parameters)
+          throws NoSuchJobException, JobInstanceAlreadyExistsException;
+
+    Long restart(long executionId)
+          throws JobInstanceAlreadyCompleteException, NoSuchJobExecutionException,
+                  NoSuchJobException, JobRestartException;
+
+    Long startNextInstance(String jobName)
+          throws NoSuchJobException, JobParametersNotFoundException, JobRestartException,
+                 JobExecutionAlreadyRunningException, JobInstanceAlreadyCompleteException;
+
+    boolean stop(long executionId)
+          throws NoSuchJobExecutionException, JobExecutionNotRunningException;
+
+    String getSummary(long executionId) throws NoSuchJobExecutionException;
+
+    Map<Long, String> getStepExecutionSummaries(long executionId)
+          throws NoSuchJobExecutionException;
+
+    Set<String> getJobNames();
+
+}
+----
+上述操作表示来自许多不同接口的方法，例如JobLauncher，JobRepository，JobExplorer和JobRegistry。 因此，提供的JobOperator实现SimpleJobOperator具有许多依赖项：
+[source,java]
+----
+ @Bean
+ public SimpleJobOperator jobOperator(JobExplorer jobExplorer,
+                                JobRepository jobRepository,
+                                JobRegistry jobRegistry) {
+
+        SimpleJobOperator jobOperator = new SimpleJobOperator();
+
+        jobOperator.setJobExplorer(jobExplorer);
+        jobOperator.setJobRepository(jobRepository);
+        jobOperator.setJobRegistry(jobRegistry);
+        jobOperator.setJobLauncher(jobLauncher);
+
+        return jobOperator;
+ }
+----
+
+==== JobParametersIncrementer
+
+JobOperator上的大多数方法都是不言自明的，可以在界面的javadoc上找到更详细的解释。但是，startNextInstance方法值得注意。此方法将始终启动Job的新实例。如果JobExecution中存在严重问题并且需要从一开始就重新开始作业，这可能非常有用。与JobLauncher不同，它需要一个新的JobParameters对象，如果参数与任何先前的参数集不同，它将触发新的JobInstance，startNextInstance方法将使用绑定到Job的JobParametersIncrementer强制Job到一个新实例：
+[source,java]
+----
+public interface JobParametersIncrementer {
+
+    JobParameters getNext(JobParameters parameters);
+
+}
+----
+
+JobParametersIncrementer的契约是，给定一个JobParameters对象，它将通过递增它可能包含的任何必要值来返回“下一个”JobParameters对象。此策略很有用，因为框架无法知道JobParameters的哪些更改使其成为“下一个”实例。例如，如果JobParameters中唯一的值是日期，并且应该创建下一个实例，那么该值是否应该增加一天？或一周（如果工作是每周一次）？对于有助于识别作业的任何数值，也可以这样说，如下所示：
+[source,java]
+----
+public class SampleIncrementer implements JobParametersIncrementer {
+
+    public JobParameters getNext(JobParameters parameters) {
+        if (parameters==null || parameters.isEmpty()) {
+            return new JobParametersBuilder().addLong("run.id", 1L).toJobParameters();
+        }
+        long id = parameters.getLong("run.id",1L) + 1;
+        return new JobParametersBuilder().addLong("run.id", id).toJobParameters();
+    }
+}
+----
+
+在此示例中，使用键“run.id”的值用于区分JobInstances。如果传入的JobParameters为null，则可以假定Job之前从未运行过，因此可以返回其初始状态。 但是，如果不是，则获取旧值，递增1并返回。
+增量器可以通过构建器中提供的增量器方法与“作业”相关联：
+[source,java]
+----
+@Bean
+public Job footballJob() {
+    return this.jobBuilderFactory.get("footballJob")
+                                     .incrementer(sampleIncrementer())
+                                     ...
+                     .build();
+}
+----
+
+==== Stopping a Job
+JobOperator最常见的用例之一是优雅地停止Job：
+[source,java]
+----
+Set<Long> executions = jobOperator.getRunningExecutions("sampleJob");
+jobOperator.stop(executions.iterator().next());
+----
+关闭不是立竿见影的，因为没有办法强制立即关闭，特别是如果执行当前是框架无法控制的开发人员代码，例如业务服务。 但是，只要控件返回到框架，它就会将当前StepExecution的状态设置为BatchStatus.STOPPED，保存它，然后在完成之前对JobExecution执行相同操作。
+
+
+==== Aborting a Job
+
+可以重新启动失败的作业执行（如果可以重新启动作业）。框架将不会重新启动状态为ABANDONED的作业执行。 ABANDONED状态也用于步骤执行，以在重新启动的作业执行中将它们标记为可跳过：如果作业正在执行并遇到在先前失败的作业执行中已标记为ABANDONED的步骤，则它将继续执行下一步骤（ 由作业流程定义和步骤执行退出状态确定）。
+
+如果进程死亡（“kill -9”或服务器故障），那么该作业当然没有运行，但JobRepository无法知道，因为在进程死亡之前没有人告诉它。您必须手动告诉它您知道执行失败或应被视为中止（将其状态更改为FAILED或ABANDONED） - 这是一个业务决策，并且无法自动执行。如果状态不可重新启动，或者您知道重启数据有效，则仅将状态更改为FAILED。 Spring Batch Admin JobService中有一个实用程序可以中止作业执行。

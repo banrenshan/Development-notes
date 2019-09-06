@@ -1,0 +1,174 @@
+= 日期API
+
+== Instant
+表示精确的时间点,由从1970-1-1 00:00:00到现在的秒数和偏移该秒数的毫秒数组成.
+
+== Duration
+Duration对象表示两个时间点之间的距离
+
+== Period
+表示两个日期之间的距离
+
+== LocalDate
+LocalDate 表示像 2017-01-01这样的日期。它包含有年份、月份、当月天数，它不不包含一天中的时间，以及时区信息
+
+
+== 日期校正器TemporalAdjuster
+如果想找到某个月的第一个周五，或是某个月的最后一天，像这样的日期就可以使用TemporalAdjuster来进行日期调整。 
+
+[source,java]
+----
+//2017-02-03的下一个星期五(包含当天)  2017-03-03
+LocalDate.of(2017, 2, 3).with(TemporalAdjusters.nextOrSame(DayOfWeek.FRIDAY));
+//2017-02-03的下一个星期五(不包含当天)  2017-02-10
+LocalDate.of(2017, 2, 3).with(TemporalAdjusters.next(DayOfWeek.FRIDAY));
+//2月中的第3个星期五  2017-02-17
+LocalDate.of(2017, 2, 3).with(TemporalAdjusters.dayOfWeekInMonth(3, DayOfWeek.FRIDAY));
+//2月中的最后一个星期五  2017-02-24
+LocalDate.of(2017, 2, 3).with(TemporalAdjusters.lastInMonth(DayOfWeek.FRIDAY));
+//下个月的第一天
+LocalDate.of(2017, 2, 3).with(TemporalAdjusters.firstDayOfNextMonth());
+----
+
+
+== LocalTime
+LocalTime表示一天中的某个时间，例如18:00:00。LocaTime与LocalDate类似，他们也有相似的API。
+
+== LocalDateTime
+LocalDateTime表示一个日期和时间，它适合用来存储确定时区的某个时间点。不适合跨时区的问题。
+
+
+== ZonedDateTime
+包含时区信息,格式是2017-01-20T17:35:20.885+08:00[Asia/Shanghai]
+.创建时区时间
+[source,java]
+----
+//2017-01-20T17:35:20.885+08:00[Asia/Shanghai]
+ZonedDateTime.now();
+//2017-01-01T12:00+08:00[Asia/Shanghai]
+ZonedDateTime.of(2017, 1, 1, 12, 0, 0, 0, ZoneId.of("Asia/Shanghai"));
+//使用一个准确的时间点来创建ZonedDateTime，下面这个代码会得到当前的UTC时间，会比北京时间早8个小时
+ZonedDateTime.ofInstant(Instant.now(), ZoneId.of("UTC"));
+----
+
+== DateTimeFormatter
+DateTimeFormatter使用了三种格式化方法来打印日期和时间
+
+.预定义的标准格式
+[source,java]
+----
+//2017-01-01
+DateTimeFormatter.ISO_LOCAL_DATE.format(LocalDate.of(2017, 1, 1))
+//20170101
+DateTimeFormatter.BASIC_ISO_DATE.format(LocalDate.of(2017, 1, 1));
+//2017-01-01T09:10:00
+DateTimeFormatter.ISO_LOCAL_DATE_TIME.format(LocalDateTime.of(2017, 1, 1, 9, 10, 0));
+----
+
+.语言环境相关的格式化风格
+[source,java]
+----
+//2017年1月1日 星期日
+DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).format(LocalDate.of(2017, 1, 1));
+//上午09时10分00秒
+DateTimeFormatter.ofLocalizedTime(FormatStyle.LONG).format(LocalTime.of(9, 10, 0));
+//2017-2-27 22:32:03
+DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM).format(LocalDateTime.now());
+----
+
+上面的方法都使用的是默认的语言环境，如果想改语言环境，需要使用withLocale方法来改变。
+[source,java]
+----
+DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM).withLocale(Locale.US).format(LocalDateTime.now());
+----
+
+.使用自定义模式格式化
+[source,java]
+----
+//2017-02-27 22:48:52
+DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now())
+----
+
+== 重复注解
+
+在java8 以前，同一个程序元素前最多只能有一个相同类型的注解；如果需要在同一个元素前使用多个相同类型的注解，则必须使用注解“容器”
+[source,java]
+----
+public@interfaceAuthority {
+     String role();
+}
+public@interfaceAuthorities {     //@Authorities注解作为可以存储多个@Authority注解的容器
+
+    Authority[] value();
+}
+
+publicclassRepeatAnnotationUseOldVersion {
+
+    @Authorities({@Authority(role="Admin"),@Authority(role="Manager")})
+
+    publicvoiddoSomeThing(){
+
+    }
+}
+----
+
+java8新增了重复注解，其使用方式为：
+
+[source,java]
+----
+@Repeatable(Authorities.class)
+public@interfaceAuthority {
+     String role();
+}
+ 
+public@interfaceAuthorities {
+    Authority[] value();
+}
+ 
+publicclassRepeatAnnotationUseNewVersion {
+    @Authority(role="Admin")
+    @Authority(role="Manager")
+    publicvoiddoSomeThing(){ }
+}
+----
+
+不同的地方是，创建重复注解Authority时，加上@Repeatable,指向存储注解Authorities，在使用时候，直接可以重复使用Authority注解。从上面例子看出，java 8里面做法更适合常规的思维，可读性强一点。但是，仍然需要定义容器注解。
+
+两种方法获得的效果相同。重复注解知识一种简化写法，这种简化写法是一种假象：多个重复注解其实会被作为“容器”注解的value成员 的数组元素处理。
+
+
+== 类型注解
+
+Java8为ElementType枚举增加了TYPE_PARAMETER、TYPE_USE两个枚举值，从而可以使用@Target(ElementType_TYPE_USE)修饰注解定义，这种注解被称为类型注解，可以用在任何使用到类型的地方。
+
+在java8以前，注解只能用在各种程序元素（定义类、定义接口、定义方法、定义成员变量...）上。从java8开始，类型注解可以用在任何使用到类型的地方。
+
+. TYPE_PARAMETER：表示该注解能写在类型参数的声明语句中。    类型参数声明如： <T>、<T extends Person>
+. TYPE_USE:表示注解可以再任何用到类型的地方使用，比如允许在如下位置使用：
+
+  . 创建对象（用new关键字创建）
+  . 类型转换
+  . 使用implements实现接口
+  .使用throws声明抛出异常
+
+[source,java]
+----
+@Target(ElementType.TYPE_USE)
+@interface NotNull{ }
+//定义类时使用
+@NotNull
+public class TypeAnnotationTest  implements Serializable    //在implements时使用
+{
+    //在方法形参中使用
+ public static void main(@NotNull String [] args)  throws @NotNull  FileNotFoundException //在throws时使用
+ {
+       Object  obj="fkjava.org";
+       //使用强制类型转换时使用
+       String str=(@NotNull String) obj;
+       //创建对象时使用
+       Object win=new (@NotNull) JFrame("疯狂软件");   
+ } 
+  //泛型中使用
+ public void foo(List<@NotNull String> info)  { }
+}
+----

@@ -1,0 +1,149 @@
+= 代理
+
+== yum源代理设置
+
+./etc/yum.conf
+[source,shell]
+----
+proxy=http://210.45.72.XX:808
+proxy_username=username
+proxy_password=password
+----
+
+== linux bash设置代理
+
+./etc/profile
+[source,shell]
+----
+export http_proxy="http://username:password@210.45.72.XX:808"
+export https_proxy="http://username:password@210.45.72.XX:808"
+----
+
+== NPM
+[sourcee,shell]
+----
+npm config set proxy http://username:password@host:port
+npm config set https-proxy http://username:password@host:port
+----
+
+== Yarn
+[source,shell]
+----
+yarn config set proxy http://username:password@host:port
+yarn config set https-proxy http://username:password@host:port
+----
+
+== Git
+[source,shell]
+----
+git config --global http.proxy http://username:password@host:port
+git config --global https.proxy http://username:password@host:port
+----
+
+== Maven
+[source,shell]
+----
+<proxies>
+    <proxy>
+        <id>id</id>
+        <active>true</active>
+        <protocol>http</protocol>
+        <username>username</username>
+        <password>password</password>
+        <host>host</host>
+        <port>port</port>
+        <nonProxyHosts>local.net|some.host.com</nonProxyHosts>
+    </proxy>
+</proxies>
+----
+
+== Maven Wrapper
+创建.mvn/jvm.config文件:
+[source,shell]
+----
+-Dhttp.proxyHost=host 
+-Dhttp.proxyPort=port 
+-Dhttps.proxyHost=host 
+-Dhttps.proxyPort=port 
+-Dhttp.proxyUser=username 
+-Dhttp.proxyPassword=password
+----
+
+== maven wrapper命令行代理
+
+[source,shell]
+----
+mvnw  -Dhttps.proxyHost=172.16.0.1 -Dhttps.proxyPort=3128  package
+----
+
+这些应用程序都是java编写,所有java编写的程序都可以如此指定.
+
+== Gradle
+
+gradle.properties和gradle/wrapper/gradle-wrapper.properties文件中:
+[source,shell]
+----
+## Proxy setup
+systemProp.proxySet="true"
+systemProp.http.keepAlive="true"
+systemProp.http.proxyHost=host
+systemProp.http.proxyPort=port
+systemProp.http.proxyUser=username
+systemProp.http.proxyPassword=password
+systemProp.http.nonProxyHosts=local.net|some.host.com
+
+systemProp.https.keepAlive="true"
+systemProp.https.proxyHost=host
+systemProp.https.proxyPort=port
+systemProp.https.proxyUser=username
+systemProp.https.proxyPassword=password
+systemProp.https.nonProxyHosts=local.net|some.host.com
+## end of proxy setup
+----
+
+== docker
+
+[source,shell]
+----
+sudo mkdir -p /etc/systemd/system/docker.service.d
+sudo vi /etc/systemd/system/docker.service.d/http-proxy.conf
+----
+内容如下:
+[source,shell]
+----
+[Service]
+Environment="HTTP_PROXY=http://proxy.example.com:80/"
+----
+
+[source,shell]
+----
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+systemctl show --property=Environment docker
+----
+
+=== docker加速器
+[source,shell]
+----
+curl -sSL https://get.daocloud.io/daotools/set_mirror.sh | sh -s http://f1361db2.m.daocloud.io
+----
+
+
+=== Vagrant代理
+
+安装插件
+[source,shell]
+----
+vagrant plugin install vagrant-proxyconf
+----
+
+[source,shell]
+----
+        if Vagrant.has_plugin?("vagrant-proxyconf")
+            config.proxy.http = "http://172.16.0.1:3128" 
+            config.proxy.https = "http://172.16.0.1:3128" 
+            config.proxy.no_proxy = "localhost,127.0.0.1" 
+
+        end
+----
+

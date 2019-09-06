@@ -1,0 +1,127 @@
+= mysql
+
+== 安装
+
+=== rpm安装
+
+1.下载镜像仓库
+[sourcee,shell]
+----
+wget -i -c http://dev.mysql.com/get/mysql57-community-release-el7-10.noarch.rpm
+----
+
+2.安装镜像库
+[source,shell]
+----
+yum -y install mysql57-community-release-el7-10.noarch.rpm
+----
+
+3.安装mysql
+[source,shell]
+----
+yum -y install mysql-community-server
+----
+
+NOTE: 这步可能会花些时间，安装完成后就会覆盖掉之前的mariadb。
+
+
+4.启动mysql服务
+[source,shell]
+----
+systemctl start  mysqld.service
+----
+
+5.查找初始化的root密码
+[source,shell]
+----
+grep "password" /var/log/mysqld.log
+----
+
+6.登录并修改root用户密码
+[source,shell]
+----
+mysql -uroot -p
+----
+
+[source,shell]
+----
+ALTER USER 'root'@'localhost' IDENTIFIED BY 'new password';
+----
+
+=== tar包安装
+
+0.安装类库
+[source,shell]
+----
+yum install -y libaio
+----
+
+1.创建mysql用户
+[source,shell]
+----
+ groupadd mysql
+ useradd -r -g mysql -s /bin/false mysql
+----
+
+2.解压到指定目录,并创建软连接
+[source,shell]
+----
+tar zxvf /path/to/mysql-VERSION-OS.tar.gz -C .
+ln -s full-path-to-mysql-VERSION-OS /usr/local/mysql
+----
+
+3.创建数据目录并授权
+[source,shell]
+----
+mkdir /usr/local/mysql/data
+chown mysql:mysql /usr/local/mysql/data
+chmod 750 /usr/local/mysql/data
+----
+
+4.初始化
+[source,shell]
+----
+bin/mysqld --initialize --user=mysql --basedir=/usr/local/mysql --datadir=/usr/local/mysql/data
+----
+
+NOTE: 此时会在最后生成mysql的初始化密码
+
+5.部署具有安全连接支持的服务器
+[source,shell]
+----
+bin/mysql_ssl_rsa_setup
+----
+
+6.启动数据库
+[source,shell]
+----
+bin/mysqld_safe --user=mysql &
+----
+
+IMPORTANT: centos会预装mariadb,/etc/my.cnf文件的存在会影响到mysql,运行上面的命令时,先删除该文件.
+
+7.登录并修改密码
+[source,shell]
+----
+mysql -hlocalhost -uroot -p
+ALTER USER 'root'@'localhost' IDENTIFIED BY 'new password';
+----
+
+8.创建自启动服务
+[source,shell]
+----
+cp support-files/mysql.server /etc/init.d/mysql.server
+
+----
+
+9.启动mysql
+[source,shell]
+----
+/etc/init.d/mysqld start
+----
+
+10.查看进程
+[source,shell]
+----
+ps aux |grep mysqld
+----

@@ -1,0 +1,275 @@
+= JDK动态代理
+:toc: left
+:icons: font
+:sectanchors: 
+:toclevels: 4
+:source-highlighter: pygments
+:pygments-style: manni
+:source-linenums-option: 
+
+== 代理模式
+代理模式是常用的java设计模式，他的特征是代理类与委托类有同样的接口，代理类主要负责为委托类预处理消息、过滤消息、把消息转发给委托类，以及事后处理消息等。代理类与委托类之间通常会存在关联关系，一个代理类的对象与一个委托类的对象关联，代理类的对象本身并不真正实现服务，而是通过调用委托类的对象的相关方法，来提供特定的服务。简单的说就是，我们在访问实际对象时，是通过代理对象来访问的，代理模式就是在访问实际对象时引入一定程度的间接性，因为这种间接性，可以附加多种用途。
+
+== 静态代理
+
+编译时就已经将接口，被代理类，代理类等确定下来。在程序运行之前，代理类的.class文件就已经生成。
+
+.接口
+[source,java]
+----
+public interface Person {
+    void giveMoney();
+}
+----
+
+.被代理类
+[source,java]
+----
+public class Student implements Person {
+    private String name;
+    public Student(String name) {
+        this.name = name;
+    }
+    
+    @Override
+    public void giveMoney() {
+       System.out.println(name + "上交班费50元");
+    }
+}
+----
+
+.代理类
+[source,java]
+----
+public class StudentsProxy implements Person{
+    //被代理对象
+    Student stu;
+    
+    public StudentsProxy(Person stu) {
+        if(stu.getClass() == Student.class) {
+            this.stu = (Student)stu;
+        }
+    }
+    
+    public void giveMoney() {
+        stu.giveMoney();
+    }
+}
+----
+
+.调用
+[source,java]
+----
+public class StaticProxyTest {
+    public static void main(String[] args) {
+        Person zhangsan = new Student("张三");
+        Person monitor = new StudentsProxy(zhangsan);
+        monitor.giveMoney();
+    }
+}
+----
+
+代理模式最主要的就是有一个公共接口（Person），一个具体的类（Student），一个代理类（StudentsProxy）,代理类持有具体类的实例，代为执行具体类实例方法。上面说到，代理模式就是在访问实际对象时引入一定程度的间接性，因为这种间接性，可以附加多种用途。这里的间接性就是指不直接调用实际对象的方法，那么我们在代理过程中就可以加上一些其他用途。
+
+== 动态代理
+ 代理类在程序运行时创建的代理方式被成为动态代理。 我们上面静态代理的例子中，代理类(studentProxy)是自己定义好的，在程序运行之前就已经编译完成。然而动态代理，代理类并不是在Java代码中定义的，而是在运行时根据我们在Java代码中的“指示”动态生成的。相比于静态代理， 动态代理的优势在于可以很方便的对代理类的函数进行统一的处理，而不用修改每个代理类中的方法。
+
+ [source,java]
+ ----
+ public class P {
+
+    interface Ihello {
+        void say(String name);
+    }
+
+    static class Myhello implements Ihello {
+
+        @Override
+        public void say(String name) {
+            System.err.println(name);
+        }
+    }
+
+    static class myHandler implements InvocationHandler {
+
+        private Object target;
+
+        public myHandler(Object target) {
+            this.target = target;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+
+            System.err.println(proxy==target);// proxy是代理对象，target是被代理对象
+            System.err.println("执行被代理对象方法之前");
+            Object result = method.invoke(target, args);
+            System.err.println("执行被代理对象方法之后");
+            return result;
+        }
+    }
+
+    public static void main(String[] args) {
+
+        Class<?> proxyClass = Proxy.getProxyClass(P.class.getClassLoader(), Ihello.class);
+        Constructor<?> constructor = proxyClass.getConstructor(InvocationHandler.class);
+        Ihello o= (Ihello) constructor.newInstance(new myHandler(new Myhello()));
+        o.say("赵志强");
+    }
+}
+
+ ----
+
+ .代理的简化调用
+ [source,java]
+ ----
+        Myhello target = new Myhello();
+        Ihello o = (Ihello) Proxy.newProxyInstance(P.class.getClassLoader(), new Class[]{Ihello.class}, new myHandler(target));
+        o.say("赵志强");
+ ----
+
+
+ == 动态代理的原理
+
+ 上面我们利用Proxy类的newProxyInstance方法创建了一个动态代理对象，查看该方法的源码，发现它只是封装了创建动态代理类的步骤：
+ [source,java]
+ ----
+ public static Object newProxyInstance(ClassLoader loader,
+                                          Class<?>[] interfaces,
+                                          InvocationHandler h)
+        throws IllegalArgumentException
+    {
+        Objects.requireNonNull(h);
+
+        final Class<?>[] intfs = interfaces.clone();
+        final SecurityManager sm = System.getSecurityManager();
+        if (sm != null) {
+            checkProxyAccess(Reflection.getCallerClass(), loader, intfs);
+        }
+
+        /*
+         * Look up or generate the designated proxy class.
+         */
+        Class<?> cl = getProxyClass0(loader, intfs);
+
+        /*
+         * Invoke its constructor with the designated invocation handler.
+         */
+        try {
+            if (sm != null) {
+                checkNewProxyPermission(Reflection.getCallerClass(), cl);
+            }
+
+            final Constructor<?> cons = cl.getConstructor(constructorParams);
+            final InvocationHandler ih = h;
+            if (!Modifier.isPublic(cl.getModifiers())) {
+                AccessController.doPrivileged(new PrivilegedAction<Void>() {
+                    public Void run() {
+                        cons.setAccessible(true);
+                        return null;
+                    }
+                });
+            }
+            return cons.newInstance(new Object[]{h});
+        } catch (IllegalAccessException|InstantiationException e) {
+            throw new InternalError(e.toString(), e);
+        } catch (InvocationTargetException e) {
+            Throwable t = e.getCause();
+            if (t instanceof RuntimeException) {
+                throw (RuntimeException) t;
+            } else {
+                throw new InternalError(t.toString(), t);
+            }
+        } catch (NoSuchMethodException e) {
+            throw new InternalError(e.toString(), e);
+        }
+    }
+ ----
+其实，我们最应该关注的是 Class<?> cl = getProxyClass0(loader, intfs);这句，这里产生了代理类，后面代码中的构造器也是通过这里产生的类来获得，可以看出，这个类的产生就是整个动态代理的关键，由于是动态生成的类文件，我这里不具体进入分析如何产生的这个类文件，只需要知道这个类文件时缓存在java虚拟机中的，我们可以通过下面的方法将其打印到文件里面，一睹真容：
+[source,java]
+----
+byte[] classFile = ProxyGenerator.generateProxyClass("$Proxy0", Student.class.getInterfaces());
+        String path = "G:/javacode/javase/Test/bin/proxy/StuProxy.class";
+        try(FileOutputStream fos = new FileOutputStream(path)) {
+            fos.write(classFile);
+            fos.flush();
+            System.out.println("代理类class文件写入成功");
+        } catch (Exception e) {
+           System.out.println("写文件错误");
+        }
+----
+
+对这个class文件进行反编译，我们看看jdk为我们生成了什么样的内容：
+
+[source,java]
+----
+public final class $Proxy1 extends Proxy implements Ihello {
+    private static Method m1;
+    private static Method m2;
+    private static Method m3;
+    private static Method m0;
+
+    public $Proxy1(InvocationHandler var1) throws  {
+        super(var1);
+    }
+
+    public final boolean equals(Object var1) throws  {
+        try {
+            return ((Boolean)super.h.invoke(this, m1, new Object[]{var1})).booleanValue();
+        } catch (RuntimeException | Error var3) {
+            throw var3;
+        } catch (Throwable var4) {
+            throw new UndeclaredThrowableException(var4);
+        }
+    }
+
+    public final String toString() throws  {
+        try {
+            return (String)super.h.invoke(this, m2, (Object[])null);
+        } catch (RuntimeException | Error var2) {
+            throw var2;
+        } catch (Throwable var3) {
+            throw new UndeclaredThrowableException(var3);
+        }
+    }
+
+    public final void say(String var1) throws  {
+        try {
+            super.h.invoke(this, m3, new Object[]{var1});
+        } catch (RuntimeException | Error var3) {
+            throw var3;
+        } catch (Throwable var4) {
+            throw new UndeclaredThrowableException(var4);
+        }
+    }
+
+    public final int hashCode() throws  {
+        try {
+            return ((Integer)super.h.invoke(this, m0, (Object[])null)).intValue();
+        } catch (RuntimeException | Error var2) {
+            throw var2;
+        } catch (Throwable var3) {
+            throw new UndeclaredThrowableException(var3);
+        }
+    }
+
+    static {
+        try {
+            m1 = Class.forName("java.lang.Object").getMethod("equals", new Class[]{Class.forName("java.lang.Object")});
+            m2 = Class.forName("java.lang.Object").getMethod("toString", new Class[0]);
+            m3 = Class.forName("com.example.demo.P$Ihello").getMethod("say", new Class[]{Class.forName("java.lang.String")});
+            m0 = Class.forName("java.lang.Object").getMethod("hashCode", new Class[0]);
+        } catch (NoSuchMethodException var2) {
+            throw new NoSuchMethodError(var2.getMessage());
+        } catch (ClassNotFoundException var3) {
+            throw new NoClassDefFoundError(var3.getMessage());
+        }
+    }
+}
+
+----
+我们可以把InvocationHandler看做一个中介类，中介类持有一个被代理对象，在invoke方法中调用了被代理对象的相应方法。通过聚合方式持有被代理对象的引用，把外部对invoke的调用最终都转为对被代理对象的调用。
+
+代理类调用自己方法时，通过自身持有的中介类对象来调用中介类对象的invoke方法，从而达到代理执行被代理对象的方法。也就是说，动态代理通过中介类实现了具体的代理功能。
+
+我们看到代理类继承了Proxy类，所以也就决定了java动态代理只能对接口进行代理，Java的继承机制注定了这些动态代理类们无法实现对class的动态代理。

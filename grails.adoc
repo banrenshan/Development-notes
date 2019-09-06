@@ -1,0 +1,3446 @@
+= grails
+:toc: left
+:icons: font
+
+== 4.配置
+
+==== 4.1.3 日志
+默认情况下，Grails 3.0中的日志记录由Logback日志记录框架处理，可以在grails-app/conf/logback.groovy文件中进行配置。
+
+===== 4.1.3.1 logger名称
+
+Grails工件（控制器，服务......）会自动注入一个log属性。logger打印的名称是完全限定类名.
+
+===== 4.1.3.2 从Stacktrace日志中屏蔽请求参数
+
+当Grails记录堆栈跟踪时，日志消息可能包含当前请求的所有请求参数的名称和值。要屏蔽安全请求参数的值，请在grails.exceptionresolver.params.exclude配置属性中指定参数名称：
+
+[source,yml]
+----
+grails:
+    exceptionresolver:
+        params:
+            exclude:
+                - password
+                - creditCard
+----
+
+通过将grails.exceptionresolver.logRequestParameters config属性设置为false，可以完全关闭请求参数日志记录。当应用程序在开发模式下运行时，默认值为true;对于所有其他环境，默认值为false。
+
+== 7.Object Relational Mapping (GORM)
+
+域类是任何业务应用程序的核心。 他们拥有关于业务流程的状态，并希望也能实现行为。 它们通过关系联系在一起; 一对一，一对多或多对多。
+
+GORM是Grails的对象关系映射（ORM）实现。它使用Hibernate（一种非常流行且灵活的开源ORM解决方案），并且由于Groovy的静态和动态类型的动态特性，以及Grails的约定，创建Grails域类的配置要少得多。
+
+您也可以用Java编写Grails域类。 有关如何使用Java编写域类但仍使用动态持久性方法的信息，请参阅Hibernate Integration一节。 以下是GORM的实际预览:
+[source,groovy]
+----
+def book = Book.findByTitle("Groovy in Action")
+
+book
+  .addToAuthors(name:"Dierk Koenig")
+  .addToAuthors(name:"Guillaume LaForge")
+  .save()
+----
+
+=== 7.1 快速开始
+
+创建域类: `grails create-domain-class helloworld.Person`
+生成grails-app/domain/helloworld/Person.groovy,内容如下:
+[source,groovy]
+----
+package helloworld
+
+class Person {
+}
+----
+
+在类中添加属性,例如:
+[source,groovy]
+----
+class Person {
+    String name
+    Integer age
+    Date lastVisit
+}
+----
+
+==== 7.1.1基本的CRUD
+
+**增加**
+[source,groovy]
+----
+def p = new Person(name: "Fred", age: 40, lastVisit: new Date())
+p.save()
+----
+
+**读取**
+
+Grails透明地向您的域类添加一个隐式id属性，您可以使用它来进行检索：
+[source,groovy]
+----
+def p = Person.get(1)
+assert 1 == p.id
+----
+
+您还可以使用read方法将对象加载为只读状态：
+[source,groovy]
+----
+def p = Person.read(1)
+----
+在这种情况下，底层的Hibernate引擎不会进行任何脏检查，并且该对象不会被持久化。 请注意，如果显式调用save方法，则将对象置于读写状态。
+
+此外，您还可以使用load方法为实例加载代理：
+[source,groovy]
+----
+def p = Person.load(1)
+----
+在调用getId()之外的方法之前，不会发生数据库访问。 然后，Hibernate初始化代理实例，如果没有找到指定id的记录，则抛出异常。
+
+**更新**
+
+更新实例,只需要更改属性,然后调用save方法:
+[source,groovy]
+----
+def p = Person.get(1)
+p.name = "Bob"
+p.save()
+----
+
+**删除**
+[source,groovy]
+----
+def p = Person.get(1)
+p.delete()
+----
+
+http://gorm.grails.org/6.1.x/hibernate[有关使用GORM的更多信息，请参阅GORM项目的专用文档]。
+
+
+
+== 8.web层
+
+=== 8.1 controller
+
+Controller处理请求并创建响应。 Controller可以直接生成响应或委托给视图。 要创建一个控制器，只需在grails-app/ controllers目录中创建一个名称以Controller结尾的类。
+
+==== 8.1.1 创建controller
+
+执行命令: `grails create-controller book` ,会在controller目录下面生成BookController,代码如下:
+[source,groovy]
+----
+class BookController {
+
+    def list() {
+
+        // do controller logic
+        // create model
+
+        return model
+    }
+}
+----
+
+对应的url是: `/book/list`,其中list是方法名称
+
+url映射有几条默认规则,上面的代码为例:
+
+. 当controller里面只有一个方法的时候,你只需要访问 `/book`就会执行该方法
+. 当方法名为index的时候,访问 `/book` 会执行该方法
+. 你可以配置controller的默认方法,只要在controller中声明静态属性,例如:
+	static defaultAction = "list"
+
+==== 8.1.2 作用域
+
+. servletContext:此范围也称为应用程序范围，允许您在整个Web应用程序中共享状态。 servletContext是ServletContext的一个实例
+. session :session允许将状态与给定用户相关联，并且通常使用cookie将会话与客户端相关联。 session对象是HttpSession的一个实例
+. request:请求对象仅允许存储当前请求的对象。 请求对象是HttpServletRequest的实例
+. param: 传入请求的查询字符串或POST参数
+. flash: Grails支持将flash作为临时存储的概念，使属性可用于此请求和下一个请求。 然后清除属性。这对于在重定向之前直接设置消息很有用，参考下面的例子.
+
+可以使用上面的变量名结合Groovy的数组索引运算符来访问作用域，甚至可以使用Servlet API提供的类（如HttpServletRequest）进行访问：
+[source,groovy]
+----
+class BookController {
+    def find() {
+        def findBy = params["findBy"]
+        def appContext = request["foo"]
+        def loggedUser = session["logged_user"]
+    }
+}
+----
+
+您还可以使用de-reference运算符访问作用域中的值，使语法更加清晰：
+[source,groovy]
+----
+class BookController {
+    def find() {
+        def findBy = params.findBy
+        def appContext = request.foo
+        def loggedUser = session.logged_user
+    }
+}
+----
+
+[source,groovy]
+----
+    def index() {
+        println(flash.message)
+        render "首页"
+    }
+
+    def flash() {
+        println(flash.message)
+        flash.message = "你好的,我来设置一下"
+
+        redirect(actionName: "index")
+    }
+----
+
+当访问flash方法的时候,设置message值,然后重定向到index,打印出message的值.当再次访问flash方法的时候,message为空,说明flash重定向之后会清空这个属性.
+
+
+创建grails应用的时候,application.yml设定 `grails.controllers.defaultScope`的值是 `singleton`,如果不设置这个属性,默认是`prototype`
+
+. prototype（默认） - 将为每个请求创建一个新控制器（推荐用于Closure属性的操作）
+. session  - 为用户会话的范围创建一个控制器
+. singleton  - 只存在一个控制器实例（推荐用于作为方法的操作）
+
+当单独修改Controller的作用域的时候,可以在类型添加静态属性
+	static scope = "singleton"
+
+==== 8.1.3模型和视图
+
+**模型**
+
+模型是视图在渲染时使用的Map。 该Map中的键对应于视图可访问的变量名称。 有几种方法可以返回模型。 首先，您可以显式返回Map实例：
+[source,groovy]
+----
+def show() {
+    [book: Book.get(params.id)]
+}
+----
+
+更高级的方法是返回Spring ModelAndView类的实例：
+[source,groovy]
+----
+import org.springframework.web.servlet.ModelAndView
+
+def index() {
+    // get some books just for the index page, perhaps your favorites
+    def favoriteBooks = ...
+
+    // forward to the list view to show them
+    return new ModelAndView("/book/list", [ bookList : favoriteBooks ])
+}
+----
+要记住的一件事是某些变量名称不能在您的模型中使用：`attributes` `application`
+
+**选择视图**
+
+在前两个示例中，没有代码指定要呈现的视图。 那么Grails如何知道选哪一个？答案在于惯例。 Grails将在grails-app/views/book/ show.gsp位置查找此show动作的视图：
+[source,groovy]
+----
+class BookController {
+    def show() {
+         [book: Book.get(params.id)]
+    }
+}
+----
+
+要渲染不同的视图，请使用render方法：
+[source,groovy]
+----
+def show() {
+    def map = [book: Book.get(params.id)]
+    render(view: "display", model: map)
+}
+----
+
+在这种情况下，Grails将尝试在grails-app/views/book/display.gsp位置呈现视图。请注意，Grails会自动使用grails-app/views目录的book目录限定视图位置。 这很方便，但是要访问共享视图，您使用绝对路径而不是相对路径：
+
+[source,groovy]
+----
+def show() {
+    def map = [book: Book.get(params.id)]
+    render(view: "/shared/display", model: map)
+}
+----
+在这种情况下，Grails将尝试在grails-app/views/shared/display.gsp位置呈现视图。
+
+Grails还支持JSP作为视图，因此如果在预期的位置找不到GSP,但是存在JSP，那么将使用它。
+
+**命名空间**
+
+如果controller使用namespace属性为自己定义名称空间，该属性将影响Grails查找使用相对路径指定的视图的根目录。命名空间控制器呈现的视图的默认根目录是grails-app/views/<namespace name>/<controller name>/.如果在命名空间目录中找不到视图，则Grails将回退到在非命名空间目录中查找视图。
+
+[source,groovy]
+----
+class ReportingController {
+    static namespace = 'business'
+
+    def humanResources() {
+        [numberOfEmployees: 9] <1>
+    }
+
+
+    def accountsReceivable() {
+
+        render view: 'numberCrunch', model: [numberOfEmployees: 13]
+    }
+}
+----
+
+<1> 如果 grails-app/views/business/reporting/humanResources.gsp不存在,则使用grails-app/views/reporting/humanResources.gsp
+<2> 如果 grails-app/views/business/reporting/numberCrunch.gsp不存在,则使用grails-app/views/reporting/numberCrunch.gsp
+
+**渲染返回结果**
+
+[source,groovy]
+----
+render "Hello World!"
+
+render {
+   for (b in books) {
+      div(id: b.id, b.title)
+   }
+}
+
+render(view: 'show')
+
+render(template: 'book_template', collection: Book.list())
+
+render(text: "<xml>some xml</xml>", contentType: "text/xml", encoding: "UTF-8")
+
+----
+
+==== 8.1.4 重定向
+
+[source,groovy]
+----
+class OverviewController {
+
+    def login() {}
+
+    def find() {
+        if (!session.user)
+            redirect(action: 'login')
+            return
+        }
+        ...
+    }
+}
+----
+
+redirect使用HttpServletResponse的sendRedirect方法
+
+[source,groovy]
+----
+redirect(controller: 'home', action: 'index')
+
+redirect(uri: "/login.html")
+redirect(url: "http://grails.org")
+ 
+Book book = ... // obtain a domain instance
+redirect book  <1>
+
+redirect(action: 'myaction', params: [myparam: "myvalue"]) <2>
+
+redirect(controller: "test", action: "show", fragment: "profile") <3>
+
+----
+
+<1> 在上面的示例中，Grails将使用域类id（如果存在）构造链接。
+<2> 传递重定向参数
+<3> 重定向的url是 `/myapp/test/show#profile`
+
+动作也可以链接。 链接允许模型从一个动作保留到下一个动作。 例如，在此操作中调用第一个操作：
+[source,groovy]
+----
+class ExampleChainController {
+
+    def first() {
+        chain(action: second, model: [one: 1])
+    }
+
+    def second () {
+        chain(action: third, model: [two: 2])
+    }
+
+    def third() {
+        [three: 3])
+    }
+}
+----
+可以使用chainModel映射在链中的后续控制器操作中访问模型。 此动态属性仅存在于对链方法的调用之后的操作中
+[source,groovy]
+----
+class ChainController {
+
+    def nextInChain() {
+        def model = chainModel.myModel
+        ...
+    }
+}
+----
+
+也可以在chain中传递参数,例如:
+[source,groovy]
+----
+chain(action: "action1", model: [one: 1], params: [myparam: "param1"])
+----
+
+NOTE: chain是通过session实现的 
+
+NOTE: chain特性没有测通
+
+==== 8.1.5 数据绑定
+
+数据绑定是将传入的请求参数“绑定”到对象属性的行为。数据绑定应该处理所有必要的类型转换，因为通常由表单提交提供的请求参数总是字符串，而Groovy或Java对象的属性可能不是。
+
+**基于map的绑定**
+
+数据绑定器能够将Map中的值转换并分配给对象的属性。 绑定器将使用Map中具有与对象上的属性名称对应的值的键将Map中的条目与对象的属性相关联。 以下代码演示了基础知识：
+
+[source,groovy]
+----
+class Person {
+    String firstName
+    String lastName
+    Integer age
+}
+----
+
+[source,groovy]
+----
+def bindingMap = [firstName: 'Peter', lastName: 'Gabriel', age: 63]
+
+def person = new Person(bindingMap)
+
+assert person.firstName == 'Peter'
+assert person.lastName == 'Gabriel'
+assert person.age == 63
+----
+
+要更新域对象的属性，您可以将Map分配给域类的properties属性：
+[source,groovy]
+----
+def bindingMap = [firstName: 'Peter', lastName: 'Gabriel', age: 63]
+
+def person = Person.get(someId) <1>
+person.properties = bindingMap
+
+assert person.firstName == 'Peter'
+assert person.lastName == 'Gabriel'
+assert person.age == 63
+----
+
+<1> 数据库中查询某个实例
+
+嵌套对象可以使用嵌套map来填充:
+
+[source,groovy]
+----
+class Person {
+    String firstName
+    String lastName
+    Integer age
+    Address homeAddress
+}
+
+class Address {
+    String county
+    String country
+}
+----
+
+[source,groovy]
+----
+def bindingMap = [firstName: 'Peter', lastName: 'Gabriel', age: 63, homeAddress: [county: 'Surrey', country: 'England'] ]
+
+def person = new Person(bindingMap)
+
+assert person.firstName == 'Peter'
+assert person.lastName == 'Gabriel'
+assert person.age == 63
+assert person.homeAddress.county == 'Surrey'
+assert person.homeAddress.country == 'England'
+----
+
+**绑定集合和map**
+
+数据绑定器可以填充和更新集合和map。 以下代码显示了填充域类中的对象List的简单示例：
+
+[source,groovy]
+----
+class Band {
+    String name
+    static hasMany = [albums: Album]
+    List albums
+}
+
+class Album {
+    String title
+    Integer numberOfTracks
+}
+----
+
+[source,groovy]
+----
+def bindingMap = [name: 'Genesis',
+                  'albums[0]': [title: 'Foxtrot', numberOfTracks: 6],
+                  'albums[1]': [title: 'Nursery Cryme', numberOfTracks: 7]]
+
+def band = new Band(bindingMap)
+
+assert band.name == 'Genesis'
+assert band.albums.size() == 2
+assert band.albums[0].title == 'Foxtrot'
+assert band.albums[0].numberOfTracks == 6
+assert band.albums[1].title == 'Nursery Cryme'
+assert band.albums[1].numberOfTracks == 7
+----
+
+**请求参数绑定到model**
+
+控制器中可用的params对象具有特殊行为，可帮助将点号请求参数名称转换为数据绑定器可以使用的嵌套映射。例如，如果请求包含名为person.homeAddress.country和person.homeAddress.city的请求参数，其值为“USA”和'St. Louis'，params将包括这些条目
+
+[source,groovy]
+----
+[person: [homeAddress: [country: 'USA', city: 'St. Louis']]]
+----
+
+有两种方法可以将请求参数绑定到域类的属性上。 第一个涉及使用域类的Map构造函数：
+[source,groovy]
+----
+def save() {
+    def b = new Book(params)
+    b.save()
+}
+----
+
+第二种方式是使用properties
+[source,groovy]
+----
+def save() {
+    def b = Book.get(params.id)
+    b.properties = params
+    b.save()
+}
+----
+
+当绑定一个空String（一个没有字符的String，甚至不是空格）时，数据绑定器会将空String转换为null。设置grails.databinding.convertEmptyStringsToNull为false关闭此特性
+默认情况下，在绑定时自动去除字符串两侧的空格。 要禁用此行为，请在grails-app/conf/application.groovy中将grails.databinding.trimStrings属性设置为false。
+
+上面两个过程,先发生字符串去空,然后发生null值转化.
+
+**数据绑定和单端关联**
+
+如果您具有一对一或多对一关联，则可以使用Grails的数据绑定功能来更新这些关系。 例如，如果您有传入的请求，例如：
+[source,shell]
+----
+/book/save?author.id=20
+----
+
+Grails将自动检测请求参数上的.id后缀，并在执行数据绑定时查找给定id的Author实例，例如：
+	def b = new Book(params)
+通过传递文字字符串“null”，可以将关联属性设置为null。 例如：
+	/book/save?author.id=null
+
+**数据绑定和多端关联**
+
+如果您具有一对多或多对多关联，则根据关联类型有不同的数据绑定技术。
+如果您有基于Set的关联（hasMany的默认关联），则填充关联的最简单方法是发送标识符列表。 例如，考虑下面<g:select>的用法：
+[source,xml]
+----
+<g:select name="books"
+          from="${Book.list()}"
+          size="5" multiple="yes" optionKey="id"
+          value="${author?.books}" />
+----
+这会生成一个选择框，允许您选择多个值。 在这种情况下，如果您提交表单，Grails将自动使用选择框中的标识符来填充图书关联。
+
+但是，如果您想要更新关联对象的属性，则此方法将不起作用。 而是使用下标运算符：
+[source,xml]
+----
+<g:textField name="books[0].title" value="the Stand" />
+<g:textField name="books[1].title" value="the Shining" />
+----
+但是，使用基于集合的关联时，以您计划更新的顺序呈现标记至关重要。这是因为集合没有顺序概念，所以尽管我们指的是book[0]和book[1]不保证在服务器端关联的顺序是正确的，除非你自己应用一些明确的排序。
+
+如果使用基于列表的关联，这不是问题，因为List具有已定义的顺序和您可以引用的索引。 对于基于Map的关联也是如此。
+
+另请注意，如果要绑定的关联的大小为2，并且您引用的元素超出了关联的大小：
+[source,xml]
+----
+<g:textField name="books[0].title" value="the Stand" />
+<g:textField name="books[1].title" value="the Shining" />
+<g:textField name="books[2].title" value="Red Madder" />
+----
+然后Grails将在定义的位置自动为您创建一个新实例。
+
+您可以使用与单端关联相同的.id语法将关联类型的现有实例绑定到List。 例如：
+[source,xml]
+----
+<g:select name="books[0].id" from="${bookList}"
+          value="${author?.books[0]?.id}" />
+
+<g:select name="books[1].id" from="${bookList}"
+          value="${author?.books[1]?.id}" />
+
+<g:select name="books[2].id" from="${bookList}"
+          value="${author?.books[2]?.id}" />
+----
+
+允许单独选择书籍列表中的单个条目。
+
+特定索引的条目也可以以相同的方式删除。 例如：
+[source,xml]
+----
+<g:select name="books[0].id"
+          from="${Book.list()}"
+          value="${author?.books[0]?.id}"
+          noSelection="['null': '']"/>
+----
+
+如果选择空选项，将呈现一个将删除book[0]上的关联的选择框。
+
+绑定到Map属性的方式相同，只是参数名称中的列表索引被map键替换：
+[source,xml]
+----
+<g:select name="images[cover].id"
+          from="${Image.list()}"
+          value="${book?.images[cover]?.id}"
+          noSelection="['null': '']"/>
+----
+
+绑定到map，数组和集合时，数据绑定器将根据需要自动增加集合的大小。
+
+**与多个域类的数据绑定**
+[source,bash]
+----
+/book/save?book.title=The%20Stand&author.name=Stephen%20King
+----
+
+您会注意到与上述请求的不同之处在于每个参数都有一个前缀，例如author或book。 用于隔离哪些参数属于哪种类型。 Grails的params对象就像一个多维哈希，你可以索引它以仅隔离要绑定的参数的子集。
+	def b = new Book(params.book)
+请注意我们如何在book.title参数的第一个点之前使用前缀来仅隔离低于此级别的参数以进行绑定。我们可以对Author域类执行相同的操作：
+	def a = new Author(params.author)
+
+**数据绑定和方法参数**
+
+控制器的方法接受请求参数作为入参。 有两类控制器方法参数。第一类是命令对象。复杂类型被视为命令对象。另一类是基本对象类型。 支持的类型是8个基本类型，它们对应的类型包装器和java.lang.String。 默认行为是按名称将请求参数映射到操作参数：
+[source,groovy]
+----
+class AccountingController {
+
+   def displayInvoice(String accountNumber, int accountType) {
+       // ...
+   }
+}
+----
+
+请求参数绑定到方法的基本类型入参时,会发生类型自动转化.如果类型转化失败,参数会被设置成默认值(包装类型是null,数字类型是null,boolean类型是false),相关的错误信息会被添加到控制器的errors属性中.
+[source,bash]
+----
+/accounting/displayInvoice?accountNumber=B59786&accountType=bogusValue
+----
+
+因为"bogusValue"不能转化成int,控制器的errors.hasErrors()值为true,errors.errorCount的是1,errors.getFieldError('accountType')会返回相应的错误.
+
+如果参数名称与请求参数的名称不匹配，则可以将@ grails.web.RequestParameter注释应用于参数，以表示应该绑定到该参数的请求参数的名称：
+[source,groovy]
+----
+import grails.web.RequestParameter
+
+class AccountingController {
+
+   def displayInvoice(@RequestParameter('accountNumber') String mainAccountNumber, int accountType) {
+       // ...
+   }
+}
+----
+
+**数据绑定和类型转换错误**
+
+有时，在执行数据绑定时，无法将特定的String转换为特定的目标类型。 这会导致类型转换错误。Grails将在Grails域类的errors属性中保留类型转换错误
+[source,groovy]
+----
+class Book {
+    ...
+    URL publisherURL
+}
+----
+
+[source,bash]
+----
+/book/save?publisherURL=a-bad-url
+----
+当发生类型不匹配错误时，无法将字符串a-bad-url绑定到publisherURL属性。 您可以像这样检查这些：
+[source,groovy]
+----
+def b = new Book(params)
+
+if (b.hasErrors()) {
+    println "The value ${b.errors.getFieldError('publisherURL').rejectedValue}" +
+            " is not a valid URL!"
+}
+----
+
+虽然我们还没有覆盖错误代码（有关更多信息，请参阅有关验证的部分），但对于类型转换错误，您可能需要来自grails-app/i18n/messages.properties文件的消息用于错误。您可以使用通用错误消息处理程序，例如：
+[source,bash]
+----
+typeMismatch.java.net.URL=The field {0} is not a valid URL
+----
+或者指定
+[source,bash]
+----
+typeMismatch.Book.publisherURL=The publisher URL you specified is not a valid URL
+----
+
+**BindUsing注解**
+
+BindUsing注释可用于为类中的特定字段定义自定义绑定机制。每次将数据绑定应用于字段时，将使用2个参数调用注释的闭包值。第一个参数是应用数据绑定的对象，第二个参数是DataBindingSource，它是数据绑定的数据源。从闭包返回的值将绑定到属性。 
+[source,groovy]
+----
+import grails.databinding.BindUsing
+
+class SomeClass {
+    @BindUsing({obj, source ->
+        source['name']?.toUpperCase()
+    })
+    String name
+}
+---- 
+BindUsing注释可用于为特定类的所有字段定义自定义绑定机制。将注释应用于类时，分配给注释的值应该是实现BindingHelper接口的类。只要将值绑定到已应用此批注的类中的属性，就会使用该类的实例。
+[source,groovy]
+----
+@BindUsing(SomeClassWhichImplementsBindingHelper)
+class SomeClass {
+    String someProperty
+    Integer someOtherProperty
+}
+----
+
+**BindInitializer注解**
+
+如果未定义，则可以使用BindInitializer注释初始化类中的关联字段。与BindUsing注释不同，数据绑定将继续绑定此关联上的所有嵌套属性。
+[source,groovy]
+----
+import grails.databinding.BindInitializer
+
+class Account{}
+
+class User {
+  Account account
+  @BindInitializer({user-> new Contact(account:user.account) })
+  Contact contact
+}
+class Contact{
+  Account account
+  String firstName
+}
+----
+
+**自定义类型转化**
+
+binder会自动进行大量的类型转换。 一些应用程序可能希望定义自己的转换值机制，一种简单的方法是编写一个实现ValueConverter的类，并在Spring应用程序上下文中将该类的实例注册为bean。
+[source,groovy]
+----
+package com.myapp.converters
+
+import grails.databinding.converters.ValueConverter
+
+/**
+ * 
+ * 转化'city:state'到Address对象.
+ */
+class AddressValueConverter implements ValueConverter {
+
+    boolean canConvert(value) {
+        value instanceof String
+    }
+
+    def convert(value) {
+        def pieces = value.split(':')
+        new com.myapp.Address(city: pieces[0], state: pieces[1])
+    }
+
+    Class<?> getTargetType() {
+        com.myapp.Address
+    }
+}
+----
+
+该类的实例需要在Spring应用程序上下文中注册为bean。 bean名称并不重要。 实现ValueConverter的所有bean都将自动插入到数据绑定过程中。
+.grails-app/conf/spring/resources.groovy
+[source,groovy]
+----
+beans = {
+    addressConverter com.myapp.converters.AddressValueConverter
+    // ...
+}
+----
+
+[source,groovy]
+----
+class Person {
+    String firstName
+    Address homeAddress
+}
+
+class Address {
+    String city
+    String state
+}
+
+def person = new Person()
+person.properties = [firstName: 'Jeff', homeAddress: "O'Fallon:Missouri"]
+assert person.firstName == 'Jeff'
+assert person.homeAddress.city = "O'Fallon"
+assert person.homeAddress.state = 'Missouri'
+----
+
+**日期格式化**
+
+通过将BindingFormat注释应用于Date字段，可以指定在将String绑定到Date值时使用的自定义日期格式。
+[source,groovy]
+----
+import grails.databinding.BindingFormat
+
+class Person {
+    @BindingFormat('MMddyyyy')
+    Date birthDate
+}
+----
+可以在application.groovy中配置全局设置，以定义在绑定到Date时将在应用程序范围内使用的日期格式。
+.grails-app/conf/application.groovy
+[source,groovy]
+----
+grails.databinding.dateFormats = ['MMddyyyy', 'yyyy-MM-dd HH:mm:ss.S', "yyyy-MM-dd'T'hh:mm:ss'Z'"]
+----
+grails.databinding.dateFormats中指定的格式将按照它们包含在List中的顺序进行尝试。 如果属性标记为@BindingFormat，则@BindingFormat将优先于grails.databinding.dateFormats中指定的值。
+
+**自定义格式转化**
+
+您可以通过编写实现FormattedValueConverter接口的类并在Spring应用程序上下文中将该类的实例注册为bean来为BindingFormat注释提供自己的处理程序。 下面是一个简单的自定义String格式化程序的示例，它可能会根据分配给BindingFormat批注的值转换String的大小写。
+[source,groovy]
+----
+package com.myapp.converters
+
+import grails.databinding.converters.FormattedValueConverter
+
+class FormattedStringValueConverter implements FormattedValueConverter {
+    def convert(value, String format) {
+        if('UPPERCASE' == format) {
+            value = value.toUpperCase()
+        } else if('LOWERCASE' == format) {
+            value = value.toLowerCase()
+        }
+        value
+    }
+
+    Class getTargetType() {
+        // specifies the type to which this converter may be applied
+        String
+    }
+}
+----
+
+该类的实例需要在Spring应用程序上下文中注册为bean。 bean名称并不重要。 实现FormattedValueConverter的所有bean将自动插入到数据绑定过程中。
+.grails-app/conf/spring/resources.groovy
+[source,groovy]
+----
+beans = {
+    formattedStringConverter com.myapp.converters.FormattedStringValueConverter
+    // ...
+}
+----
+有了这个，BindingFormat注释可以应用于String字段，以通知数据绑定器利用自定义转换器。
+[source,groovy]
+----
+import grails.databinding.BindingFormat
+
+class Person {
+    @BindingFormat('UPPERCASE')
+    String someUpperCaseString
+
+    @BindingFormat('LOWERCASE')
+    String someLowerCaseString
+
+    String someOtherString
+}
+----
+
+
+**本地化绑定格式**
+
+BindingFormat注释通过使用可选的代码属性支持本地化的格式字符串。 如果为代码属性赋值，则该值将用作消息代码，以从Spring应用程序上下文中的messageSource bean检索绑定格式字符串，并且该查找将被本地化。
+[source,groovy]
+----
+import grails.databinding.BindingFormat
+
+class Person {
+    @BindingFormat(code='date.formats.birthdays')
+    Date birthDate
+}
+----
+
+.grails-app/conf/i18n/messages.properties
+[source,bash]
+----
+date.formats.birthdays=MMddyyyy
+----
+
+**结构化数据绑定编辑器**
+
+结构化数据绑定编辑器是一个帮助程序类，可以将结构化请求参数绑定到属性。 结构化绑定的常见用例是绑定到Date对象，该对象可以由多个请求参数中包含的几个较小信息构成，其名称为birthday_month，birthday_date和birthday_year。 结构化编辑器将检索所有这些单独的信息并使用它们构建日期。
+
+该框架提供了一个结构化编辑器，用于绑定Date对象。 应用程序可以为适合的任何类型注册自己的结构化编辑器。 考虑以下类：
+[source,groovy]
+----
+package databinding
+
+class Gadget {
+    Shape expandedShape
+    Shape compressedShape
+}
+----
+
+[source,groovy]
+----
+package databinding
+
+class Shape {
+    int area
+}
+----
+Gadget有两个Shape属性,Shape有area属性,应用可能接受width和height参数来计算Shape的area,结构化编辑器就非常适合这种情况.
+
+使用数据绑定过程注册结构化编辑器的方法是将grails.databinding.TypedStructuredBindingEditor接口的实例添加到Spring应用程序上下文中。 实现TypedStructuredBindingEditor接口的最简单方法是扩展org.grails.databinding.converters.AbstractStructuredBindingEditor抽象类并覆盖getPropertyValue方法，如下所示：
+[source,groovy]
+----
+package databinding.converters
+
+import databinding.Shape
+
+import org.grails.databinding.converters.AbstractStructuredBindingEditor
+
+class StructuredShapeEditor extends AbstractStructuredBindingEditor<Shape> {
+
+    public Shape getPropertyValue(Map values) {
+        // retrieve the individual values from the Map
+        def width = values.width as int
+        def height = values.height as int
+
+        // use the values to calculate the area of the Shape
+        def area = width * height
+
+        // create and return a Shape with the appropriate area
+        new Shape(area: area)
+    }
+}
+----
+该类的实例需要在Spring应用程序上下文中注册：
+.grails-app/conf/spring/resources.groovy
+[source,groovy]
+----
+beans = {
+    shapeEditor databinding.converters.StructuredShapeEditor
+    // ...
+}
+----
+当数据绑定器绑定到Gadget类的实例时，它将检查是否存在名为compressedShape和expandedShape的请求参数，其值为“struct”，如果它们确实存在，则将触发使用StructuredShapeEditor.
+
+结构的各个组件需要具有propertyName_structuredElementName形式的参数名称。 对于上面的Gadget类，这意味着compressedShape请求参数应该具有值“struct”，而compressedShape_width和compressedShape_height参数应该具有compressedShape的宽度和高度的值。类似地，expandedShape请求参数应具有值“struct”，并且expandedShape_width和expandedShape_height参数应具有expanded的Shape的宽度和高度的值。
+
+[source,groovy]
+----
+class DemoController {
+
+    def createGadget(Gadget gadget) {
+        /*
+        /demo/createGadget?expandedShape=struct&expandedShape_width=80&expandedShape_height=30
+                          &compressedShape=struct&compressedShape_width=10&compressedShape_height=3
+
+        */
+
+        // with the request parameters shown above gadget.expandedShape.area would be 2400
+        // and gadget.compressedShape.area would be 30
+        // ...
+    }
+}
+----
+通常，带有“struct”作为其值的请求参数将由隐藏的表单字段表示。
+
+**数据绑定事件**
+
+DataBindingListener接口为侦听器提供了一种通知数据绑定事件的机制。 接口如下所示：
+[source,groovy]
+----
+package grails.databinding.events;
+
+import grails.databinding.errors.BindingError;
+
+/**
+ * A listener which will be notified of events generated during data binding.
+ *
+ * @author Jeff Brown
+ * @since 3.0
+ * @see DataBindingListenerAdapter
+ */
+public interface DataBindingListener {
+
+    /**
+     * @return true if the listener is interested in events for the specified type.
+     */
+    boolean supports(Class<?> clazz);
+
+    /**
+     * Called when data binding is about to start.
+     *
+     * @param target The object data binding is being imposed upon
+     * @param errors the Spring Errors instance (a org.springframework.validation.BindingResult)
+     * @return true if data binding should continue
+     */
+    Boolean beforeBinding(Object target, Object errors);
+
+    /**
+     * Called when data binding is about to imposed on a property
+     *
+     * @param target The object data binding is being imposed upon
+     * @param propertyName The name of the property being bound to
+     * @param value The value of the property being bound
+     * @param errors the Spring Errors instance (a org.springframework.validation.BindingResult)
+     * @return true if data binding should continue, otherwise return false
+     */
+    Boolean beforeBinding(Object target, String propertyName, Object value, Object errors);
+
+    /**
+     * Called after data binding has been imposed on a property
+     *
+     * @param target The object data binding is being imposed upon
+     * @param propertyName The name of the property that was bound to
+     * @param errors the Spring Errors instance (a org.springframework.validation.BindingResult)
+     */
+    void afterBinding(Object target, String propertyName, Object errors);
+
+    /**
+     * Called after data binding has finished.
+     *
+     * @param target The object data binding is being imposed upon
+     * @param errors the Spring Errors instance (a org.springframework.validation.BindingResult)
+     */
+    void afterBinding(Object target, Object errors);
+
+    /**
+     * Called when an error occurs binding to a property
+     * @param error encapsulates information about the binding error
+     * @param errors the Spring Errors instance (a org.springframework.validation.BindingResult)
+     * @see BindingError
+     */
+    void bindingError(BindingError error, Object errors);
+}
+----
+Spring应用程序上下文中实现该接口的任何bean都将自动注册到数据绑定器。 DataBindingListenerAdapter类实现DataBindingListener接口，并为接口中的所有方法提供默认实现，因此该类非常适合子类化，因此您的侦听器类只需要为侦听器感兴趣的方法提供实现。
+
+**直接使用数据绑定器**
+
+在某些情况下，应用程序可能希望直接使用数据绑定器。例如，在服务上对某些不是域类的任意对象进行绑定。以下操作无效，因为properties属性是只读的。
+[source,groovy]
+----
+package bindingdemo
+
+class Widget {
+    String name
+    Integer size
+}
+----
+
+[source,groovy]
+----
+package bindingdemo
+
+class WidgetService {
+
+    def updateWidget(Widget widget, Map data) {
+        // this will throw an exception because
+        // properties is read-only
+        widget.properties = data
+    }
+}
+----
+
+数据绑定器的一个实例位于Spring应用程序上下文中，其bean名称为grailsWebDataBinder。该bean实现了DataBinder接口。以下代码演示了如何直接使用数据绑定器。
+[source,groovy]
+----
+package bindingdemo
+
+import grails.databinding.SimpleMapDataBindingSource
+
+class WidgetService {
+
+    // this bean will be autowired into the service
+    def grailsWebDataBinder
+
+    def updateWidget(Widget widget, Map data) {
+        grailsWebDataBinder.bind widget, data as SimpleMapDataBindingSource
+    }
+
+}
+----
+
+**数据绑定和安全问题**
+
+从请求参数批量更新属性时，需要注意不要允许客户端将恶意数据绑定到域类并保留在数据库中。 您可以使用下标运算符限制绑定到给定域类的属性：
+[source,groovy]
+----
+def p = Person.get(1)
+
+p.properties['firstName','lastName'] = params
+----
+在这种情况下，只会绑定firstName和lastName属性。
+
+另一种方法是使用命令对象作为数据绑定的目标而不是域类。 或者，也有灵活的bindData方法。
+
+bindData方法允许相同的数据绑定功能，但允许任意对象：
+[source,groovy]
+----
+def p = new Person()
+bindData(p, params)
+----
+bindData方法还允许您排除不想更新的某些参数：
+[source,groovy]
+----
+def p = new Person()
+bindData(p, params, [exclude: 'dateOfBirth'])
+----
+或仅包含某些属性：
+[source,groovy]
+----
+def p = new Person()
+bindData(p, params, [include: ['firstName', 'lastName']])
+----
+
+==== 8.1.6 响应JSON数据
+
+**使用respond方法输出JSON**
+
+respond方法是返回json或者内容协商或者json视图的首选方法.
+响应方法提供内容协商策略，以智能地为给定客户端生成适当的响应。
+[source,groovy]
+----
+package example
+
+class BookController {
+    def index() {
+        respond Book.list()
+    }
+}
+----
+respond方法将采取以下步骤：
+. 如果客户端Accept标头指定了媒体类型（例如application / json），请使用它
+. 如果URI的文件扩展名（例如/books.json）包含grails-app/conf/application.yml的grails.mime.types属性中定义的格式，请使用配置中定义的媒体类型
+
+然后，响应方法将从渲染器注册表中为对象和计算的媒体类型查找适当的渲染器。
+
+Grails包含许多预先配置的Renderer实现，这些实现将为传递给响应的参数生成JSON响应的默认表示。 例如，转到/book.json URI将生成JSON，例如：
+[source,json]
+----
+[
+    {id:1,"title":"The Stand"},
+    {id:2,"title":"Shining"}
+]
+----
+
+**控制媒体类型的优先级**
+
+默认情况下，如果您定义控制器，则没有优先级将哪种格式发送回客户端，Grails假定您希望将HTML作为响应类型提供。
+
+但是，如果您的应用程序主要是API，则可以使用responseFormats属性指定priorty：
+[source,groovy]
+----
+package example
+
+class BookController {
+    static responseFormats = ['json', 'html']
+    def index() {
+        respond Book.list()
+    }
+}
+----
+在上面的示例中，如果无法从Accept标头或文件扩展名计算要响应的媒体类型，Grails将默认使用json进行响应。
+
+**使用视图输出JSON响应**
+
+如果您定义视图（GSP或JSON视图），那么Grails将在使用响应方法时通过从传递给响应的参数计算模型来呈现视图。
+
+例如，在上一个例子中，如果您要定义grails-app/views/index.gson和grails-app/views/index.gsp视图，则在客户端请求application/json或text/html媒体时将使用这些视图。 因此，您可以定义单个后端，以便为Web浏览器提供响应或表示应用程序的API。
+
+渲染视图时，Grails将根据传递给响应方法的值的类型计算要传递给视图的模型。
+
+|===
+| Example | 	Argument Type	| Calculated Model Variable
+| respond Book.list()| java.util.List | bookList
+| respond( [] ) | java.util.List | emptyList
+| respond Book.get(1) | example.Book | book
+| respond( [1,2] ) | java.util.List | integerList
+| respond( [1,2] as Set ) | java.util.Set | integerSet
+| respond( [1,2] as Integer[] ) | Integer[] | integerArray
+|===
+
+使用此约定，您可以引用传递给视图的响应参数：
+
+.grails-app/views/book/index.gson
+[source,groovy]
+----
+@Field List<Book> bookList = []
+
+json bookList, { Book book ->
+    title book.title
+}
+----
+
+您会注意到，如果Book.list（）返回一个空列表，则模型变量名称将转换为emptyList。这是设计使然，如果未指定模型变量，则应在视图中提供默认值，例如上例中的List：
+.grails-app/views/book/index.gson
+[source,groovy]
+----
+// defaults to an empty list
+@Field List<Book> bookList = []
+...
+----
+
+在某些情况下，您可能希望更明确地控制模型变量的名称。 例如，如果您有一个域继承层次结构，其中对list（）的调用返回依赖于自动计算的不同子类可能不可靠。
+
+在这种情况下，您应该使用response和map参数直接传递模型：
+	respond bookList: Book.list()
+如果您只是希望扩充计算的模型，那么您可以通过传递模型参数来实现：
+	respond Book.list(), [model: [bookCount: Book.count()]]
+上面的示例将生成一个类似[bookList：books，bookCount：totalBooks]的模型，其中计算的模型与模型参数中传递的模型相结合。
+
+**使用render方法输出JSON**
+
+render方法也可用于输出JSON，但只应用于不创建JSON视图的情况：
+[source,groovy]
+----
+def list() {
+
+    def results = Book.list()
+
+    render(contentType: "application/json") {
+        books(results) { Book b ->
+            title b.title
+        }
+    }
+}
+----
+
+渲染的结果是:
+[source,json]
+----
+[
+    {"title":"The Stand"},
+    {"title":"Shining"}
+]
+----
+
+==== 8.1.9 上传文件
+Grails使用Spring的MultipartHttpServletRequest接口支持文件上传。 文件上传的第一步是创建一个这样的表单：
+[source,html]
+----
+Upload Form: <br />
+    <g:uploadForm action="upload">
+        <input type="file" name="myFile" />
+        <input type="submit" />
+    </g:uploadForm>
+----
+
+uploadForm标记方便地将enctype =“multipart/form-data”属性添加到标准<g：form>标记。
+
+然后有许多方法来处理文件上传。 一种是直接使用Spring MultipartFile实例：
+[source,groovy]
+----
+def upload() {
+    def f = request.getFile('myFile')
+    if (f.empty) {
+        flash.message = 'file cannot be empty'
+        render(view: 'uploadForm')
+        return
+    }
+
+    f.transferTo(new File('/some/local/dir/myfile.txt'))
+    response.sendError(200, 'Done')
+}
+----
+
+也可以使用数据绑定来执行文件上载。 考虑这个Image域类：
+[source,groovy]
+----
+class Image {
+    byte[] myFile
+
+    static constraints = {
+        // Limit upload file size to 2MB
+        myFile maxSize: 1024 * 1024 * 2
+    }
+}
+----
+如果使用构造函数中的params对象创建Image，如下例所示，Grails将自动将文件的内容作为byte []绑定到myFile属性：
+	def img = new Image(params)
+设置size或maxSize约束很重要，否则您的数据库可能会创建一个小的列大小，无法处理合理大小的文件。 例如，H2和MySQL默认为byte []属性的blob大小为255字节。
+
+
+文件上传的Grails默认大小为128000（~128KB）。 超过此限制时，您将看到以下异常：
+
+	org.springframework.web.multipart.MultipartException: Could not parse multipart servlet request; nested exception is java.lang.IllegalStateException: org.apache.tomcat.util.http.fileupload.FileUploadBase$SizeLimitExceededException
+
+你可以在下面的配置文件中设置大小
+.grails-app/conf/application.yml
+[source,groovy]
+----
+grails:
+    controllers:
+        upload:
+            maxFileSize: 2000000 <1>
+            maxRequestSize: 2000000 <2>
+----
+<1> maxFileSize =上传文件允许的最大大小。
+<2> maxRequestSize = multipart/form-data请求允许的最大大小。
+
+==== 8.1.10 命令对象
+
+Grails控制器支持命令对象的概念。 命令对象是与数据绑定结合使用的类，通常用于验证可能不适合现有域类的数据。
+
+**声明命令对象**
+[source,groovy]
+----
+class LoginCommand implements grails.validation.Validateable {
+    String username
+    String password
+
+    static constraints = {
+        username(blank: false, minSize: 6)
+        password(blank: false, minSize: 6)
+    }
+}
+----
+
+在此示例中，命令对象类实现Validateable特征。 Validateable trait允许定义约束，就像在域类中一样。如果命令对象在与使用它的控制器相同的源文件中定义，Grails将自动使其成为可验证的。
+
+默认情况下，所有不是java.util.Collection或java.util.Map实例的Validateable对象属性都可以为null：false。 java.util.Collection和java.util.Map的实例默认为nullable：true。 如果您希望默认情况下具有nullable：true属性的Validateable，则可以通过在类中定义defaultNullable方法来指定：
+[source,groovy]
+----
+class AuthorSearchCommand implements grails.validation.Validateable {
+    String  name
+    Integer age
+
+    static boolean defaultNullable() {
+        true
+    }
+}
+----
+在上面的例子中,name和age允许为null
+
+**使用命令对象**
+
+要使用命令对象，控制器操作可以选择指定任意数量的命令对象参数。 必须提供参数类型，以便Grails知道要创建和初始化的对象。
+
+在执行控制器操作之前，Grails将自动创建命令对象类的实例，并通过绑定请求参数来填充其属性。 如果命令对象类标记为Validateable，则将验证命令对象。 例如：
+[source,groovy]
+----
+class LoginController {
+
+    def login(LoginCommand cmd) {
+        if (cmd.hasErrors()) {
+            redirect(action: 'loginForm')
+            return
+        }
+
+        // work with the command object data
+    }
+}
+----
+
+如果命令对象类型也是一个与类型,请求参数中包含域类id,此时创建的命令对象是通过静态方法get从数据中检索出来而不是通过构造函数创建的.
+
+无论从get调用返回什么，都将传递给控制器方法。 这意味着如果存在id请求参数且数据库中未找到相应的记录，则命令对象的值将为null。 如果从数据库中检索实例时发生错误，则null将作为参数传递给控制器方法，并且将在控制器的errors属性中添加错误。
+
+如果命令对象的类型是域类，并且没有id请求参数或者有一个id请求参数且其值为空，那么null将被传递到控制器方法，除非HTTP请求方法是“POST”，在这种情况下 将通过调用域类构造函数创建域类的新实例。 对于域类实例为非null的所有情况，仅在HTTP请求方法为“POST”，“PUT”或“PATCH”时才执行数据绑定。
+
+**命令对象和请求参数名称**
+
+通常，请求参数名称将直接映射到命令对象中的属性名称。嵌套参数名称可用于以直观方式绑定对象图。
+
+如果控制器操作接受恰好包含相同属性名称的多个命令对象，则可能会出现问题。 如下面的例子:
+[source,groovy]
+----
+class StoreController {
+    def buy(Person buyer, Product product) {
+        // ...
+    }
+}
+
+class Person {
+    String name
+    Address address
+}
+
+class Address {
+    String city
+}
+
+class Product {
+    String name
+}
+----
+
+如果存在名为name的请求参数，则不清楚它是否应表示产品的名称或Person的名称。 如果控制器操作接受2个相同类型的命令对象，则可能出现另一个问题版本，如下所示。
+[source,groovy]
+----
+class StoreController {
+    def buy(Person buyer, Person seller, Product product) {
+        // ...
+    }
+}
+
+class Person {
+    String name
+    Address address
+}
+
+class Address {
+    String city
+}
+
+class Product {
+    String name
+}
+----
+
+为了帮助解决这个问题，框架规定了将参数名称映射到命令对象类型的特殊规则。 命令对象数据绑定将所有以控制器方法参数名称开头的参数视为属于相应的命令对象。
+
+例如，product.name请求参数将绑定到product参数中的name属性，buyer.name请求参数将绑定到buyer参数中的name属性.
+
+**命令对象和依赖注入**
+[source,groovy]
+----
+class LoginCommand implements grails.validation.Validateable {
+
+    def loginService
+
+    String username
+    String password
+
+    static constraints = {
+        username validator: { val, obj ->
+            obj.loginService.canLogin(obj.username, obj.password)
+        }
+    }
+}
+----
+**将请求主体绑定到命令对象**
+
+当请求接受命令对象的控制器方法并且请求包含正文时，Grails将尝试根据请求内容类型解析请求的主体，并使用正文对命令对象执行数据绑定。请参阅以下示例。
+
+[source,groovy]
+----
+package bindingdemo
+
+class DemoController {
+
+    def createWidget(Widget w) {
+        render "Name: ${w?.name}, Size: ${w?.size}"
+    }
+}
+
+class Widget {
+    String name
+    Integer size
+}
+----
+
+[source,bash]
+----
+$ curl -H "Content-Type: application/json" -d '{"name":"Some Widget","42"}'[size] localhost:8080/demo/createWidget
+ Name: Some Widget, Size: 42
+
+$ curl -H "Content-Type: application/xml" -d '<widget><name>Some Other Widget</name><size>2112</size></widget>' localhost:8080/bodybind/demo/createWidget
+ Name: Some Other Widget, Size: 2112
+----
+请注意，解析请求的正文以使其工作。 在此之后读取请求主体的任何尝试都将失败，因为相应的输入流将为空。 控制器方法可以使用命令对象，也可以单独解析请求的主体（直接或通过引用request.JSON之类的东西），但不能同时解析。
+[source,groovy]
+----
+package bindingdemo
+
+class DemoController {
+
+    def createWidget(Widget w) {
+        // this will fail because it requires reading the body,
+        // which has already been read.
+        def json = request.JSON
+
+        // ...
+
+    }
+}
+----
+**使用命令对象列表**
+
+命令对象的常见用例是包含另一个的集合的Command对象：
+[source,groovy]
+----
+class DemoController {
+
+    def createAuthor(AuthorCommand command) {
+        // ...
+
+    }
+
+    class AuthorCommand {
+        String fullName
+        List<BookCommand> books
+    }
+
+    class BookCommand {
+        String title
+        String isbn
+    }
+}
+----
+
+在此示例中，我们要创建一个包含多个Books的Author。
+
+为了从UI层开始工作，您可以在GSP中执行以下操作：
+[source,html]
+----
+<g:form name="submit-author-books" controller="demo" action="createAuthor">
+    <g:fieldValue name="fullName" value=""/>
+    <ul>
+        <li>
+            <g:fieldValue name="books[0].title" value=""/>
+            <g:fieldValue name="books[0].isbn" value=""/>
+        </li>
+
+        <li>
+            <g:fieldValue name="books[1].title" value=""/>
+            <g:fieldValue name="books[1].isbn" value=""/>
+        </li>
+    </ul>
+</g:form>
+----
+
+还支持JSON，因此您可以使用正确的数据绑定提交以下内容:
+[source,json]
+----
+{
+    "fullName": "Graeme Rocher",
+    "books": [{
+        "title": "The Definitive Guide to Grails",
+        "isbn": "1111-343455-1111"
+    }, {
+        "title": "The Definitive Guide to Grails 2",
+        "isbn": "1111-343455-1112"
+    }],
+}
+----
+
+==== 8.1.11处理重复的表单提交
+Grails内置支持使用“Synchronizer Token Pattern”处理重复表单提交。 您需要在表单标记上定义一个标记：
+[source,html]
+----
+<g:form useToken="true" ...>
+----
+
+然后在您的控制器代码中，您可以使用withForm方法来处理有效和无效的请求：
+[source,groovy]
+----
+withForm {
+   // good request
+}.invalidToken {
+   // bad request
+}
+----
+
+如果您只提供withForm方法而不是链式的invalidToken方法，那么默认情况下，Grails会将无效标记存储在flash.invalidToken变量中，并将请求重定向回原始页面。 然后可以在视图中检查：
+[source,html]
+----
+<g:if test="${flash.invalidToken}">
+  Don't click the button twice!
+</g:if>
+----
+
+==== 8.1.12 简单类型转化
+如果您希望避免数据绑定的开销并且只是想将传入的参数（通常是字符串）转换为另一种更合适的类型，则params对象为每种类型提供了许多便捷方法：
+	def total = params.int('total')
+上面的例子使用了int方法，还有boolean，long，char，short等方法。这些方法中的每一个都是空指针安全的，并且不受任何解析错误的影响，因此您不必对参数执行任何其他检查。
+
+每种转换方法都允许将默认值作为可选的第二个参数传递。 如果在map中找不到相应的条目或者在转换期间发生错误，则将返回默认值。 例：
+	def total = params.int('total', 42)
+这些相同的类型转换方法也可用于GSP标签的attrs参数。
+
+一个常见的用例是处理同名的多个请求参数。 例如，您可以获得一个查询字符串，例如?name = Bob＆name = Judy。
+
+在这种情况下，处理一个参数和处理许多参数具有不同的语义，因为Groovy的String迭代机制迭代每个字符。 为了避免这个问题，params对象提供了一个总是返回列表的列表方法：
+[source,groovy]
+----
+for (name in params.list('name')) {
+    println name
+}
+----
+
+==== 8.1.13 异常处理
+
+Grails控制器支持声明性异常处理的简单机制。 如果控制器声明一个接受单个参数的方法，并且参数类型是java.lang.Exception或java.lang.Exception的某个子类，则只要该控制器中的操作引发该类型的异常，就会调用该方法.例如:
+[source,groovy]
+----
+package demo
+
+class DemoController {
+
+    def someAction() {
+        // do some work
+    }
+
+    def handleSQLException(SQLException e) {
+        render 'A SQLException Was Handled'
+    }
+
+    def handleBatchUpdateException(BatchUpdateException e) {
+        redirect controller: 'logging', action: 'batchProblem'
+    }
+
+    def handleNumberFormatException(NumberFormatException nfe) {
+        [problemDescription: 'A Number Was Invalid']
+    }
+}
+----
+
+该控制器的行为就好像是这样编写的:
+[source,groovy]
+----
+package demo
+
+class DemoController {
+
+    def someAction() {
+        try {
+            // do some work
+        } catch (BatchUpdateException e) {
+            return handleBatchUpdateException(e)
+        } catch (SQLException e) {
+            return handleSQLException(e)
+        } catch (NumberFormatException e) {
+            return handleNumberFormatException(e)
+        }
+    }
+
+    def handleSQLException(SQLException e) {
+        render 'A SQLException Was Handled'
+    }
+
+    def handleBatchUpdateException(BatchUpdateException e) {
+        redirect controller: 'logging', action: 'batchProblem'
+    }
+
+    def handleNumberFormatException(NumberFormatException nfe) {
+        [problemDescription: 'A Number Was Invalid']
+    }
+}
+----
+
+异常处理程序方法可以执行控制器方法可以执行的任何操作，包括调用render，redirect，返回模型等。
+
+跨多个控制器共享异常处理程序方法的一种方法是使用继承。 异常处理程序方法继承到子类中，因此应用程序可以在多个控制器扩展的抽象类中定义异常处理程序。 跨多个控制器共享异常处理程序方法的另一种方法是使用Traits，如下所示:
+[source,groovy]
+----
+package com.demo
+
+trait DatabaseExceptionHandler {
+    def handleSQLException(SQLException e) {
+        // handle SQLException
+    }
+
+    def handleBatchUpdateException(BatchUpdateException e) {
+        // handle BatchUpdateException
+    }
+}
+----
+
+[source,groovy]
+----
+package com.demo
+
+class DemoController implements DatabaseExceptionHandler {
+
+    //DatabaseExceptionHandler中定义的所有异常处理程序方法将在编译时添加到此类
+}
+----
+
+编译时必须存在异常处理程序方法。 具体而言，不支持将运行时元编程添加控制器类上的异常处理程序方法。
+
+=== 8.3 路径映射
+
+到目前为止，在整个文档中，用于URL的约定是/controller/action/id的默认值。 但是，此约定并未与Grails硬连接，实际上由位于grails-app/controllers/mypackage/ UrlMappings.groovy的URL Mappings类控制。
+
+UrlMappings类包含一个名为mappings的属性，该属性已分配了一段代码：
+[source,groovy]
+----
+package mypackage
+
+class UrlMappings {
+    static mappings = {
+    }
+}
+----
+
+==== 8.3.1映射到controller
+
+要创建简单映射，只需使用相对URL作为方法名称，并为控制器和要映射到的方法指定命名参数：
+	"/product"(controller: "product", action: "list")
+
+在这种情况下，我们已将URL /product 映射到ProductController的list方法上。 省略action定义以映射到控制器的默认方法上：
+	"/product"(controller: "product")
+下面是另一种书写方式:
+[source,groovy]
+----
+"/product" {
+    controller = "product"
+    action = "list"
+}
+----
+如果您的映射都属于特定路径，则可以使用group方法对映射进行分组：
+[source,groovy]
+----
+group "/product", {
+    "/apple"(controller:"product", id:"apple")
+    "/htc"(controller:"product", id:"htc")
+}
+----
+
+您还可以创建嵌套的组URL映射：
+[source,groovy]
+----
+group "/store", {
+    group "/product", {
+        "/$id"(controller:"product")
+    }
+}
+----
+
+要将一个URI重写到另一个显式URI（而不是控制器的方法上），请执行以下操作：
+	"/hello"(uri: "/hello.dispatch")
+在与其他框架集成时，重写特定URI通常很有用。
+
+==== 8.3.2映射到REST资源
+从Grails 2.3开始，可以按照惯例创建映射到控制器上的RESTful URL映射。语法如下：
+	"/books"(resources:'book')
+您可以使用resources参数定义基本URI和要映射到的控制器的名称。 以上映射将生成以下URL：
+|===
+| HTTP Method	| URI	| Grails Action
+| GET| /books| index
+| GET| /books/create| create
+| POST| /books| save
+| GET| /books/${id}| show
+| GET| /books/${id}/edit| edit
+| PUT| /books/${id}| update
+| DELETE| /books/${id}| delete
+|===
+如果您不确定将为您的案例生成哪个映射，只需在grails控制台中运行命令url-mappings-report。 它将为您提供所有url映射的非常简洁的报告。
+
+如果您希望包含或排除任何生成的URL映射，可以使用includes或excludes参数来执行此操作，该参数接受要包括或排除的Grails方法的名称：
+[source,groovy]
+----
+"/books"(resources:'book', excludes:['delete', 'update'])
+
+"/books"(resources:'book', includes:['index', 'show'])
+----
+
+**显式REST映射**
+
+从Grails 3.1开始，如果您不想依赖资源映射来定义映射，那么您可以使用HTTP方法名称（小写）为任何URL映射添加前缀，以指示它应用的HTTP方法。 以下URL映射：
+[source,groovy]
+----
+get "/books"(controller:"book", action:"index")
+get "/books/create"(controller:"book", action:"create")
+post "/books"(controller:"book", action:"save")
+get "/books/$id"(controller:"book", action:"show")
+get "/books/$id/edit"(controller:"book", action:"edit")
+put "/books/$id"(controller:"book", action:"update")
+delete "/books/$id"(controller:"book", action:"delete")
+----
+
+**单个资源**
+
+单个资源是系统中只有一个（可能是每个用户）的资源。 您可以使用单个参数（而不是资源）创建单个资源：
+	"/book"(single:'book')
+|===
+| HTTP Method |	URI	Grails | Action
+|	GET |	/book/create |	create
+|	POST|	/book |	save
+|	GET |	/book |	show
+|	GET |	/book/edit |	edit
+|	PUT |	/book  |	update
+|	DELETE|	/book |	delete
+|===
+
+主要区别在于URL映射中不包含id。
+
+**资源嵌套**
+
+您可以嵌套资源映射以生成子资源。 例如：
+[source,groovy]
+----
+"/books"(resources:'book') {
+  "/authors"(resources:"author")
+}
+----
+
+|===
+| HTTP Method |	URL	Grails | Action
+| GET| /books/${bookId}/authors| index
+| GET| /books/${bookId}/authors/create| create
+| POST| /books/${bookId}/authors| save
+| GET| /books/${bookId}/authors/${id}| show
+| GET| /books/${bookId}/authors/edit/${id}| edit
+| PUT| /books/${bookId}/authors/${id}| update
+| DELETE| /books/${bookId}/authors/${id}| delete
+|===
+您还可以在资源映射中嵌套常规URL映射：
+[source,groovy]
+----
+"/books"(resources: "book") {
+    "/publisher"(controller:"publisher")
+}
+----
+
+这将导致以下URL可用：
+
+|===
+|HTTP Method |	URL	Grails |Action
+|GET|/books/${bookId}/publisher|index
+|===
+
+要在资源正下方映射URI，请使用集合块：
+[source,groovy]
+----
+"/books"(resources: "book") {
+    collection {
+        "/publisher"(controller:"publisher")
+    }
+}
+----
+生产的URL如下:
+|===
+|HTTP Method	|URL	Grails| Action
+|GET|/books/publisher|index
+|===
+
+**链接到RESTful映射**
+
+可以使用g:link标签链接到控制器方法上,例如:
+	<g:link controller="book" action="index">My Link</g:link>
+为方便起见，您还可以将域实例传递给链接标记的资源属性：
+	<g:link resource="${book}">My Link</g:link>
+这将自动生成正确的链接（在本例中为“/books/1”，ID为“1”）。
+
+嵌套资源的情况稍有不同，因为它们通常需要两个标识符（资源的id和嵌套在其中的id）。 例如，给定嵌套资源：
+[source,groovy]
+----
+"/books"(resources:'book') {
+  "/authors"(resources:"author")
+}
+----
+
+如果你想访问author controller的show 方法,需要:
+	<g:link controller="author" action="show" method="GET" params="[bookId:1]" id="2">The Author</g:link>
+但是，为了使其更简洁，可以使用链接标记的资源属性：
+[source,html]
+----
+// Results in /books/1/authors/2
+<g:link resource="book/author" action="show" bookId="1" id="2">My Link</g:link>
+----
+
+resource属性接受由斜杠分隔的资源的路径（在本例中为“book / author”）。 标记的属性可用于指定必要的bookId参数。
+
+==== 8.3.3 路径映射中的重定向
+从Grails 2.3开始，可以定义重定向的URL映射。 当URL映射指定重定向时，只要映射与传入请求匹配，就会使用映射提供的信息启动重定向。
+
+当URL映射指定重定向时，映射必须提供表示要重定向到的URI的String，或者必须提供表示重定向目标的Map。该Map的结构就像可以作为参数传递给控制器中的重定向方法的Map。
+[source,groovy]
+----
+"/viewBooks"(redirect: [uri: '/books/list'])
+"/viewAuthors"(redirect: [controller: 'author', action: 'list'])
+"/viewPublishers"(redirect: [controller: 'publisher', action: 'list', permanent: true])
+----
+
+默认情况下，作为原始请求一部分的请求参数不会包含在重定向中。 要包含它们，必须添加参数keepParamsWhenRedirect：true。
+[source,groovy]
+----
+"/viewBooks"(redirect: [uri: '/books/list', keepParamsWhenRedirect: true])
+"/viewAuthors"(redirect: [controller: 'author', action: 'list', keepParamsWhenRedirect: true])
+"/viewPublishers"(redirect: [controller: 'publisher', action: 'list', permanent: true, keepParamsWhenRedirect: true])
+----
+
+==== 8.3.4 嵌入变量
+
+**简单变量**
+[source,groovy]
+----
+static mappings = {
+  "/product/$id"(controller: "product")
+}
+----
+在这种情况下，通过嵌入$id变量作为第二个标记，Grails将自动将第二个标记映射到名为id的参数（通过params对象可用）。 例如，给定URL/product/MacBook，以下代码将“MacBook”呈现给响应：
+[source,groovy]
+----
+class ProductController {
+     def index() { render params.id }
+}
+----
+您当然可以构建更复杂的映射示例。例如，传统的博客URL格式可以映射如下：
+[source,groovy]
+----
+static mappings = {
+   "/$blog/$year/$month/$day/$id"(controller: "blog", action: "show")
+}
+----
+上面的映射可以让你做以下事情：
+	/graemerocher/2007/01/10/my_funky_blog_entry
+URL中的各个令牌将再次映射到params对象，其值可用于year, month, day, id等。
+
+**动态控制器和方法名称**
+
+变量也可用于动态构造控制器和方法名称。 实际上，默认的Grails URL映射使用此技术：
+[source,groovy]
+----
+static mappings = {
+    "/$controller/$action?/$id?"()
+}
+----
+您还可以使用闭包来解析控制器名称和方法名称以动态执行：
+[source,groovy]
+----
+static mappings = {
+    "/$controller" {
+        action = { params.goHere }
+    }
+}
+----
+
+**可选变量**
+
+默认映射的另一个特征是能够追加？ 在变量的末尾，使其成为可选标记。 在另一个示例中，该技术可以应用于博客URL映射以具有更灵活的链接：
+[source,groovy]
+----
+static mappings = {
+    "/$blog/$year?/$month?/$day?/$id?"(controller:"blog", action:"show")
+}
+----
+通过此映射，所有这些URL都只与params对象中填充的相关参数匹配：
+[source,bash]
+----
+/graemerocher/2007/01/10/my_funky_blog_entry
+/graemerocher/2007/01/10
+/graemerocher/2007/01
+/graemerocher/2007
+/graemerocher
+----
+
+**可选的文件扩展名**
+
+如果要捕获特定路径的扩展名，则存在特殊情况映射：
+	"/$controller/$action?/$id?(.$format)?"()
+通过添加(.$format)? 映射您可以使用控制器中的response.format属性访问文件扩展名：
+[source,groovy]
+----
+def index() {
+    render "extension is ${response.format}"
+}
+----
+
+**任意变量**
+
+您还可以通过在传递给映射的块中设置任意参数从URL映射传递到控制器：
+[source,groovy]
+----
+"/holiday/win" {
+     id = "Marrakech"
+     year = 2007
+}
+----
+这些变量将传递给控制器的params对象。
+
+**动态变量**
+
+硬编码的任意变量很有用，但有时您需要根据运行时因子计算变量的名称。 通过为变量名指定一个块也可以实现这一点：
+[source,groovy]
+----
+"/holiday/win" {
+     id = { params.id }
+     isEligible = { session.user != null } // must be logged in
+}
+----
+在上述情况下，当URL实际匹配时，块中的代码被解析，因此可以与各种逻辑组合使用。
+
+==== 8.3.5 映射到视图
+
+您可以在不涉及控制器的情况下解析视图的URL。 例如，要将根URL/映射到位于grails-app/views/index.gsp位置的GSP，您可以使用：
+[source,groovy]
+----
+static mappings = {
+    "/"(view: "/index")  
+}
+----
+或者，如果您需要特定于给定控制器的视图，您可以使用：
+[source,groovy]
+----
+static mappings = {
+   "/help"(controller: "site", view: "help") 
+}
+----
+
+==== 8.3.6映射到响应代码
+
+Grails还允许您将HTTP响应代码映射到控制器或视图。只需使用与您感兴趣的响应代码来匹配的方法名称：
+[source,groovy]
+----
+static mappings = {
+   "403"(controller: "errors", action: "forbidden")
+   "404"(controller: "errors", action: "notFound")
+   "500"(controller: "errors", action: "serverError")
+}
+----
+你也可以自定义错误页:
+[source,groovy]
+----
+static mappings = {
+   "403"(view: "/errors/forbidden")
+   "404"(view: "/errors/notFound")
+   "500"(view: "/errors/serverError")
+}
+----
+**声明性错误处理**
+
+此外，您还可以为各个异常配置处理程序：
+[source,groovy]
+----
+static mappings = {
+   "403"(view: "/errors/forbidden")
+   "404"(view: "/errors/notFound")
+   "500"(controller: "errors", action: "illegalArgument",
+         exception: IllegalArgumentException)
+   "500"(controller: "errors", action: "nullPointer",
+         exception: NullPointerException)
+   "500"(controller: "errors", action: "customException",
+         exception: MyException)
+   "500"(view: "/errors/serverError")
+}
+----
+
+使用此配置，IlrorsController中的illegalArgument方法将处理IllegalArgumentException，nullPointer方法将处理NullPointerException，customException方法将处理MyException。 其他异常将由catch-all规则处理并使用/errors/serverError视图。
+
+您可以使用请求的异常属性从自定义错误处理视图或控制器操作中访问异常，如下所示：
+[source,groovy]
+----
+class ErrorController {
+    def handleError() {
+        def exception = request.exception
+    }
+}
+----
+
+==== 8.3.7 映射到HTTP方法
+
+URL映射还可以配置为基于HTTP方法（GET，POST，PUT或DELETE）进行映射。 这对RESTful API和基于HTTP方法限制映射非常有用。
+[source,groovy]
+----
+static mappings = {
+   "/product/$id"(controller:"product", action: "update", method: "PUT")
+}
+----
+
+==== 8.3.8映射通配符
+
+[source,groovy]
+----
+static mappings = {
+    "/images/*.jpg"(controller: "image")
+}
+----
+上面的映射会匹配/image/logo.jpg
+[source,groovy]
+----
+static mappings = {
+    "/images/**.jpg"(controller: "image")
+}
+----
+上面的映射匹配 /image/logo.jpg和/image/other/logo.jpg
+
+如果您使用通配符URL映射，那么您可能希望从Grails的URL映射过程中排除某些URI。 为此，您可以在UrlMappings.groovy类中提供排除设置：
+[source,groovy]
+----
+class UrlMappings {
+    static excludes = ["/images/*", "/css/*"]
+    static mappings = {
+        ...
+    }
+}
+----
+
+==== 8.3.9自动链接重写
+URL映射的另一个重要特性是它们会自动自定义链接标记的行为，因此更改映射不需要您更改所有链接。
+
+这是通过URL重写技术完成的，该技术可以反向设计URL映射的链接。所以给出了一个映射，比如前面部分的博客：
+[source,groovy]
+----
+static mappings = {
+   "/$blog/$year?/$month?/$day?/$id?"(controller:"blog", action:"show")
+}
+----
+
+如果你使用下面的标签:
+[source,html]
+----
+<g:link controller="blog" action="show"
+        params="[blog:'fred', year:2007]">
+    My Blog
+</g:link>
+
+<g:link controller="blog" action="show"
+        params="[blog:'fred', year:2007, month:10]">
+    My Blog - October 2007 Posts
+</g:link>
+----
+路径会被自动重写成:
+[source,html]
+----
+<a href="/fred/2007">My Blog</a>
+<a href="/fred/2007/10">My Blog - October 2007 Posts</a>
+----
+
+==== 8.3.10 应用约束
+URL映射还支持Grails的统一验证约束机制，可让您进一步“约束”URL的匹配方式。 例如，如果我们重新访问之前的博客示例代码，则映射当前如下所示：
+[source,groovy]
+----
+static mappings = {
+   "/$blog/$year?/$month?/$day?/$id?"(controller:"blog", action:"show")
+}
+----
+这允许 `/graemerocher/2007/01/10/my_funky_blog_entry`,同样的也允许`/graemerocher/not_a_year/not_a_month/not_a_day/my_funky_blog_entry`.
+这是有问题的，因为它迫使您在控制器代码中进行一些解析。幸运的是，可以限制URL映射以进一步验证URL令牌：
+[source,groovy]
+----
+"/$blog/$year?/$month?/$day?/$id?" {
+     controller = "blog"
+     action = "show"
+     constraints {
+          year(matches:/\\\d{4}/)
+          month(matches:/\\\d{2}/)
+          day(matches:/\\\d{2}/)
+     }
+}
+----
+
+==== 8.3.11命名的URL映射
+URL映射还支持命名映射.该名称可用于在生成链接时引用特定映射。格式定义如下:
+[source,groovy]
+----
+static mappings = {
+   name <mapping name>: <url pattern> {
+      // ...
+   }
+}
+----
+例如:
+[source,groovy]
+----
+static mappings = {
+    name personList: "/showPeople" {
+        controller = 'person'
+        action = 'list'
+    }
+    name accountDetails: "/details/$acctNumber" {
+        controller = 'product'
+        action = 'accountDetails'
+    }
+}
+----
+在gsp引用该名称:
+	<g:link mapping="personList">List People</g:link>
+最后改标签会被解析成:
+	<a href="/showPeople">List People</a>
+下面是包含参数的例子:
+[source,groovy]
+----
+<g:link mapping="accountDetails" params="[acctNumber:'8675309']">
+    Show Account
+</g:link>
+----
+解析的结果是:
+	<a href="/details/8675309">Show Account</a>
+
+或者，您可以使用链接命名空间引用命名映射。
+[source,html]
+----
+<link:personList>List People</link:personList>
+<link:accountDetails acctNumber="8675309">Show Account</link:accountDetails>
+----
+
+==== 8.3.12自定义URL格式
+默认URL映射机制支持URL中的驼峰案例名称。 在名为MathHelperController的控制器中访问名为addNumbers的操作的默认URL类似于/mathHelper/addNumbers。Grails允许自定义此模式，并提供一个实现，该实现使用带连字符(-)的约定替换camel case约定，该约定将支持/math-helper/add-numbers等URL。 要启用带连字符的URL，请为grails-app/conf/application.groovy中的grails.web.url.converter属性指定值“hyphenated”。
+
+可以通过提供实现UrlConverter接口的类并将该类的实例添加到具有bean名称grails.web.UrlConverter.BEAN_NAME的Spring应用程序上下文来插入任意策略。如果Grails在具有该名称的上下文中找到一个bean，它将被用作默认转换器，并且不需要为grails.web.url.converter配置属性赋值。
+[source,groovy]
+----
+package com.myapplication
+
+class MyUrlConverterImpl implements grails.web.UrlConverter {
+
+    String toUrlElement(String propertyOrClassName) {
+        // return some representation of a property or class name that should be used in URLs...
+    }
+}
+----
+
+.grails-app/conf/spring/resources.groovy
+[source,groovy]
+----
+beans = {
+    "${grails.web.UrlConverter.BEAN_NAME}"(com.myapplication.MyUrlConverterImpl)
+}
+----
+
+==== 8.3.13 命名空间控制器
+如果应用程序在不同的包中定义了多个具有相同名称的控制器，则必须在命名空间中定义控制器。 为控制器定义命名空间的方法是在控制器中定义名为namespace的静态属性，并将String分配给表示命名空间的属性。
+
+[source,groovy]
+----
+package com.app.reporting
+
+class AdminController {
+
+    static namespace = 'reports'
+
+    // ...
+}
+----
+
+[source,groovy]
+----
+package com.app.security
+
+class AdminController {
+
+    static namespace = 'users'
+
+    // ...
+}
+----
+
+在定义与命名空间控制器关联的url映射时，namespace变量需要是URL映射的一部分。
+[source,groovy]
+----
+class UrlMappings {
+
+    static mappings = {
+        '/userAdmin' {
+            controller = 'admin'
+            namespace = 'users'
+        }
+
+        '/reportAdmin' {
+            controller = 'admin'
+            namespace = 'reports'
+        }
+
+        "/$namespace/$controller/$action?"()
+    }
+}
+----
+反向URL映射还要求指定命名空间。
+[source,html]
+----
+<g:link controller="admin" namespace="reports">Click For Report Admin</g:link>
+<g:link controller="admin" namespace="users">Click For User Admin</g:link>
+----
+解析URL映射（转发或反向）到命名空间控制器时，只有在提供了命名空间后才会匹配映射。如果应用程序在不同的包中提供了多个具有相同名称的控制器，则最多可以定义其中一个没有命名空间属性的控制器。如果存在多个具有相同名称但未定义名称空间属性的控制器，则框架将不知道如何区分它们以用于正向或反向映射。
+
+允许应用程序使用插件，该插件提供与应用程序提供的控制器同名的控制器，并且只要控制器位于单独的包中，两个控制器都不能定义命名空间属性。例如，应用程序可能包含名为com.accounting.ReportingController的控制器，应用程序可能使用一个插件，该插件提供名为com.humanresources.ReportingController的控制器。唯一的问题是插件提供的控制器的URL映射需要明确指定映射适用于插件提供的ReportingController。例如:
+[source,groovy]
+----
+static mappings = {
+    "/accountingReports" {
+        controller = "reporting"
+    }
+    "/humanResourceReports" {
+        controller = "reporting"
+        plugin = "humanResources"
+    }
+}
+----
+
+=== 8.4 CORS
+
+.application.yml
+[source,yml]
+----
+grails:
+    cors:
+        enabled: true
+----
+这会应用到所有的url,默认配置是:
+
+|===
+|allowedOrigins |['*']
+|allowedMethods|['*']
+|allowedHeaders|['*']
+|exposedHeaders|null
+|maxAge|1800
+|allowCredentials|true
+|===
+
+可以覆盖这些配置:
+[source,yml]
+----
+grails:
+    cors:
+        enabled: true
+        allowedOrigins:
+            - http://localhost:5000
+----
+你也可以指定具体的url
+[source,yml]
+----
+grails:
+    cors:
+        enabled: true
+        allowedHeaders:
+            - Content-Type
+        mappings:
+            /api/**:
+                allowedOrigins:
+                    - http://localhost:5000
+----
+如果您不希望覆盖任何默认设置，但只想指定URL，则可以像下面这样执行此操作：
+[source,yml]
+----
+grails:
+    cors:
+        enabled: true
+        mappings:
+            /api/**: inherit
+----
+
+=== 8.5 拦截器
+
+grail提供了创建拦截器的命令 `grails create-interceptor MyInterceptor`,改名令会在grails-app/controllers目录下面创建:
+[source,groovy]
+----
+class MyInterceptor {
+
+  boolean before() { true }
+
+  boolean after() { true }
+
+  void afterView() {
+    // no-op
+  }
+
+}
+----
+
+==== 8.5.1定义拦截器
+默认情况下，拦截器将匹配具有相同名称的控制器。 例如，如果你有一个名为BookInterceptor的拦截器，那么对BookController操作的所有请求都将触发拦截器。
+Interceptor实现了Interceptor traits，并提供了3种可用于拦截请求的方法:
+. before:在方法之前执行，并且可以通过返回false来取消方法的执行。
+. after:在执行方法后执行，如果返回false则可以暂停视图呈现。 after方法还可以分别使用视图和模型属性修改视图或模型：
+	boolean after() {
+	  model.foo = "bar" // add a new model attribute called 'foo'
+	  view = 'alternate' // render a different view called 'alternate'
+	  true
+	}
+. afterView:在视图渲染完成后执行。 如果发生异常，则使用Interceptor特征的throwable属性可以获得异常。
+
+==== 8.5.2使用拦截器匹配请求
+
+您可以使用Interceptor API中定义的match或matchAll方法配置拦截器以匹配任何请求。匹配方法返回一个Matcher实例，该实例可用于配置拦截器如何匹配请求。例如:
+[source,groovy]
+----
+class AuthInterceptor {
+  AuthInterceptor() {
+    matchAll()
+    .excludes(controller:"login")
+  }
+
+  boolean before() {
+    // perform authentication
+  }
+}
+----
+
+你也可以使用match方法.例如:
+[sourcee,groovy]
+----
+class LoggingInterceptor {
+  LoggingInterceptor() {
+    match(controller:"book", action:"show") // using strings
+    match(controller: ~/(author|publisher)/) // using regex
+  }
+
+  boolean before() {
+    ...
+  }
+}
+----
+
+==== 8.5.3 拦截器执行顺序
+
+可以通过定义order属性来定义拦截器的优先级。
+[source,groovy]
+----
+class AuthInterceptor {
+
+  int order = HIGHEST_PRECEDENCE
+
+  ...
+}
+----
+order属性的默认值为0.拦截器执行顺序是通过按顺序对order属性进行排序并首先执行最低数值排序的拦截器来确定的。值HIGHEST_PRECEDENCE和LOWEST_PRECEDENCE可用于定义应分别最先或最后运行的拦截器。
+
+请注意，如果您编写一个供其他人使用的拦截器，最好增加或减少HIGHEST_PRECEDENCE和LOWEST_PRECEDENCE，以允许在您创作的拦截器之前或之后插入其他拦截器：
+	int order = HIGHEST_PRECEDENCE + 50
+	int order = LOWEST_PRECEDENCE - 50
+要找出拦截器的计算顺序，您可以将调试记录器添加到logback.groovy，如下所示：
+	logger 'grails.artefact.Interceptor', DEBUG, ['STDOUT'], false
+您可以使用grails-app/conf/application.yml中的bean覆盖配置覆盖任何拦截器默认顺序：
+[source,yml]
+----
+beans:
+  authInterceptor:
+    order: 50
+----
+
+=== 8.6 内容协商
+Grails内置了对使用HTTP Accept标头，显式格式请求参数或URI扩展的内容协商的支持。
+
+在开始处理内容协商之前，您需要告诉Grails您希望支持哪些内容类型。 默认情况下，Grails使用grails.mime.types设置在grails-app / conf / application.yml中配置了许多不同的内容类型：
+[source,yml]
+----
+grails:
+    mime:
+        types:
+            all: '*/*'
+            atom: application/atom+xml
+            css: text/css
+            csv: text/csv
+            form: application/x-www-form-urlencoded
+            html:
+              - text/html
+              - application/xhtml+xml
+            js: text/javascript
+            json:
+              - application/json
+              - text/json
+            multipartForm: multipart/form-data
+            rss: application/rss+xml
+            text: text/plain
+            hal:
+              - application/hal+json
+              - application/hal+xml
+            xml:
+              - text/xml
+              - application/xml
+----
+上面的配置允许Grails检测包含'text/xml'或'application xml'媒体类型的请求格式为'xml'。 您只需在map中添加新条目即可添加自己的类型。 第一个是默认格式。
+
+**显式格式请求参数**
+假设一个控制器动作可以返回各种格式的资源：HTML，XML和JSON。 客户会得到什么格式？ 客户端控制此操作的最简单，最可靠的方法是通过格式URL参数。例如:
+	http://my.domain.org/books?format=xml
+您还可以在URL映射定义中定义此参数：
+[source,groovy]
+----
+"/book/list"(controller:"book", action:"list") {
+    format = "xml"
+}
+----
+您可以根据此属性对控制器操作进行编码以返回XML，但您也可以使用特定于控制器的withFormat（）方法：
+[source,groovy]
+----
+import grails.converters.JSON
+import grails.converters.XML
+
+class BookController {
+
+    def list() {
+        def books = Book.list()
+
+        withFormat {
+            html bookList: books
+            json { render books as JSON }
+            xml { render books as XML }
+            '*' { render books as JSON }
+        }
+    }
+}
+----
+在此示例中，Grails将仅执行与所请求的内容类型匹配的withFormat（）内部的块。 因此，如果首选格式为html，则Grails将仅执行html（）调用。 每个“块”可以是相应视图的地图模型（正如我们在上面的例子中为“html”所做的那样）或闭包。闭包可以包含任何标准动作代码，例如它可以直接返回模型或呈现内容。当没有明确匹配格式时，*（通配符）块可用于处理所有其他格式。
+
+有一种特殊格式“all”，其处理方式与显式格式不同。如果指定了“all”（通常这通过Accept标头发生见下文），那么当没有*（通配符）块可用时，将执行withFormat（）的第一个块。
+
+**使用请求头**
+
+每个传入的HTTP请求都有一个特殊的Accept标头，用于定义客户端可以“接受”的媒体类型（或mime类型）。 在旧版浏览器中，这通常是：`*/*` .这只是意味着无论什么。 但是，较新的浏览器会发送更有趣的值，例如Firefox发送的这些值：
+[source,bash]
+----
+text/xml, application/xml, application/xhtml+xml, text/html;q=0.9, text/plain;q=0.8, image/png, */*;q=0.5
+----
+
+这个特殊的接受标头是无益的，因为它表明XML是首选的响应格式，而用户真的期待HTML。这就是为什么Grails默认忽略浏览器的接受标头。但是，非浏览器客户端通常在其要求中更具体，并且可以发送接受标头，例如 `application/json`
+
+如前所述，Grails中的默认配置是忽略浏览器的accept标头。这是通过配置设置grails.mime.disable.accept.header.userAgents完成的，配置为检测主要呈现引擎并忽略其ACCEPT标头。 这允许Grails的内容协商继续适用于非浏览器客户端：
+[source,bash]
+----
+grails.mime.disable.accept.header.userAgents = ['Gecko', 'WebKit', 'Presto', 'Trident']
+----
+
+例如，如果它看到上面的accept标头（'application / json'），它将按照您的预期将格式设置为json。 当然，这与withFormat（）方法的工作方式与设置格式URL参数的方式相同（尽管URL参数优先）。
+
+'*/\*'的accept标头导致format属性的值为all。
+
+**URL扩展**
+
+Grails还支持使用URI扩展进行内容协商。 例如，给定以下URI：
+	/book/list.xml
+这是默认URL映射定义的结果，它是：
+	"/$controller/$action?/$id?(.$format)?"{
+请注意在路径中包含format变量。 如果您不希望通过文件扩展名使用内容协商，那么只需删除URL映射的这一部分：
+	"/$controller/$action?/$id?"{
+
+== 9 Traits
+
+== 10. REST
+
+== 11.异步编程
+
+== 12.校验
+
+Grails验证功能基于Spring的Validator API和数据绑定功能构建。 然而，Grails更进一步，并提供了一种统一的方法来定义验证“约束”及其约束机制。
+
+Grails中的约束是一种声明性地指定验证规则的方法。 最常见的是它们应用于域类，但URL映射和命令对象也支持约束。
+
+=== 12.1 声明约束
+
+在域类中，约束是使用赋予代码块的constraints属性定义的.然后，使用与约束适用的属性名称匹配的方法调用以及命名参数来指定约束：
+[source,groovy]
+----
+class User {
+    String login
+    String password
+    String email
+    Integer age
+
+    static constraints = {
+        login size: 5..15, blank: false, unique: true
+        password size: 5..15, blank: false
+        email email: true, blank: false
+        age min: 18
+    }
+}
+----
+
+请注意，约束仅被评估一次，这可能与依赖于像java.util.Date实例之类的值的约束相关。例如:
+[source,groovy]
+----
+class User {
+    ...
+
+    static constraints = {
+        
+        birthDate max: new Date() <1>
+    }
+}
+----
+
+<1> 在评估约束时创建此Date对象，而不是每次验证User类的实例时。
+
+从静态代码块引用实例变量在Groovy（或Java）中是不合法的。 如果您这样做，您将遇到MissingPropertyException以解决您的麻烦。 例如:
+[source,groovy]
+----
+class Response {
+    Survey survey
+    Answer answer
+
+    static constraints = {
+        survey blank: false
+        answer blank: false, inList: survey.answers
+    }
+}
+----
+
+但是我们可以使用闭包来解决这个问题:
+[source,groovy]
+----
+class Response {
+    ...
+    static constraints = {
+        survey blank: false
+        answer blank: false, validator: { val, obj -> val in obj.survey.answers }
+    }
+}
+----
+
+=== 12.2 验证约束
+
+.调用validate方法
+[source,groovy]
+----
+def user = new User(params)
+
+if (user.validate()) {
+    // do something with user
+}
+else {
+    user.errors.allErrors.each {
+        println it
+    }
+}
+----
+
+在Grails中有两个验证阶段，第一阶段是数据绑定，当您将请求参数绑定到实例上时会发生这种情况，例如：
+	def user = new User(params)
+此时，由于类型转换（例如将字符串转换为日期），您可能已经在errors属性中出现错误。 您可以使用Errors API检查这些并获取原始输入值：
+[source,groovy]
+----
+if (user.hasErrors()) {
+    if (user.errors.hasFieldErrors("login")) {
+        println user.errors.getFieldError("login").rejectedValue
+    }
+}
+----
+当您调用validate或save时，会发生第二阶段的验证。这是Grails将根据您定义的约束验证绑定值。例如，默认情况下，save方法在执行之前调用validate，允许您编写如下代码：
+[source,groovy]
+----
+if (user.save()) {
+    return user
+}
+else {
+    user.errors.allErrors.each {
+        println it
+    }
+}
+----
+
+=== 12.3在类之间共享约束
+Grails中的一个常见模式是使用命令对象验证用户提交的数据，然后将命令对象的属性复制到相关的域类。这通常意味着您的命令对象和域类可以共享属性及其约束。 您可以在两者之间手动复制和粘贴约束，但这是一种非常容易出错的方法。 相反，请使用Grails的全局约束和导入机制。
+
+**全局约束**
+
+除了在域类，命令对象和其他可验证类中定义约束之外，您还可以在grails-app/conf/application.groovy中定义它们：
+[source,groovy]
+----
+grails.gorm.default.constraints = {
+    '*'(nullable: true, size: 1..20)
+    myShared(nullable: false, blank: false)
+}
+----
+
+这些约束不附加到任何特定类，但可以从任何可验证类中轻松引用它们：
+[source,groovy]
+----
+class User {
+    ...
+
+    static constraints = {
+        login shared: "myShared"
+    }
+}
+----
+
+请注意shared参数的使用，该参数的值是grails.gorm.default.constraints中定义的约束之一的名称。尽管配置设置的名称，您可以从任何可验证的类（如命令对象）引用这些共享约束。
+
+'*'约束是一种特殊情况：它意味着相关约束（上例中的'nullable'和'size'）将应用于所有可验证类中的所有属性。 这些默认值可以由可验证类中声明的约束覆盖。
+
+**导入约束**
+
+Grails 2引入了一种共享约束的替代方法，允许您将一组约束从一个类导入另一个类。
+
+[source,groovy]
+----
+class User {
+    String firstName
+    String lastName
+    String passwordHash
+
+    static constraints = {
+        firstName blank: false, nullable: false
+        lastName blank: false, nullable: false
+        passwordHash blank: false, nullable: false
+    }
+}
+----
+
+然后，您需要创建一个命令对象UserCommand，它共享域类的一些属性和相应的约束。 您可以使用importFrom（）方法执行此操作：
+[source,groovy]
+----
+class UserCommand {
+    String firstName
+    String lastName
+    String password
+    String confirmPassword
+
+    static constraints = {
+        importFrom User
+
+        password blank: false, nullable: false
+        confirmPassword blank: false, nullable: false
+    }
+}
+----
+这将从User域类导入所有约束并将它们应用于UserCommand。 导入将忽略源类（User）中导入类（UserCommand）中没有相应属性的任何约束。 在上面的示例中，只有'firstName'和'lastName'约束将被导入UserCommand，因为这些是两个类共享的唯一属性。
+
+如果要更多地控制导入的约束，请使用include和exclude参数。 它们都接受与源约束中的属性名称匹配的简单或正则表达式字符串的列表。 例如，如果您只想导入'lastName'约束，您将使用：
+[source,groovy]
+----
+static constraints = {
+    importFrom User, include: ["lastName"]
+    ...
+}
+----
+或者使用正则
+[source,groovy]
+----
+static constraints = {
+    importFrom User, include: [/.*Name/]
+    ...
+}
+----
+
+=== 12.4 验证客户
+
+通常，如果您收到验证错误，则会重定向回视图以进行渲染。 在那里你需要一些显示错误的方法。 Grails支持一组丰富的标记来处理错误。 要将错误呈现为列表，您可以使用renderErrors：
+	<g:renderErrors bean="${user}" />
+如果需要更多控制，可以使用hasErrors和eachError：
+[source,xml]
+----
+<g:hasErrors bean="${user}">
+  <ul>
+   <g:eachError var="err" bean="${user}">
+       <li>${err}</li>
+   </g:eachError>
+  </ul>
+</g:hasErrors>
+----
+
+当字段输入错误时，突出显示使用红色框或某个指示器通常很有用。 这也可以通过将hasErrors作为方法调用来完成。 例如：
+[source,html]
+----
+<div class='value ${hasErrors(bean:user,field:'login','errors')}'>
+   <input type="text" name="login" value="${fieldValue(bean:user,field:'login')}"/>
+</div>
+----
+此代码检查用户bean的login字段是否有任何错误，如果是，则向div添加错误CSS类，允许您使用CSS规则突出显示div。
+
+每个错误实际上都是Spring中FieldError类的一个实例，它保留了原始输入值。 这很有用，因为您可以使用error对象来恢复用户使用fieldValue标记输入的值：
+	<input type="text" name="login" value="${fieldValue(bean:user,field:'login')}"/>
+此代码将检查User bean中是否存在FieldError，以及是获取login字段的原始输入值。
+
+=== 12.5 数据校验和国际化
+
+关于Grails中的错误的另一个重要注意事项是错误消息在任何地方都不是硬编码的。 Spring中的FieldError类使用Grails的i18n支持解析来自消息包的消息。
+看下面的代码:
+[source,groovy]
+----
+package com.mycompany.myapp
+
+class User {
+    ...
+
+    static constraints = {
+        login size: 5..15, blank: false, unique: true
+        password size: 5..15, blank: false
+        email email: true, blank: false
+        age min: 18
+    }
+}
+----
+
+如果违反了约束，Grails会按惯例查找消息代码：
+|===
+ | Constraint	 | Error Code
+ | blank| className.propertyName.blank
+ | creditCard| className.propertyName.creditCard.invalid
+ | email | className.propertyName.email.invalid
+ | inList | className.propertyName.not.inList
+ | matches | className.propertyName.matches.invalid
+ | max | className.propertyName.max.exceeded
+ | maxSize | className.propertyName.maxSize.exceeded
+ | min | className.propertyName.min.notmet
+ | minSize | className.propertyName.minSize.notmet
+ | notEqual | className.propertyName.notEqual
+ | nullable | className.propertyName.nullable
+ | range | className.propertyName.range.toosmall or className.propertyName.range.toobig
+ | size | className.propertyName.size.toosmall or className.propertyName.size.toobig
+ | unique | className.propertyName.unique
+ | url | className.propertyName.url.invalid
+ | validator | classname.propertyName. + String returned by Closure
+|===
+
+在空白约束的情况下，这将是user.login.blank，因此您需要在grails-app/i18n/messages.properties文件中显示以下消息：
+	user.login.blank=Your login name must be specified!
+
+会查找带包名或者不带包名的code,带包名优先。 例如，com.mycompany.myapp.User.login.blank将在user.login.blank之前使用。 这允许您的域类消息代码与插件冲突的情况。
+
+renderErrors标记将使用消息标记自动为您查找消息。 如果您需要更多的渲染控制，您可以自己处理：
+[source,html]
+----
+<g:hasErrors bean="${user}">
+  <ul>
+   <g:eachError var="err" bean="${user}">
+       <li><g:message error="${err}" /></li>
+   </g:eachError>
+  </ul>
+</g:hasErrors>
+----
+
+=== 12.6 将验证应用于其他类
+
+默认情况下，域类和命令对象支持验证。通过在其他类中定义静态constraints属性（如上所述）可以使其他类可验证。仅仅定义约束属性是不够的,应用程序还需要向框架注册可验证类.
+
+定义静态约束属性并实现Validateable特征的类将是可验证的。例如:
+[source,groovy]
+----
+package com.mycompany.myapp
+
+import grails.validation.Validateable
+
+class User implements Validateable {
+    ...
+
+    static constraints = {
+        login size: 5..15, blank: false, unique: true
+        password size: 5..15, blank: false
+        email email: true, blank: false
+        age min: 18
+    }
+}
+----
+
+==  13. 服务层
+Grails定义了服务层的概念。 Grails团队不鼓励在控制器中嵌入核心应用程序逻辑，因为它不会促进重用和关注点的清晰分离。
+
+Grails中的服务主要负责程序的业务逻辑，让控制器负责处理具有重定向的请求流等等。
+
+`grails create-service helloworld.simple` 创建服务如下:
+[source,groovy]
+----
+package helloworld
+
+class SimpleService {
+}
+----
+
+=== 13.1 声明式事务
+[source,groovy]
+----
+import grails.gorm.transactions.*
+
+@Transactional
+class CountryService {
+
+}
+----
+
+结果是所有方法都包装在事务中，并且如果方法抛出异常（Checked或Runtime异常）或Error，则会发生自动回滚。默认情况下，事务的传播级别设置为PROPAGATION_REQUIRED。
+
+对于需要在每个方法级别对事务进行更细粒度控制或需要指定备用传播级别的情况，Grails还提供@Transactional和@NotTransactional注释。 例如，当使用@Transactional注释类时，@NotTransactional注释可用于标记要跳过的特定方法。
+[source,groovy]
+----
+import grails.gorm.transactions.Transactional
+
+class BookService {
+
+    @Transactional(readOnly = true)
+    def listBooks() {
+        Book.list()
+    }
+
+    @Transactional
+    def updateBook() {
+        // ...
+    }
+
+    def deleteBook() {
+        // ...
+    }
+}
+----
+在此示例中，listBooks使用只读事务，updateBook使用默认的读写事务，而deleteBook不是事务性的（给定其名称可能不是一个好主意）.
+
+你也可以在类上使用@Transactional,其含义和spring一样.
+
+==== 13.1.1 多数据源事务
+[source,groovy]
+----
+class Movie {
+    String title
+}
+class Book {
+    String title
+
+    static mapping = {
+        datasource 'books'
+    }
+}
+----
+您可以向@Transactional或@ReadOnly注释提供所需的数据源。
+[source,groovy]
+----
+import grails.gorm.transactions.ReadOnly
+import grails.gorm.transactions.Transactional
+import groovy.transform.CompileStatic
+
+@CompileStatic
+class BookService {
+
+    @ReadOnly('books')
+    List<Book> findAll() {
+        Book.where {}.findAll()
+    }
+
+    @Transactional('books')
+    void save(String title) {
+        Book book = new Book(title: title)
+        book.save()
+        book
+    }
+}
+@CompileStatic
+class MovieService {
+
+    @ReadOnly
+    List<Movie> findAll() {
+        Movie.where {}.findAll()
+    }
+}
+----
+
+==== 13.1.2事务回滚和会话
+
+在使用事务时，在Hibernate如何处理基础持久性会话时必须考虑一些重要的注意事项。回滚事务时，GORM使用的Hibernate会话将被清除。这意味着会话中的任何对象都会分离，访问未初始化的延迟加载集合将导致LazyInitializationException。
+
+要理解为什么清除Hibernate会话很重要。 请考虑以下示例：
+[source,groovy]
+----
+class Author {
+    String name
+    Integer age
+
+    static hasMany = [books: Book]
+}
+----
+
+如果您要使用连续事务保存两author，如下所示：
+[source,groovy]
+----
+Author.withTransaction { status ->
+    new Author(name: "Stephen King", age: 40).save()
+    status.setRollbackOnly()
+}
+
+Author.withTransaction { status ->
+    new Author(name: "Stephen King", age: 40).save()
+}
+----
+
+由于第一个事务通过清除Hibernate会话回滚save，因此只保存第二个作者。 如果没有清除Hibernate会话，那么两个实例都将被保存，这将导致非常意外的结果。
+
+但是，由于会话被清除，因此获取LazyInitializationException会令人沮丧。
+[source,groovy]
+----
+class AuthorService {
+
+    void updateAge(id, int age) {
+        def author = Author.get(id)
+        author.age = age
+        if (author.isTooOld()) {
+            throw new AuthorException("too old", author)
+        }
+    }
+}
+----
+
+[source,groovy]
+----
+class AuthorController {
+
+    def authorService
+
+    def updateAge() {
+        try {
+            authorService.updateAge(params.id, params.int("age"))
+        }
+        catch(e) {
+            render "Author books ${e.author.books}"
+        }
+    }
+}
+----
+
+在上面的示例中，如果Author年龄超过了isTooOld（）方法中定义的最大值，则会通过抛出AuthorException来回滚事务。 AuthorException引用author，但是当访问books关联时，将抛出LazyInitializationException，因为已清除了基础Hibernate会话。
+
+要解决此问题，您有许多选择。 一个是early查询以获取所需的数据：
+[source,groovy]
+----
+class AuthorService {
+    ...
+    void updateAge(id, int age) {
+        def author = Author.findById(id, [fetch:[books:"eager"]])
+        ...
+----
+
+另一种解决方案是在事务回滚后重定向请求：
+[source,groovy]
+----
+class AuthorController {
+
+    AuthorService authorService
+
+    def updateAge() {
+        try {
+            authorService.updateAge(params.id, params.int("age"))
+        }
+        catch(e) {
+            flash.message = "Can't update age"
+            redirect action:"show", id:params.id
+        }
+    }
+}
+----
+
+在这种情况下，新请求将处理再次检索作者。 最后，第三种解决方案是再次检索作者的数据，以确保会话保持正确状态：
+[source,groovy]
+----
+class AuthorController {
+
+    def authorService
+
+    def updateAge() {
+        try {
+            authorService.updateAge(params.id, params.int("age"))
+        }
+        catch(e) {
+            def author = Author.read(params.id)
+            render "Author books ${author.books}"
+        }
+    }
+}
+----
+
+=== 13.2 服务的作用域
+默认情况下，对服务方法的访问不会同步，因此不会阻止这些方法的并发执行。 实际上，因为服务是单例并且可以同时使用，所以在服务中存储状态时应该非常小心。 或者采取简单（和更好）的道路，从不将状态存储在服务中。
+. prototype  - 每次将服务注入另一个类时都会创建一个新服务
+. request - 将根据请求创建新服务
+. flash  - 将仅为当前和下一个请求创建新服务
+. flow  - 在Web流中，服务将存在于流的范围内
+. conversation  - 在Web流程中，服务将存在于对话范围内。 即根流及其子流
+. session  - 为用户会话的范围创建服务
+. singleton（默认） - 只存在一个服务实例
+
+要启用其中一个范围，请向您的类添加静态scope属性，例如
+	static scope = "flow"
+您还可以配置服务是否已延迟初始化。 默认情况下，这设置为true，但是您可以禁用它并使用lazyInit属性进行初始化：
+	static lazyInit = false
+=== 13.3 服务和依赖注入
+
+Grails服务的一个关键方面是能够使用Spring Framework的依赖注入功能。Grails支持“按照惯例进行依赖注入”。换句话说，您可以使用服务类名的属性名称表示自动将它们注入控制器，标记库等。例如，给定一个名为BookService的服务，如果在控制器中定义名为bookService的属性，如下所示：
+[source,groovy]
+----
+class BookController {
+    def bookService
+    ...
+}
+----
+在这种情况下，Spring容器将根据其配置的范围自动注入该服务的实例。 所有依赖注入都是通过名称完成的。 您还可以按如下方式指定类型：
+[source,groovy]
+----
+class AuthorService {
+    BookService bookService
+}
+----
+
+为了与标准JavaBean约定保持一致，如果类名的前2个字母为大写，则属性名称与类名相同。例如，JDBCHelperService类的属性名称是JDBCHelperService，而不是jDBCHelperService或jdbcHelperService。
+
+注入非默认数据源时要小心。 例如，使用此配置：
+[source,groovy]
+----
+dataSources:
+    dataSource:
+        pooled: true
+        jmxExport: true
+        .....
+    secondary:
+        pooled: true
+        jmxExport: true
+        .....
+----
+你可以这样注入datasource:
+[source,groovy]
+----
+class BookSqlService {
+
+      def dataSource
+}
+----
+但要注入secondary数据源，您必须使用Spring的Autowired注入:
+[source,groovy]
+----
+class BookSqlSecondaryService {
+
+  @Autowired
+  @Qualifier('dataSource_secondary')
+  def dataSource2
+}
+----
+
+**服务名冲突**
+
+如果在不同的包中定义了多个具有相同名称的服务，则与服务关联的默认bean名称可能会出现问题。 例如，应用程序定义名为com.demo.ReportingService的服务类，与此同时,应用程序使用名为ReportingUtilities的插件，该插件提供名为com.reporting.util.ReportingService的服务类。
+
+每个的默认bean名称都是reportingService，因此它们会相互冲突。Grails通过在bean名称前加上插件名称来更改插件提供服务的默认bean名称。
+
+在上面描述的场景中，reportingService将是应用程序中定义的com.demo.ReportingService类的实例，reportingUtilitiesReportingService 将是ReportingUtilities插件提供的com.reporting.util.ReportingService类的实例。
+
+对于插件提供的所有服务bean，如果应用程序中没有其他具有相同名称的服务或其他插件，则将创建一个不包含插件名称的别名，该别名包含插件名称前缀。
+
+例如，如果ReportingUtilities插件提供名为com.reporting.util.AuthorService的服务，并且应用程序或应用程序正在使用的任何插件中没有其他AuthorService，那么将有一个名为reportingUtilitiesAuthorService的bean，它是com.reporting.util.AuthorService类的实例authorService bean的别名。
+
+== 14 静态类型检查和编译
+Groovy是一种动态语言，默认情况下，Groovy使用动态调度机制来执行方法调用和属性访问。这种动态调度机制为语言提供了很大的灵活性和强大功能。例如，可以在运行时向类动态添加方法，并且可以在运行时动态替换现有方法。这些功能非常重要，可为语言提供强大的功能。但是，有时您可能希望禁用此动态分派以支持更静态的分派机制，而Groovy提供了一种方法。告诉Groovy编译器特定类应该静态编译的方法是使用groovy.transform.CompileStatic注释标记该类，如下所示:
+[source,groovy]
+----
+import groovy.transform.CompileStatic
+
+@CompileStatic
+class MyClass {
+
+    // this class will be statically compiled...
+
+}
+----
+
+使用CompileStatic的一个限制是，当您使用它时，您将放弃动态调度提供的功能和灵活性的访问权限。例如，在Grails中，您将无法从使用CompileStatic标记的类调用GORM动态查找，因为编译器无法验证动态查找方法是否存在，因为它在编译时不存在。您可能希望利用Groovy的静态编译优势而不放弃Grails特定事物（如动态查找器）的动态调度访问权限，这就是grails.compiler.GrailsCompileStatic的用武之地。GrailsCompileStatic的行为与CompileStatic类似，但它知道某些Grails功能，并允许动态访问这些特定功能。
+
+=== 14.1 GrailsCompileStatic注解
+
+该注解可以应用在类上或者方法上.
+
+[source,groovy]
+----
+import grails.compiler.GrailsCompileStatic
+
+@GrailsCompileStatic
+class SomeClass {
+
+    // all of the code in this class will be statically compiled
+
+    def methodOne() {
+        // ...
+    }
+
+    def methodTwo() {
+        // ...
+    }
+
+    def methodThree() {
+        // ...
+    }
+}
+----
+
+[source,groovy]
+----
+import grails.compiler.GrailsCompileStatic
+
+class SomeClass {
+
+    // methodOne and methodThree will be statically compiled
+    // methodTwo will be dynamically compiled
+
+    @GrailsCompileStatic
+    def methodOne() {
+        // ...
+    }
+
+    def methodTwo() {
+        // ...
+    }
+
+    @GrailsCompileStatic
+    def methodThree() {
+        // ...
+    }
+}
+----
+
+可以使用GrailsCompileStatic标记一个类，然后跳过特定的方法:
+[source,groovy]
+----
+import grails.compiler.GrailsCompileStatic
+import groovy.transform.TypeCheckingMode
+
+@GrailsCompileStatic
+class SomeClass {
+
+    // methodOne and methodThree will be statically compiled
+    // methodTwo will be dynamically compiled
+
+    def methodOne() {
+        // ...
+    }
+
+    @GrailsCompileStatic(TypeCheckingMode.SKIP)
+    def methodTwo() {
+        // ...
+    }
+
+    def methodThree() {
+        // ...
+    }
+}
+----
+
+标记为GrailsCompileStatic的代码将全部静态编译，但Grails特定的交互除外，这些交互无法静态编译，但GrailsCompileStatic可以识别为动态调度允许的。 这些包括在配置块中调用动态查找器和DSL代码，例如域类中的约束和映射闭包。
+
+在决定静态编译代码时必须小心。 静态编译有一些好处，但为了利用这些好处，您放弃了动态调度的强大功能和灵活性。例如，如果代码是静态编译的，则它无法利用插件可能提供的运行时元编程增强功能。
+
+=== 14.2 GrailsTypeChecked 注解
+
+grails.compiler.GrailsTypeChecked注释与GrailsCompileStatic注释非常相似，只是它只启用静态类型检查，而不是静态编译。 这为表达式提供了编译时反馈，这些表达式在编译时无法静态验证，同时仍然为该类留下动态调度。
+[source,groovy]
+----
+import grails.compiler.GrailsTypeChecked
+
+@GrailsTypeChecked
+class SomeClass {
+
+    // all of the code in this class will be statically type
+    // checked and will be dynamically dispatched at runtime
+
+    def methodOne() {
+        // ...
+    }
+
+    def methodTwo() {
+        // ...
+    }
+
+    def methodThree() {
+        // ...
+    }
+}
+----
+
+== 15. 测试
+
+自动化测试是Grails的关键部分。因此，Grails提供了许多方法使测试更容易，从低级单元测试到高级功能测试。本节详细介绍了Grails为测试提供的不同功能。
+
+首先要注意的是，所有create-*和generate-*命令都会自动创建单元测试或集成测试。例如，如果您运行create-controller命令，如下所示：
+	grails create-controller com.acme.app.simple
+
+Grails将在grails-app/controllers/com/acme/app/SimpleController.groovy创建一个控制器，并在src/test/groovy/com/acme/app/ SimpleControllerSpec.groovy上创建一个单元测试。 然而Grails不会做的就是填充测试中的逻辑！ 
+
+**运行测试**
+
+命令是 `grails test-app`
+
+生成的日志信息:
+[source,shell]
+----
+Running Unit Tests...
+Running test FooTests...FAILURE
+Unit Tests Completed in 464ms ...
+
+Tests failed: 0 errors, 1 failures
+----
+Grails将纯文本和HTML测试报告与原始XML文件一起写入target/test-reports目录。
+
+使用Grails的交互模式在执行测试时具有一些明显的优势。首先，测试将在第二次和后续运行中执行得更快。其次，可以使用快捷方式在浏览器中打开HTML报告 `open test-report`
+
+**taget 测试**
+
+您可以选择性地运行测试。 要运行名为SimpleController的控制器的所有测试：
+	grails test-app SimpleController
+你还可以使用通配符:
+[source,bash]
+----
+grails test-app *Controller
+grails test-app some.org.*Controller
+grails test-app some.org.*
+grails test-app some.org.**.*
+grails test-app SimpleController.testLogin
+grails test-app some.org.* SimpleController.testLogin BookController
+
+----
+
+**测试阶段**
+
+除了定位某些测试之外，您还可以定位测试阶段。 默认情况下，Grails有两个测试阶段单元和集成。
+	grails test-app -unit
+	grails test-app -integration
+
+=== 15.1 单元测试
+
+单元测试一般是测试单个方法或代码块，而不考虑周围的基础结构。单元测试通常在没有涉及I/ O数据库，套接字连接或文件资源的情况下运行。 这是为了确保它们尽可能快地运行，因为快速反馈非常重要。
+[source,groovy]
+----
+import spock.lang.Specification
+import grails.testing.web.controllers.ControllerUnitTest
+
+class HelloControllerTests extends Specification implements ControllerUnitTest<HelloController> {
+
+    void "Test message action"() {
+        when:"The message action is invoked"
+        controller.message()
+
+        then:"Hello is returned"
+        response.text == 'Hello'
+    }
+}
+----
+
+=== 15.2 集成测试
+
+集成测试与单元测试的不同之处在于您可以在测试中完全访问Grails环境。
+
+创建集成测试的命令 `grails create-integration-test Example`,src/integration-test/groovy/<PACKAGE>/ExampleSpec.groovy
+
+Grails使用测试环境进行集成测试，并在第一次测试运行之前加载应用程序。 所有测试都使用相同的应用程序状态
+
+**事务**
+默认情况下，集成测试方法在其自己的数据库事务中运行，并在每个测试方法的末尾回滚。这意味着在测试期间保存的数据不会持久保存到数据库（在所有测试中共享）。 默认生成的集成测试模板包括Rollback注解：
+[source,groovy]
+----
+import grails.testing.mixin.integration.Integration
+import grails.gorm.transactions.*
+import spock.lang.*
+
+@Integration
+@Rollback
+class ExampleSpec extends Specification {
+
+    ...
+
+    void "test something"() {
+        expect:"fix me"
+            true == false
+    }
+}
+----
+
+Rollback注释确保每个测试方法在回滚的事务中运行。 通常这是可取的，因为您不希望您的测试取决于应用程序状态或顺序。
+
+在Grails 3.0中，测试依赖于grails.gorm.transactions.Rollback注释来在集成测试中绑定会话。尽管回滚了每个测试方法事务，但setup（）方法使用未回滚的单独事务。数据将持久存储到数据库，如果setup（）设置数据并将其保留，则需要手动清理数据，如下面的示例所示：
+[source,groovy]
+----
+import grails.testing.mixin.integration.Integration
+import grails.gorm.transactions.*
+import spock.lang.*
+
+@Integration
+@Rollback
+class BookSpec extends Specification {
+
+    void setup() {
+        // Below line would persist and not roll back
+        new Book(name: 'Grails in Action').save(flush: true)
+    }
+
+    void "test something"() {
+        expect:
+        Book.count() == 1
+    }
+}
+----
+要自动回滚设置逻辑，需要从测试方法本身调用任何持久性操作，以便它们在测试方法的回滚事务中运行。与使用如下所示的setupData（）方法类似：
+[source,groovy]
+----
+import grails.testing.mixin.integration.Integration
+import grails.gorm.transactions.*
+import spock.lang.*
+
+@Integration
+@Rollback
+class BookSpec extends Specification {
+
+    void setupData() {
+        // Below line would roll back
+        new Book(name: 'Grails in Action').save(flush: true)
+    }
+
+    void "test something"() {
+        given:
+        setupData()
+
+        expect:
+        Book.count() == 1
+    }
+}
+----
+
+
+=== 15.3 功能测试
+
+功能测试涉及对正在运行的应用程序发出HTTP请求并验证结果行为。 这对于端到端测试场景非常有用，例如针对JSON API进行REST调用。默认情况下，Grails支持使用Geb框架编写功能测试。要创建功能测试，您可以使用create-functional-test命令创建一个新的功能测试：
+	grails create-functional-test MyFunctional
+
+上面的命令将在src/integration-test/groovy目录中创建MyFunctionalSpec.groovy。该测试使用Integration注解，以表明它是一个集成测试并扩展了GebSpec类：
+[source,groovy]
+----
+@Integration
+class HomeSpec extends GebSpec {
+
+    def setup() {
+    }
+
+    def cleanup() {
+    }
+
+    void "Test the home page renders correctly"() {
+        when:"The home page is visited"
+            go '/'
+
+        then:"The title is correct"
+            $('title').text() == "Welcome to Grails"
+    }
+}
+----
+
+运行测试时，应用程序容器将在后台加载，您可以使用Geb API将请求发送到正在运行的应用程序。
+
+请注意，应用程序仅在整个测试运行时加载一次，因此功能测试在整个套件中共享应用程序的状态。
+
+此外，应用程序作为测试加载到JVM中，这意味着测试可以完全访问应用程序状态，并且可以直接与GORM等数据服务进行交互，以设置和清除测试数据。
+
+Integration注释支持可选的applicationClass属性，该属性可用于指定用于功能测试的应用程序类。该类必须扩展GrailsAutoConfiguration。
+
+如果未指定applicationClass，则测试运行时环境将尝试动态定位应用程序类，这可能在可能存在多个应用程序类的多项目构建中存在问题。
+
+默认运行服务器端口时将随机分配。 Integration注释将serverPort的属性添加到测试类中，如果您想要知道运行应用程序的端口，则可以使用此属性，如果您正在扩展GebSpec，如上所示，但可以是有用的信息。
+
+
+如果要在固定端口（由server.port配置属性定义）上运行测试，则需要使用@SpringBootTest手动注释测试：
+[source,groovy]
+----
+import grails.testing.mixin.integration.Integration
+import org.springframework.boot.test.context.SpringBootTest
+import spock.lang.Specification
+
+@Integration
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
+class MySpec extends Specification {
+
+    // ...
+
+}
+----

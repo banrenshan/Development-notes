@@ -1,0 +1,473 @@
+= spring-cloud-task
+
+Spring Cloud Task可以轻松创建短期的微服务。它提供的功能可以在生产环境中按需执行短期JVM进程。
+
+== 1.快速入门
+
+Spring Cloud Task使用关系数据库来存储已执行任务的结果。 虽然您可以开发没有数据库的任务（任务的状态记录为任务存储库更新的一部分），但对于生产环境，您希望使用受支持的数据库。 Spring Cloud Task目前支持以下数据库：
+. DB2
+. H2
+. HSQLDB
+. MySql
+. Oracle
+. Postgres
+. SqlServer
+
+=== 1.1 引入依赖
+[source,xml]
+----
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-jdbc</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-task</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>com.h2database</groupId>
+			<artifactId>h2</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+----
+=== 1.2 编写任务
+[sourec,java]
+----
+package io.spring.demo.helloworld;
+
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+
+@EnableTask
+@SpringBootApplication
+public class HelloworldApplication {
+
+	@Bean
+	public CommandLineRunner commandLineRunner() {
+		return new HelloWorldCommandLineRunner();
+	}
+
+	public static void main(String[] args) {
+		SpringApplication.run(HelloworldApplication.class, args);
+	}
+
+	public static class HelloWorldCommandLineRunner implements CommandLineRunner {
+
+		@Override
+		public void run(String... strings) throws Exception {
+			System.out.println("Hello, World!");
+		}
+	}
+}
+----
+
+@EnableTask注解可能是我们在这个java文件中见到的第一个陌生的东西，这个class级别的注解如果标记在启动类或配置类上意味着会自动导入额外的默认task配置类SimpleTaskConfiguration，开启 Spring Cloud Task功能。这个task配置类会自动注册TaskRepository任务仓库作为基础组件管理后面的task。
+
+虽然我们没有在数据库中持久化存储task相关信息，TaskRepository仍然可以开箱即用的在内存中创建一个Map纪录每个task的结果。不过在生产环境采用Map来存储task的最终结果是不可信的，应用重启后结果会丢失。在这个小demo里，我们使用这种方式来快速开始开发，并用日志纪录会对任务仓库所做的一些操作，后续的文档里，我会详细的介绍Spring Cloud Task的配置。
+
+当示例项目运行时，Spring Boot会执行我们的HelloWorldCommandLineRunner类并在标准输出流中打印 "Hello World!"。TaskLifecyceListener监听器会纪录从任务开始至结束全生命周期所做过的操作。
+
+
+在spring应用中有很多种方式去启用应用逻辑，Spring Boot提供了很多方便的启动工具来帮你完成应用逻辑调用和管理，你可以使用 *Runner 接口（如CommandLineRunner 或 ApplicationRunner），一个标准的task应用会在这两个运行器类中选择一个来完成业务逻辑的调用。
+
+一个task的生命周期就是从*Runner#run方法开始，直到该task的所有任务都被执行完成。Spring Boot允许应用中有多个 *Runner 接口的实现,spring cloud task同样遵循该规则.
+
+NOTE: 如果应用不是通过CommandLineRunner 或 ApplicationRunner，而是由其它机制启动的（如InitializingBean#afterPropertiesSet），那么Spring Cloud Task将不会对它进行记录。
+
+
+
+=== 1.3 配置
+
+[source,yml]
+----
+logging.level.org.springframework.cloud.task=DEBUG
+spring.application.name=helloWorld
+----
+
+=== 1.4 运行结果
+----
+2018-07-23 17:44:34.426  INFO 1978 --- [           main] i.s.d.helloworld.HelloworldApplication   : Starting HelloworldApplication on Glenns-MBP-2.attlocal.net with PID 1978 (/Users/glennrenfro/project/helloworld/target/classes started by glennrenfro in /Users/glennrenfro/project/helloworld)
+2018-07-23 17:44:34.430  INFO 1978 --- [           main] i.s.d.helloworld.HelloworldApplication   : No active profile set, falling back to default profiles: default
+2018-07-23 17:44:34.472  INFO 1978 --- [           main] s.c.a.AnnotationConfigApplicationContext : Refreshing org.springframework.context.annotation.AnnotationConfigApplicationContext@1d24f32d: startup date [Mon Jul 23 17:44:34 EDT 2018]; root of context hierarchy
+2018-07-23 17:44:35.280  INFO 1978 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2018-07-23 17:44:35.410  INFO 1978 --- [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2018-07-23 17:44:35.419 DEBUG 1978 --- [           main] o.s.c.t.c.SimpleTaskConfiguration        : Using org.springframework.cloud.task.configuration.DefaultTaskConfigurer TaskConfigurer
+2018-07-23 17:44:35.420 DEBUG 1978 --- [           main] o.s.c.t.c.DefaultTaskConfigurer          : No EntityManager was found, using DataSourceTransactionManager
+2018-07-23 17:44:35.522 DEBUG 1978 --- [           main] o.s.c.t.r.s.TaskRepositoryInitializer    : Initializing task schema for h2 database
+2018-07-23 17:44:35.525  INFO 1978 --- [           main] o.s.jdbc.datasource.init.ScriptUtils     : Executing SQL script from class path resource [org/springframework/cloud/task/schema-h2.sql]
+2018-07-23 17:44:35.558  INFO 1978 --- [           main] o.s.jdbc.datasource.init.ScriptUtils     : Executed SQL script from class path resource [org/springframework/cloud/task/schema-h2.sql] in 33 ms.
+2018-07-23 17:44:35.728  INFO 1978 --- [           main] o.s.j.e.a.AnnotationMBeanExporter        : Registering beans for JMX exposure on startup
+2018-07-23 17:44:35.730  INFO 1978 --- [           main] o.s.j.e.a.AnnotationMBeanExporter        : Bean with name 'dataSource' has been autodetected for JMX exposure
+2018-07-23 17:44:35.733  INFO 1978 --- [           main] o.s.j.e.a.AnnotationMBeanExporter        : Located MBean 'dataSource': registering with JMX server as MBean [com.zaxxer.hikari:name=dataSource,type=HikariDataSource]
+2018-07-23 17:44:35.738  INFO 1978 --- [           main] o.s.c.support.DefaultLifecycleProcessor  : Starting beans in phase 0
+2018-07-23 17:44:35.762 DEBUG 1978 --- [           main] o.s.c.t.r.support.SimpleTaskRepository   : Creating: TaskExecution{executionId=0, parentExecutionId=null, exitCode=null, taskName='application', startTime=Mon Jul 23 17:44:35 EDT 2018, endTime=null, exitMessage='null', externalExecutionId='null', errorMessage='null', arguments=[]}
+2018-07-23 17:44:35.772  INFO 1978 --- [           main] i.s.d.helloworld.HelloworldApplication   : Started HelloworldApplication in 1.625 seconds (JVM running for 4.764)
+Hello, World!
+2018-07-23 17:44:35.782 DEBUG 1978 --- [           main] o.s.c.t.r.support.SimpleTaskRepository   : Updating: TaskExecution with executionId=1 with the following {exitCode=0, endTime=Mon Jul 23 17:44:35 EDT 2018, exitMessage='null', errorMessage='null'}
+----
+
+SimpleTaskRepository记录了任务的创建和结束状态
+
+==  2.Spring Cloud Task的生命周期
+
+在任务开始时，在运行任何CommandLineRunner或ApplicationRunner实现之前，TaskRepository记录启动事件。此事件由Spring Framework的SmartLifecycle＃start触发。
+
+完成Spring Boot的所有*Runner#run调用或ApplicationContext失败（由ApplicationFailedEvent指示）后，将在存储库中更新执行的结果。
+
+=== 2.1 TaskExecution
+
+存储在TaskRepository中的信息在TaskExecution类中建模，包含以下信息：
+
+|===
+| Field	| Description
+| executionid | 任务运行的唯一ID。
+| exitCode | 退出代码,从ExitCodeExceptionMapper实现生成。 如果没有生成退出代码但抛出了ApplicationFailedEvent，则设置为1。 否则，假设为0。
+| taskName | 任务的名称，由配置的TaskNameResolver确定。
+| startTime | 任务开始的时间，如SmartLifecycle #start call所示。
+| endTime | 任务完成的时间，如ApplicationReadyEvent所示。
+| exitMessage | 退出信息。 这可以通过TaskExecutionListener以编程方式设置。
+| errorMessage | 如果异常是任务结束的原因（由ApplicationFailedEvent指示），则该异常的堆栈跟踪将存储在此处。
+| arguments | 它们传递到可执行引导应用程序时的字符串命令行参数的列表。
+|===
+
+== 3.映射退出状态
+
+Spring Boot提供了一个接口ExitCodeExceptionMapper，它允许您将未捕获的异常映射到退出代码。 这样做可以让您在退出代码级别指出出错的地方。 此外，通过以这种方式映射退出码，Spring Cloud Task会记录返回的退出代码。例如:
+[source,java]
+----
+public class MyExitCodeExceptionMapper implements ExitCodeExceptionMapper {
+    @Override
+    public int getExitCode(Throwable throwable) {
+        if (throwable.getCause() instanceof ArithmeticException) {
+            return 401;
+        }
+        return 0;
+    }
+}
+
+    @Bean
+    public MyExitCodeExceptionMapper myExitCodeExceptionMapper(){
+        return new MyExitCodeExceptionMapper();
+    }
+----
+
+如果任务以SIG-INT或SIG-TERM终止，则除非代码中另有指定，否则退出代码为零。
+
+== 4.配置
+Spring Cloud Task提供了一个即用型配置，如DefaultTaskConfigurer和SimpleTaskConfiguration类中所定义。 本节将介绍默认设置以及如何根据需要自定义Spring Cloud Task。
+
+=== 4.1 DataSource
+
+Spring Cloud Task使用数据源来存储任务执行的结果。默认情况下，我们提供H2的内存实例，以提供一种简单的方式快速开发。但是，在生产环境中，您可能希望配置自己的DataSource。
+
+如果您的应用程序仅使用单个DataSource并且同时充当您的业务模式和任务存储库，那么您需要做的就是配置DataSource（最简单的方法是通过Spring Boot的配置约定）。 Spring Cloud Task会自动将此DataSource用于存储库。
+
+如果您的应用程序使用多个DataSource，则需要使用适当的DataSource配置任务存储库。 可以通过TaskConfigurer的实现来完成此自定义。
+
+=== 4.2 表前缀
+
+TaskRepository的一个可修改属性是任务表的表前缀。 默认情况下，它们都以TASK_开头。配置如下:
+----
+spring.cloud.task.tablePrefix=yourPrefix
+----
+
+=== 4.3 关闭表初始化
+
+如果您正在创建任务表并且不希望Spring Cloud Task在任务启动时创建它们，请将spring.cloud.task.initialize.enable属性设置为false.
+
+=== 4.4外部生成的任务ID
+
+在某些情况下,您可能希望在任务被请求执行和实际执行之间有些时差.Spring Cloud Task允许您在请求任务时创建TaskExecution。 然后将生成的TaskExecution的执行ID传递给任务，以便它可以通过任务的生命周期更新TaskExecution。
+
+可以通过在TaskRepository的实现上调用createTaskExecution方法来创建TaskExecution，该实现引用包含TaskExecution对象的数据存储。
+
+要将Task配置为使用生成的TaskExecutionId，请添加以下属性：
+----
+spring.cloud.task.executionid=yourtaskId
+----
+
+=== 4.5 外部任务ID
+
+Spring Cloud Task允许您为每个TaskExecution存储外部任务ID。这方面的一个示例是Cloud Foundry在平台上启动任务时提供的任务ID。要将Task配置为使用生成的TaskExecutionId，请添加以下属性：
+----
+spring.cloud.task.external-execution-id=<externalTaskId>
+----
+
+=== 4.6 父任务ID
+
+Spring Cloud Task允许您为每个TaskExecution存储父任务ID。这样的一个示例是某个任务执行一个或多个其他任务，此时希望记录该任务下所有的子任务。需要设置:
+----
+spring.cloud.task.parent-execution-id=<parentExecutionTaskId>
+----
+
+=== 4.7 TaskConfigurer
+
+TaskConfigurer是一个策略接口，允许您自定义Spring Cloud Task的组件配置方式。默认情况下，我们提供DefaultTaskConfigurer，它提供逻辑默认值：基于映射的内存组件（没有提供DataSource,方便开发）和基于JDBC的组件.
+TaskConfigurer允许您配置三个主要组件：
+|===
+| Component	| Description	| Default (provided by DefaultTaskConfigurer)
+| TaskRepository | 要使用的TaskRepository的实现。| SimpleTaskRepository
+| TaskExplorer | 要使用的TaskExplorer（用于对任务存储库进行只读访问的组件）的实现。|SimpleTaskExplorer
+| PlatformTransactionManager | 运行任务更新时要使用的事务管理器。|DataSourceTransactionManager（如果使用DataSource）。 ResourcelessTransactionManager如果不是。
+|===
+
+您可以通过创建TaskConfigurer接口的自定义实现来自定义上表中描述的任何组件。 通常，扩展DefaultTaskConfigurer（如果未找到TaskConfigurer则提供）并覆盖所需的getter就足够了。 但是，可能需要从头开始实现自己的。
+
+=== 4.8 任务的名称
+
+在大多数情况下，任务的名称是Spring Boot中配置的应用程序名称。但是，在某些情况下，您可能希望将任务的运行映射到其他名称。Spring Cloud Data Flow就是一个例子（因为您可能希望使用任务定义的名称来运行任务）。因此，我们提供了通过TaskNameResolver接口自定义任务命名方式的功能。
+
+默认情况下，Spring Cloud Task提供SimpleTaskNameResolver，它使用以下选项（按优先顺序排列）：
+. Spring Boot属性（以Spring Boot允许的任何方式配置）:spring.cloud.task.name。
+. 使用Spring Boot规则解析的应用程序名称（通过ApplicationContext＃getId获得）。
+
+=== 4.9任务执行监听器
+
+TaskExecutionListener允许您为任务生命周期中发生的特定事件注册侦听器。为此，请创建一个实现TaskExecutionListener接口的类。实现TaskExecutionListener接口的类将收到以下事件的通知：
+. onTaskStartup:在将TaskExecution存储到TaskRepository之前。
+. onTaskEnd:在更新TaskRepository中的TaskExecution信息并标记任务的最终状态之前。
+. onTaskFailed:在任务抛出未处理的异常时调用onTaskEnd方法之前。
+
+Spring Cloud Task还允许您使用以下方法注释将TaskExecution侦听器添加到bean中的方法：
+. @BeforeTask
+. @AfterTask
+. @FailedTask
+[source,java]
+----
+ public class MyBean {
+
+	@BeforeTask
+	public void methodA(TaskExecution taskExecution) {
+	}
+
+	@AfterTask
+	public void methodB(TaskExecution taskExecution) {
+	}
+
+	@FailedTask
+	public void methodC(TaskExecution taskExecution, Throwable throwable) {
+	}
+}
+----
+
+==== 4.9.1任务执行监听器抛出的异常
+
+如果TaskExecutionListener事件处理程序抛出异常，则该事件处理程序的所有侦听器处理都将停止。 例如，如果三个onTaskStartup侦听器已启动且第一个onTaskStartup事件处理程序抛出异常，则不会调用另外两个onTaskStartup方法。但是，将调用TaskExecutionListeners的其他事件处理程序（onTaskEnd和onTaskFailed）。
+
+当TaskExecutionListener事件处理程序抛出异常时返回的退出代码是ExitCodeEvent报告的退出代码。如果没有发出ExitCodeEvent，则会计算抛出的Exception以查看它是否为ExitCodeGenerator类型。如果是这样，它将从ExitCodeGenerator返回退出代码。 否则，返回1。
+
+在onTaskStartup方法中抛出异常的情况下，应用程序的退出代码将为1.如果在onTaskEnd或onTaskFailed方法中抛出异常，则应用程序的退出代码将是使用以上列举规则建立的代码 。
+
+==== 4.9.2 退出消息
+
+您可以使用TaskExecutionListener以编程方式为任务设置退出消息。 这是通过设置TaskExecution的exitMessage来完成的，然后将其传递给TaskExecutionListener。 以下示例显示了使用@AfterTask ExecutionListener注释的方法：
+[source,java]
+----
+@AfterTask
+public void afterMe(TaskExecution taskExecution) {
+    taskExecution.setExitMessage("AFTER EXIT MESSAGE");
+}
+----
+
+可以在任何侦听器事件（onTaskStartup，onTaskFailed和onTaskEnd）上设置ExitMessage。 三个侦听器的优先顺序如下：
+
+1. onTaskEnd
+2. onTaskFailed
+3. onTaskStartup
+
+例如，如果为onTaskStartup和onTaskFailed侦听器设置exitMessage并且任务结束而不会失败，则onTaskStartup中的exitMessage将存储在存储库中。否则，如果发生故障，则存储onTaskFailed中的exitMessage。此外，如果使用onTaskEnd侦听器设置exitMessage，则onTaskEnd中的exitMessage将取代onTaskStartup和onTaskFailed的退出消息。
+
+=== 4.10限制Spring Cloud任务实例
+
+Spring Cloud Task允许您确定一次只能运行具有给定任务名称的一个任务。 为此，您需要建立任务名称并为每个任务执行设置spring.cloud.task.single-instance-enabled = true。当第一个任务执行正在运行时，任何具有相同任务的名称在`spring.cloud.task.single-instance-enabled = true`时运行，将失败并显示以下错误消息： 名称“应用程序”已在运行。 spring.cloud.task.single-instance-enabled的默认值为false。
+
+要使用此功能，必须将以下Spring Integration依赖项添加到应用程序：
+[source,xml]
+----
+<dependency>
+    <groupId>org.springframework.integration</groupId>
+    <artifactId>spring-integration-core</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.integration</groupId>
+    <artifactId>spring-integration-jdbc</artifactId>
+</dependency>
+----
+
+=== 4.11 禁用Spring Cloud任务自动配置
+
+禁用Task的自动配置,加以下注释来完成：
+[source,java]
+----
+@EnableAutoConfiguration(exclude={SimpleTaskAutoConfiguration.class})
+
+----
+或者设置spring.cloud.task.autoconfiguration.enabled为false.
+
+下面的部分结和spring batch
+
+== 5.将作业执行与执行它的任务相关联
+
+Spring Boot提供了在über-jar中执行批处理作业的工具。 Spring Boot对此功能的支持使开发人员可以在该执行中执行多个批处理作业。 Spring Cloud Task提供了将作业执行（作业执行）与任务执行相关联的功能，以便可以追溯到另一个任务。
+
+Spring Cloud Task通过使用TaskBatchExecutionListener实现此功能。默认情况下，此侦听器在任何上下文中自动配置，该上下文同时配置了Spring Batch作业（通过在上下文中定义了Job类型的bean）和类路径上的spring-cloud-task-batch jar。 监听器被注入到满足这些条件的所有Job中。
+
+=== 5.1 覆盖TaskBatchExecutionListener
+
+要防止将侦听器注入当前上下文中的任何批处理作业，可以使用标准的Spring Boot机制禁用自动配置。
+
+要仅将侦听器注入上下文中的特定作业，请覆盖batchTaskExecutionListenerBeanPostProcessor并提供作业Bean ID列表，如以下示例所示：
+[source,java]
+----
+public TaskBatchExecutionListenerBeanPostProcessor batchTaskExecutionListenerBeanPostProcessor() {
+	TaskBatchExecutionListenerBeanPostProcessor postProcessor =
+		new TaskBatchExecutionListenerBeanPostProcessor();
+
+	postProcessor.setJobNames(Arrays.asList(new String[] {"job1", "job2"}));
+
+	return postProcessor;
+}
+----
+参考https://github.com/spring-cloud/spring-cloud-task/tree/master/spring-cloud-task-samples/batch-job[示例]工程
+
+== 6.远程分区
+
+Spring Cloud Deployer提供了在大多数云基础架构上启动基于Spring Boot的应用程序的工具。 DeployerPartitionHandler和DeployerStepExecutionHandler将工作步骤执行的启动委派给Spring Cloud Deployer。
+
+要配置DeployerStepExecutionHandler，您必须提供一个表示要执行的SpringBootüber-jar的Resource，一个TaskLauncher和一个JobExplorer。您可以配置任何环境属性以及一次执行的最大工作数，轮询结果的间隔（默认为10秒）和超时（默认为-1或无超时）。 以下示例显示了如何配置此PartitionHandler：
+[source,java]
+----
+@Bean
+public PartitionHandler partitionHandler(TaskLauncher taskLauncher,
+		JobExplorer jobExplorer) throws Exception {
+
+	MavenProperties mavenProperties = new MavenProperties();
+	mavenProperties.setRemoteRepositories(new HashMap<>(Collections.singletonMap("springRepo",
+		new MavenProperties.RemoteRepository(repository))));
+
+ 	Resource resource =
+		MavenResource.parse(String.format("%s:%s:%s",
+				"io.spring.cloud",
+				"partitioned-batch-job",
+				"1.1.0.RELEASE"), mavenProperties);
+
+	DeployerPartitionHandler partitionHandler =
+		new DeployerPartitionHandler(taskLauncher, jobExplorer, resource, "workerStep");
+
+	List<String> commandLineArgs = new ArrayList<>(3);
+	commandLineArgs.add("--spring.profiles.active=worker");
+	commandLineArgs.add("--spring.cloud.task.initialize.enable=false");
+	commandLineArgs.add("--spring.batch.initializer.enabled=false");
+
+	partitionHandler.setCommandLineArgsProvider(
+		new PassThroughCommandLineArgsProvider(commandLineArgs));
+	partitionHandler.setEnvironmentVariablesProvider(new NoOpEnvironmentVariablesProvider());
+	partitionHandler.setMaxWorkers(2);
+	partitionHandler.setApplicationName("PartitionedBatchJobTask");
+
+	return partitionHandler;
+}
+----
+
+== 7.批处理信息消息
+Spring Cloud Task使批处理作业能够发出信息性消息。“Spring批处理事件”部分详细介绍了此功能。
+
+== 8.批处理job退出码
+
+如前所述，Spring Cloud Task应用程序支持记录任务执行的退出代码的功能。但是，如果在任务中运行Spring Batch作业，无论批处理作业执行如何完成，在使用默认批处理/引导行为时，任务结果始终为零。请记住,boot应用返回的状态码应该和task执行结果的状态码一致.要覆盖此行为并允许任务在批处理作业返回FAILED的BatchStatus时返回非零的退出代码，请将spring.cloud.task.batch.fail-on-job-failure设置为true。 然后退出代码可以是1（默认值）或基于指定的ExitCodeGenerator）
+
+此功能使用新的CommandLineRunner替换Spring Boot提供的CommandLineRunner。默认情况下，它配置相同的顺序。 但是，如果要自定义CommandLineRunner的运行顺序，可以通过设置spring.cloud.task.batch.commandLineRunnerOrder属性来设置其顺序。 要让您的任务根据批处理作业执行的结果返回退出代码，您需要编写自己的CommandLineRunner。
+
+== Spring Cloud Stream集成
+
+任务本身很有用,但是将其集成到更大的生态系统,使之处理更复杂的逻辑.下面的部分介绍集成spring cloud stream到spring cloud task.
+
+=== 从spring cloud stream加载任务
+
+您可以从流中启动任务。 为此，请创建一个接收器，该接收器侦听包含TaskLaunchRequest类型的消息。 TaskLaunchRequest包含：
+. uri:到要执行的任务工件
+. applicationName:与任务关联的名称。 如果未设置applicationName，则TaskLaunchRequest将生成由以下内容组成的任务名称：Task- <UUID>。
+. commandLineArguments:执行任务所需的命令行参数。
+. environmentProperties:包含任务要使用的环境变量的map
+. deploymentProperties:包含部署程序用于部署任务的属性的map。
+
+例如，可以创建一个流，该流具有从HTTP源接收数据的处理器，并创建包含TaskLaunchRequest的GenericMessage，并将消息发送到其输出通道。然后，任务接收器将从其输入channnel接收消息，然后启动任务。
+
+要创建taskSink，您只需创建一个包含EnableTaskLauncher注释的Spring Boot应用程序，如以下示例所示：
+[source,java]
+----
+@SpringBootApplication
+@EnableTaskLauncher
+public class TaskSinkApplication {
+	public static void main(String[] args) {
+		SpringApplication.run(TaskSinkApplication.class, args);
+	}
+}
+----
+Spring Cloud Task项目的samples模块包含一个Sink和Processor示例。 要将这些示例安装到本地maven存储库，请从spring-cloud-task-samples目录运行maven构建，并将skipInstall属性设置为false，如以下示例所示：
+	mvn clean install
+NOTE: 必须将maven.remoteRepositories.springRepo.url属性设置为über-jar所在的远程存储库的位置。如果未设置，则没有远程存储库，因此它仅依赖于本地存储库。
+
+==== Spring Cloud Data Flow
+要在Spring Cloud Data Flow中创建流，您必须首先注册我们创建的任务接收器应用程序。在以下示例中，我们使用Spring Cloud Data Flow shell注册Processor和Sink示例应用程序：
+----
+app register --name taskSink --type sink --uri maven://io.spring.cloud:tasksink:<version>
+app register --name taskProcessor --type processor --uri maven:io.spring.cloud:taskprocessor:<version>
+----
+以下示例显示如何从Spring Cloud Data Flow shell创建流：
+----
+stream create foo --definition "http --server.port=9000|taskProcessor|taskSink" --deploy
+----
+
+==  Spring Cloud Task Events
+当任务通过Spring Cloud Stream通道运行时，Spring Cloud Task提供通过Spring Cloud Stream通道发出事件的功能。任务侦听器用于在名为task-events的消息通道上发布TaskExecution。此功能自动装入任何具有spring-cloud-stream，spring-cloud-stream- <binder>的任务，以及其类路径上的已定义任务。
+
+要禁用事件发出侦听器，请将spring.cloud.task.events.enabled属性设置为false。
+
+通过定义适当的类路径，以下任务将TaskExecution作为任务事件通道上的事件（在任务的开始和结束时）发出：
+[source,java]
+----
+
+@SpringBootApplication
+public class TaskEventsApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(TaskEventsApplication.class, args);
+	}
+
+	@Configuration
+	public static class TaskConfiguration {
+
+		@Bean
+		public CommandLineRunner commandLineRunner() {
+			return new CommandLineRunner() {
+				@Override
+				public void run(String... args) throws Exception {
+					System.out.println("The CommandLineRunner was executed");
+				}
+			};
+		}
+	}
+}
+----
+
+要禁用任务事件，可以将spring.cloud.task.events.enabled属性设置为false。
+
+==  Spring Batch Events
+
+通过任务执行Spring Batch作业时，可以将Spring Cloud Task配置为基于Spring Batch中提供的Spring Batch侦听器发出信息性消息。 具体来说，以下Spring Batch侦听器将自动配置到每个批处理作业中，并在运行Spring Cloud Task时在关联的Spring Cloud Stream通道上发出消息：
+
+. JobExecutionListener listens for job-execution-events
+. StepExecutionListener listens for step-execution-events
+. ChunkListener listens for chunk-events
+. ItemReadListener listens for item-read-events
+. ItemProcessListener listens for item-process-events
+. ItemWriteListener listens for item-write-events
+. SkipListener listens for skip-events
+
+当上下文中存在适当的bean（Job和TaskLifecycleListener）时，这些侦听器将自动配置到任何AbstractJob中。侦听这些事件的配置的处理方式与完成任何其他Spring Cloud Stream通道的绑定相同。 我们的任务（运行批处理作业的任务）充当源，监听应用程序充当处理器或接收器。
+
+image::../images/20190228174921.png[]

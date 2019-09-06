@@ -1,0 +1,167 @@
+= java-lambda表达式
+
+== lambda表达式的本质和作用
+
+lambda的本质其实就是匿名内部类，而他的主要作用就是精简代码，增强可读性。我们来举个例子来验证一下这句话。
+
+不是用lambda的代码
+[source,java]
+----
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                System.err.println("哈哈哈。。。");
+            }
+        }).start();
+----
+
+使用lambda的代码
+[source,java]
+----
+        new Thread(() -> System.err.println("哈哈哈。。。")).start();
+----
+
+通过上面两段代码的对比，我们可以发现，使用lambda表达式使开发人员更容易读懂代码。但是代码编译的背后并没有改变。
+
+== lambda表达式的语法结构
+
+[source,java]
+----
+        //完整的lambda表达式
+        Function<String, Integer> stringObjectFunction = (String s) -> {
+            return 1;
+        };
+        //省略了return的lambda表达式
+        Function<String, Integer> stringObjectFunction1 = (String s) -> 1;
+
+        //返回bool值的表达式
+        IntPredicate intPredicate = (int a) -> a > 100;
+
+        //没有参数，返回double类型
+        DoubleSupplier doubleSupplier = () -> 2;
+
+        FilenameFilter filenameFilter = (a, b) -> a.compareTo(b);
+----
+
+从上面的例子可以看出，lambda表达式的参数类型是可以省略的。return关键字在特定情况下也是可以省略的。
+
+== 常用的函数式接口
+
+只有一个抽象方法的接口，我们称之为函数式接口。函数式接口一般会在类上添加@FunctionalInterface注解。
+
+|===
+
+|接口 | 函数描述符 | 接口描述
+
+| Predicate<T>
+| boolean test(T t); 
+| 接受单个输入参数，判断是否符合某种规则，并返回结果
+
+| Consumer<T>
+| void accept(T t);
+| 接受单个输入参数并不返回结果的操作
+
+| Function<T, R>
+| R apply(T t);
+| 接受单个输入参数，并转化成你想要的结果返回
+
+| Supplier<T> 
+| T get();
+| 表示结果的提供值：不接受输入参数，只返回数据结果
+
+| #UnaryOperator<T>#
+| R apply(T t);
+| 该操作产生与其操作数相同的类型的结果
+
+| BiFunction<T, U, R>
+| R apply(T t, U u)
+| 接受两个输入参数，并转化成你想要的结果返回
+
+| #BinaryOperator<T>#
+| R apply(T t, U u)
+| 接受两个相同类型输入参数，并转化成相同类型的结果返回
+
+| BiPredicate<L,R>
+| boolean test(T t, U u);
+| 接受两个输入参数，判断是否符合某种规则，并返回结果
+
+| BiConsumer<T,U> 
+| void accept(T t, U u);
+| 接受两个输入参数并不返回结果的操作
+
+|===
+
+== 装箱的函数式接口
+java中有个自动装箱和拆箱的机制。装箱的本质是把原始的类型包裹起来，并保存在堆里。因此，装箱后的值需要更多的内存，并需要额外的内存搜索来获取被包裹的原始值。
+
+java8为我们前面所说的函数式接口带来了一个专门的版本，以便在输入和输出都是原始类型时避免自动装箱的操作。比如，在下面的代码中，使用IntPredicate就避免了对值1000进行装箱操作，但是用Predicate<Integer>就会把参数1000装箱。
+[source,java]
+----
+IntPredicate evenNumbers = (int i) -> i % 2 == 0;
+evenNumbers.test(1000); //不装箱
+
+Predicate<Integer> oddNumbers = (Integer i) -> i % 2 == 1;
+oddNumbers.test(1000); //装箱
+----
+
+== 方法引用
+
+我们先举个例子来看什么是方法引用
+[source,java]
+----
+        List<String> list = Arrays.asList("zhaozhiqiang", "wangxu", "hanli");
+        System.err.println("原始集合" + list);
+        // list.sort((a, b) -> a.compareTo(b)); //原始的使用方式
+        list.sort(String::compareTo); //方法引用
+
+        System.err.println("新的集合" + list);
+----
+
+方法引用主要有三类。
+
+. 指向静态方法的方法引用（例如Integer的parseInt方法，写作Integer::parseInt）。
+. 指 向 任意类型实例方法 的方法引用（例如 String 的 length 方法，写作String::length）。
+. 指向现有对象的实例方法的方法引用（假设你有一个局部变量e,e::getValue）。
+
+
+== 函数式接口的组合使用
+
+许多函数式接口，比如用于传递Lambda表达式的Comparator、Function和Predicate都提供了允许你进行复合的方法。这是什么意思呢？在实践中，这意味着你可以把多个简单的Lambda复合成复杂的表达式。比如，你可以让两个谓词之间做一个or操作，组合成一个更大的谓词。而且，你还可以让一个函数的结果成为另一个函数的输入。你可能会想，函数式接口中怎么可能有更多的方法呢？窍门在于，我们即将介绍的方法都是默认方法，也就是说它们不是抽象方法。
+
+[source,java]
+----
+inventory.sort(comparing(Apple::getWeight).reversed()); //按重量递减排序
+
+inventory.sort(comparing(Apple::getWeight)
+ .reversed()
+ .thenComparing(Apple::getCountry)); //按重量递减排序,两个苹果一样重时，进一步按国家排序
+----
+
+=== 谓词复合
+
+[source,java]
+----
+Predicate<Apple> notRedApple = redApple.negate(); //产生现有Predicate对象redApple的非
+
+Predicate<Apple> redAndHeavyApple =redApple.and(a -> a.getWeight() > 150);//链接两个谓词来生成另一个Predicate对象
+
+Predicate<Apple> redAndHeavyAppleOrGreen =redApple.and(a -> a.getWeight() > 150)
+ 												  .or(a -> "green".equals(a.getColor())); 
+----
+
+=== 函数复合
+[source,java]
+----
+Function<Integer, Integer> f = x -> x + 1;
+Function<Integer, Integer> g = x -> x * 2;
+Function<Integer, Integer> h = f.andThen(g); //g(f(x))
+int result = h.apply(1); //返回4
+----
+
+[source,java]
+----
+Function<Integer, Integer> f = x -> x + 1;
+Function<Integer, Integer> g = x -> x * 2;
+Function<Integer, Integer> h = f.compose(g); //f(g(x))
+int result = h.apply(1); //返回3
+----

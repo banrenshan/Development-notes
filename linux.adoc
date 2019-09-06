@@ -1,0 +1,584 @@
+---
+title: linux笔记
+---
+
+
+= docker 
+:toc: left
+:icons: font
+:imagesdir: /blog/images
+
+
+== linux安装
+
+image::aa.png[]
+
+== VMvare三种网络模式
+
+== linux文件目录
+
+|===
+|目录|说明
+|/bin|系统有很多放置执行文件的目录，但/bin比较特殊。因为/bin放置的是在单人维护模式下还能够被操作的指令。在/bin底下的指令可以被root与一般帐号所使用，主要有：cat,chmod(修改权限), chown, date, mv, mkdir, cp, bash等等常用的指令。
+|/boot|主要放置开机会使用到的文件，包括Linux核心文件以及开机选项与开机所需设置等等。Linux kernel常用的文件为：vmlinuz ，如果使用的是grub这个开机管理程式，则还会存在/boot/grub/这个目录。
+|/dev|在Linux系统上，任何硬件设备都是以文件形式存在于这个目录当中。只要通过存取这个目录下的某个文件，就等于存取某个设备。比要重要的设备有/dev/null, /dev/zero, /dev/tty , /dev/lp*, / dev/hd*, /dev/sd*等等
+|/etc|系统主要的设置几乎都放在这个目录内，例如人员的帐号密码信息、各种服务的启始信息等等。 一般来说，这个目录下的各种设置是可以让一般使用者查阅的，但是只有root有权力修改。比较重要的档案有：/etc/inittab, /etc/init.d/, /etc/modprobe.conf, /etc/X11/, /etc/fstab, /etc/sysconfig/等等。 另外，其下重要的目录有：/etc/init.d/ ：所有服务的预设启动script都是放在这里的，例如要启动或者关闭iptables的话： /etc/init.d/iptables start、/etc/init.d/ iptables stop
+|/home|这是系统预设的使用者的家目录。在你新增一个一般使用者帐号时，新账号的家目录就会被创建在这里。比较重要的是，家目录有两种代号：~ ：代表当前使用者的家目录，而 ~guest：则代表用户名为guest的家目录。
+
+/etc/xinetd.d/ ：这就是所谓的super daemon管理的各项服务的设定档目录。
+|/lib| 系统的函式库非常的多，而/lib放置的则是在开机时会用到的函式库，以及在/bin或/sbin底下的指令会呼叫的函式库而已 
+|/media|media是媒体的英文，顾名思义，这个/media底下放置的就是可移除的装置。 包括软碟、光碟、DVD等等装置都暂时挂载于此。 常见的档名有：/media/floppy, /media/cdrom等等
+|/mnt|如果妳想要暂时挂载某些额外的装置，一般建议妳可以放置到这个目录中。在早时候，这个目录的用途与/media相同啦。 只是有了/media之后，这个目录就用来暂时挂载用了。
+|/opt|这个是给第三方协议软体放置的目录 。不过，以前的Linux系统中，我们还是习惯放置在/usr/local目录下。
+|/root|系统管理员(root)的家目录。 之所以放在这里，是因为如果进入单人维护模式而仅挂载根目录时，该目录就能够拥有root的家目录，所以我们会希望root的家目录与根目录放置在同一个分区中。
+|/sbin|Linux有非常多指令是用来设定系统环境的，这些指令只有root才能够利用来设定系统，其他使用者最多只能用来查询而已。放在/sbin底下的为开机过程中所需要的，里面包括了开机、修复、还原系统所需要的指令。至于某些第三方乳尖，一般则放置到/usr/sbin/当中。至于本机自行安装的软体所产生的系统执行档(system binary)，则放置到/usr/local/sbin/当中了。常见的指令包括：fdisk, fsck, ifconfig, init, mkfs等等。
+|/srv|srv可以视为service的缩写，是一些网路服务启动之后，这些服务所需要取用的资料目录。 常见的服务例如WWW, FTP等等。 举例来说，WWW伺服器需要的网页资料就可以放置在/srv/www/里面。呵呵，看来平时我们编写的代码应该放到这里了。
+|/tmp|这是让一般使用者或者是正在执行的程序暂时放置档案的地方。这个目录是任何人都能够存取的，所以你需要定期的清理一下。当然，重要资料不可放置在此目录啊。 因为FHS甚至建议在开机时，应该要将/tmp下的资料都删除
+|/lost+found|这个目录是使用标准的ext2/ext3档案系统格式才会产生的一个目录，目的在于当档案系统发生错误时，将一些遗失的片段放置到这个目录下。 这个目录通常会在分割槽的最顶层存在，例如你加装一个硬盘于/disk中，那在这个系统下就会自动产生一个这样的目录/disk/lost+found
+|/proc|此目录的数据都在内存中，如系统核心，外部设备，网络状态，由于数据都存放于内存中，所以不占用磁盘空间，比较重要的目录有 /proc/cpuinfo、/proc/interrupts、/proc/dma、/proc/ioports、/proc/net/* 等。
+|/var|放置系统执行过程中经常变化的文件，如随时更改的日志文件 /var/log，/var/log/message：所有的登录文件存放目录，/var/spool/mail：邮件存放的目录，/var/run:程序或服务启动后，其PID存放在该目录下。建议单独分区，设置较大的磁盘空间
+|/usr|应用程序存放目录，/usr/bin 存放应用程序，/usr/share 存放共享数据，/usr/lib 存放不能直接运行的，却是许多程序运行所必需的一些函数库文件。/usr/local: 存放软件升级包。/usr/share/doc: 系统说明文件存放目录。/usr/share/man: 程序说明文件存放目录，使用 man ls 时会查询 /usr/share/man/man1/ls.1.gz 的内容建议单独分区，设置较大的磁盘空间
+
+|===
+
+== linux 分区方案
+
+1. 挂载点/；主分区；安装系统和软件；大小为30G；分区格式为ext4； 
+2. 挂载点/home；逻辑分区；相当于“我的文档”；大小为硬盘剩下的; 分区格式ext4； 
+3. swap；逻辑分区；充当虚拟内存；大小等于内存大小（本人2G）；分区格式为swap 
+4. /boot ；引导分区；逻辑分区； 大小为200M ；分区格式为ext4；
+
+因为Linux的文件系统是一种树状的结构，一个软件会把包含的众多文件，放置在不同的目录当中，所以不同的使用目的，每个目录扩张的速度会不一样。例如，当计算机当作服务器使用时，由于变动的文件一般是位于/var当中，所以/var应规划足够的空间；当计算机当作日常桌用应用时，/home会增加使用量，所以/home要放大空间；若计算机中会安装大量的软件，那你可能需要增加/usr的空间。 
+
+当然，不把这些空间独立分割出去，一起使用/的空间，会有最好的空间使用效率，但这样容易造成系统不稳定，或其它的问题的情形发生。前面提到Linux文件系统的根目录，是一定要挂载的。没有特定指定分区挂载的目录，都会与根目录放在同一个分区中。
+
+== vi快捷键
+
+* 复制当前行: `yy`
+* 复制n行:  `nyy`
+* 粘贴: `p`
+* 撤销最后一次修改: `u`
+* 撤销当前行修改: `U`
+* 删除当前行: `dd`
+* 从当前行开始删除n行: `ndd`
+* 向后查找: `/字符`
+* 向前查找: `?字符`
+* 查找下一个: `n`
+* 查找上一个: `N`
+* `:%s/old/new/g` 搜索整个文件，将所有的old替换为new
+* `:%s/old/new/gc` 搜索整个文件，将所有的old替换为new，每次都要你确认是否替换
+* 移动到文件末尾: `L`
+* 移动到文件开始: `H`
+* 移动到行尾: `$`
+* 移动到行头: `|`
+
+* `:e!`    放弃所有修改，从上次保存文件开始再编辑
+* `:set nu`    每行前打印行号
+* `:set nonu`  关闭行号打印
+* `:.=`    打印当前行的行号
+* `gg=G`   格式化
+
+== 用户和组
+
+=== 添加用户
+
+useradd 选项 用户名
+
+[source,shell]
+----
+useradd zhao #创建zhao用户,默认用户组是zhao,默认在home下面创建zhao目录
+useradd -d  /home/wang zhao #创建zhao用户,并制定家目录
+useradd -g zhaogroup zhao #创建zhao用户并指定用户组
+----
+
+=== 删除用户
+
+userdel 选项 用户名
+
+[source,shell]
+----
+userdel zhao #删除zhao用户,但是家目录还在
+userdel -r zhao #删除zhao用户以及家目录
+----
+
+=== 修改用户
+
+usermod 选项 用户名
+[source,shell]
+----
+usermod -s /bin/ksh -d /home/z –g developer sam
+----
+此命令将用户sam的登录Shell修改为ksh，主目录改为/home/z，用户组改为developer
+
+=== 修改用户密码
+
+用户账号刚创建时没有口令，但是被系统锁定，无法使用，必须为其指定口令后才可以使用，即使是指定空口令。
+
+指定和修改用户口令的Shell命令是passwd。超级用户可以为自己和其他用户指定口令，普通用户只能用它修改自己的口令。命令的格式为：
+
+`passwd 选项 用户名`
+
+可使用的选项：
+
+* -l 锁定口令，即禁用账号。
+* -u 口令解锁。
+* -d 使账号无口令。
+* -f 强迫用户下次登录时修改口令。
+
+普通用户修改自己的口令时，passwd命令会先询问原口令，验证后再要求用户输入两遍新口令，如果两次输入的口令一致，则将这个口令指定给用户；而超级用户为用户指定口令时，就不需要知道原口令。
+
+
+每个用户都有一个用户组，系统可以对一个用户组中的所有用户进行集中管理。不同Linux系统对用户组的规定有所不同，如Linux下的用户属于与它同名的用户组，这个用户组在创建用户时同时创建。
+
+=== 添加用户组
+
+groupadd 选项 用户组
+可以使用的选项有：
+
+* -g GID 指定新用户组的组标识号（GID）。
+* -o 一般与-g选项同时使用，表示新用户组的GID可以与系统已有用户组的GID相同。
+
+实例1：
+	# groupadd group1
+
+此命令向系统中增加了一个新组group1，新组的组标识号是在当前已有的最大组标识号的基础上加1。
+
+实例2：
+	# groupadd -g 101 group2
+
+此命令向系统中增加了一个新组group2，同时指定新组的组标识号是101。
+
+=== 删除用户组
+
+groupdel 用户组
+
+完成用户管理的工作有许多种方法，但是每一种方法实际上都是对有关的系统文件进行修改。
+
+与用户和用户组相关的信息都存放在一些系统文件中，这些文件包括/etc/passwd, /etc/shadow, /etc/group等。
+
+=== 几个查看文件内容的命令
+
+`cat 文件名`:打印文件的所有内容到控制台
+`cat -n 文件名`:打印文件内容的时候显示行号
+`cat 文件名 | more`:打印文件的一页内容,按空格显示下一页
+
+`more 文件名`:分页显示文件的内容,空格下一页,Ctrl+B上一页,回车键下一行,等号输出当前行号,:f显示文件名称和当前行号,q退出,/字符是查找
+`less 文件名`:分屏查看大文件内容,和more的用法一样
+
+`head 文件`:查看前10行内容
+`head -n  文件`:查看文件前n行内容
+`tail 文件`:查看文件后10行内容
+`tail -n 文件`:查看文件后n行呢绒
+`tail -f 文件`:实时查看文件新追加的内容
+
+=== 输出重定向和追加
+
+`ls -l > aa.txt`:把执行命令的结果覆盖写入到aa.txt中
+`ls -l >> aa.txt`:把执行命令的结果追加写入到aa.txt中
+
+
+=== cal 显示系统日历
+
+=== 软连接
+
+相当于wondows中的快捷方式,删除软连接不会删除原文件
+
+建立:ln -s /usr/local/linux/work  /local/linkwork
+删除: rm -rf /local/linkwork
+
+=== 查找
+
+. find命令
+	. find 目录 -name 搜索的文件名称:find html -name *html ,搜索html目录下面所有以html结尾的文件
+	. find 目录 -user 用户名称: find html -user root:搜索html目录下面属于user用户的文件
+	. find 目录 -size 文件大小: find html -size 10k:搜索html目录下面大小等于10k的文件,大于10k在前面加上+,小于加-,可以用于查找系统中的大文件
+	. 处理上面一些,还有根据文件最近修改时间等查找方式
+
+. locate命令
+
+locate(locate) 命令用来查找文件或目录。 locate命令要比find -name快得多，原因在于它不搜索具体目录，而是搜索一个数据库/var/lib/mlocate/mlocate.db。这个数据库中含有本地所有文件信息。Linux系统自动创建这个数据库，并且每天自动更新一次，因此，我们在用whereis和locate 查找文件时，有时会找到已经被删除的数据，或者刚刚建立文件，却无法查找到，原因就是因为数据库文件没有被更新。为了避免这种情况，可以在使用locate之前，先使用updatedb命令，手动更新数据库
+
+locate new.txt
+
+. grep
+
+是一种强大的文本搜索工具，它能使用正则表达式搜索文本，并把匹配的行打印出来。
+
+cat doc.html | grep -n "市场热点":在doc.html文件中搜索市场热点文字,-n是显示行号.这个命令非常有用,可以用于日志查找
+
+== 压缩
+
+. zip命令
+zip -r myfile.zip ./* :将当前目录下的所有文件和文件夹全部压缩成myfile.zip文件,－r表示递归压缩子目录下所有文件.
+unzip -o -d /home/sunny myfile.zip:把myfile.zip文件解压到 /home/sunny/ ,-o:不提示的情况下覆盖文件;-d:指明将文件解压缩到/home/sunny目录下.
+
+. tar 命令
+
+　. tar –cvf jpg.tar *.jpg //将目录里所有jpg文件打包成tar.jpg
+  . tar –czf jpg.tar.gz *.jpg //将目录里所有jpg文件打包成jpg.tar后，并且将其用gzip压缩，生成一个gzip压缩过的包，命名为jpg.tar.gz
+　. tar –cjf jpg.tar.bz2 *.jpg //将目录里所有jpg文件打包成jpg.tar后，并且将其用bzip2压缩，生成一个bzip2压缩过的包，命名为jpg.tar.bz2
+　. tar –xvf file.tar //解压 tar包
+　. tar -xzvf file.tar.gz //解压tar.gz
+  . tar -xjvf file.tar.bz2 //解压 tar.bz2
+
+  c:压缩
+  x:解压
+  v:显示打包过程日志
+  f:使用档案名字，切记，这个参数是最后一个参数，后面只能接档案名,必须
+
+== 进程管理
+  
+要对进程进行监测和控制,首先必须要了解当前进程的情况,也就是需要查看当前进程,ps命令就是最基本进程查看命令。使用该命令可以确定有哪些进程正在运行和运行的状态、进程是否结束、进程有没有僵尸、哪些进程占用了过多的资源等等.总之大部分信息都是可以通过执行该命令得到。ps是显示瞬间进程的状态，并不动态连续；如果想对进程进行实时监控应该用top命令。
+
+参数：
+. -A ：所有的进程均显示出来，与 -e 具有同样的效用；
+. -a ： 显示现行终端机下的所有进程，包括其他用户的进程；
+. -u ：以用户为主的进程状态 ；
+. x ：通常与 a 这个参数一起使用，可列出较完整信息。
+
+执行 `ps -aux` 
+
+. USER：该进程属于那个使用者账号。
+. PID ：该进程的进程ID号。
+. %CPU：该进程使用掉的 CPU 资源百分比；
+. %MEM：该进程所占用的物理内存百分比；
+. VSZ ：该进程使用掉的虚拟内存量 (Kbytes)
+. RSS ：该进程占用的固定的内存量 (Kbytes)
+. TTY ：该进程是在那个终端机上面运作，若与终端机无关，则显示 ?。另外， tty1-tty6 是本机上面的登入者程序，若为 pts/0 等等的，则表示为由网络连接进主机的程序。
+. STAT：该程序目前的状态，主要的状态有：
+	. R ：该程序目前正在运作，或者是可被运作；
+	. S ：该程序目前正在睡眠当中，但可被某些讯号(signal) 唤醒。
+	. T ：该程序目前正在侦测或者是停止了；
+	. Z ：该程序应该已经终止，但是其父程序却无法正常的终止他，造成 zombie (疆尸) 程序的状态
+. START：该进程被触发启动的时间；
+. TIME ：该进程实际使用 CPU 运作的时间。
+. COMMAND：该程序的实际指令。
+
+
+*杀死进程*
+kill pid:杀死进程id
+kill -9 pid:强制杀死进程id
+killall pname:杀死进程名称,系统一般没有安装该指令
+
+== 定时任务
+
+crontab -e :编辑定时任务
+crontab -l :列出所有的定时任务
+crontab -r :删除定时任务
+
+*定时任务的格式*
+
+*   *　 *　 *　 *　　command
+分钟(0-59)　小时(0-23)　日期(1-31)　月份(1-12)　星期(0-6,0代表星期天)　 命令
+
+. 星号（*）可以用来代表所有有效的值。譬如，月份值中的星号意味着在满足其它制约条件后每月都执行该命令。
+. 整数间的短线（-）指定一个整数范围。譬如，1-4 意味着整数 1、2、3、4。
+. 用逗号（,）隔开的一系列值指定一个列表。譬如，3, 4, 6, 8 标明这四个指定的整数。
+. 正斜线（/）可以用来指定间隔频率。在范围后加上/<integer> 意味着在范围内可以跳过integer。譬如，0-59/2可以用来在分钟字段定义每两分钟。间隔频率值还可以和星号一起使用。例如，*/3 的值可以用在月份字段中表示每三个月运行一次任务。
+
+== top查看进程信息
+
+VIRT:进程使用的虚拟内存的 VIRT=RES+SWAP
+RES:进程使用的,未被换出的物理内存大小 RES=CODE+DATA
+SWAP:进程使用的被换出的虚拟内存大小
+CODE:可执行代码占用的物理内存大小
+DATA:可执行代码以外的部分(数据段+栈)占用的物理内存大小
+
+== netstat查看网络情况
+
+a :列出所有端口
+t :列出tcp端口
+u :列出udp端口
+p :显示进程信息
+
+== 网络配置
+
+修改IP,DNS:编辑 /etc/sysconfig/network-scripts/ifcfg-etho 文件,添加
+
+[source,shell]
+----
+IPADDR=192.168.2.109
+DNS1=192.168.3.4
+GATEWAY=192.168.2.1
+----
+
+修改完成后重启网络或者重启系统
+
+
+修改主机名称: 编辑/etc/sysconfig/network文件,重启生效
+修改hosts: 编辑/etc/hosts,不需要重启
+
+
+== 分区管理
+
+lsblk:查看分区情况.
+
+fdisk /dev/sda:对硬盘sda分区
+
+[source,shell]
+----
+[root@test4 ~]# fdisk /dev/sda  //对sda磁盘进行分区
+Device contains neither a valid DOS partition table, nor Sun, SGI or OSF disklabel
+Building a new DOS disklabel. Changes will remain in memory only,
+until you decide to write them. After that, of course, the previous
+content won't be recoverable.
+
+
+The number of cylinders for this disk is set to 2597.
+There is nothing wrong with that, but this is larger than 1024,
+and could in certain setups cause problems with:
+1) software that runs at boot time (e.g., old versions of LILO)
+2) booting and partitioning software from other OSs
+    (e.g., DOS FDISK, OS/2 FDISK)
+Warning: invalid flag 0x0000 of partition table 4 will be corrected by w(rite)
+
+Command (m for help): m          //输出帮助信息
+ Command action
+    a   toggle a bootable flag    //设置启动分区
+    b   edit bsd disklabel        //编辑分区标签
+    c   toggle the dos compatibility flag
+    d   delete a partition        //删除一个分区
+    l   list known partition types  //列出分区类型
+    m   print this menu           //输出帮助信息
+    n   add a new partition       //建立一个新的分区
+    o   create a new empty DOS partition table //创建一个新的空白DOS分区表
+    p   print the partition table    //打印分区表
+    q   quit without saving changes  //退出不保存设置
+    s   create a new empty Sun disklabel
+    t   change a partition's system id  //改变分区的ID
+    u   change display/entry units    //改变显示的单位
+    v   verify the partition table    //检查验证分区表
+    w   write table to disk and exit  //保存分区表
+    x   extra functionality (experts only)
+Command (m for help):n     
+Command action
+   e   extended                 //e是扩展分区
+   p   primary partition (1-4)  //p是主分区
+p
+Partition number (1-4): 1       //定义分区数量   --主分区最多只能有四个
+First cylinder (1-2597, default 1): 1
+Last cylinder or +size or +sizeM or +sizeK (1-2597, default 2597): +100M
+
+Command (m for help): w          //保存刚才的配置信息。
+The partition table has been altered!
+
+Calling ioctl() to re-read partition table.
+
+WARNING: Re-reading the partition table failed with error 22: 无效的参数.
+The kernel still uses the old table.
+The new table will be used at the next reboot.
+Syncing disks.
+----
+
+mkfs.ext3 /dev/sdc1 :格式化分区
+
+mount /dev/sda6 /mnt/sda7/ :进行挂载使用
+
+vim /etc/fstab 永久性挂载配置
+
+df -h:查看磁盘使用情况
+
+du : 指定文件显示文件的大小,指定目录则循环显示该文件夹下面所有文件的大小
+. h:以人可读的方式显示文件大小
+. s:显示文件夹的总大小
+. c:不仅显示两个目录各自占用磁盘空间的大小，还在最后一行统计它们的总和
+. du|sort -nr|more: 按照空间大小排序
+. du -h  --max-depth=1 : 输出当前目录下各个子目录所使用的空间
+
+
+ls -lR|grep "^-"|wc -l :统计当前文件夹下文件的个数，包括子文件夹里的
+ls -lR|grep "^d"|wc -l : 统计文件夹下目录的个数，包括子文件夹里的
+ls -l |grep "^-"|wc -l: 统计当前文件夹下文件的个数
+ls -l |grep "^d"|wc -l: 统计当前文件夹下目录的个数
+
+
+== 包管理
+
+rpm -ivh 包: 安装rpm包.v显示安装过程,i安装,h显示安装进度
+rpm -e 包:删除安装包,如果该包依赖别的包,则删除失败,需要添加--nodeps强制删除
+rpm -qa | grep 包:查询包是否安装,q查询,a显示所有包
+rpm -qi PACKAGE_NAME:查询包的简要信息
+rpm -ql PACKAGE_NAME:查询包的安装路径
+rpm -qc PACKAGE_NAME: 可以查看软件包安装后生成的所有配置文件。
+rpm -qd PACKAGE_NAME: 可以查看软件包安装后生成的所有说明文件和帮助文件。
+
+
+== 文件权限
+
+`-rwxrw-r‐-1 root root 1213 Feb 2 09:39 abc`
+
+. 第一个字符代表文件（-）、目录（d），链接（l）
+. 其余字符每3个一组（rwx），读（r）、写（w）、执行（x）
+. 第一组rwx：文件所有者的权限是读、写和执行
+. 第二组rw-：与文件所有者同一组的用户的权限是读、写但不能执行
+. 第三组r--：不与文件所有者同组的其他用户的权限是读不能写和执行
+. 也可用数字表示为：r=4，w=2，x=1  因此rwx=4+2+1=7 
+
+*文件赋权*
+
+. chmod 755 abc：赋予abc权限rwxr-xr-x
+. chmod u=rwx，g=rx，o=rx abc：同上u=用户权限，g=组权限，o=不同组其他用户权限
+. chmod u-x，g+w abc：给abc去除用户执行的权限，增加组写的权限
+. chmod a+r abc：给所有用户添加读的权限
+
+
+*改变所有者（chown）和用户组（chgrp）命令*
+
+. chown xiaoming abc：改变abc的所有者为xiaoming
+. chgrp root abc：改变abc所属的组为root
+. chown root ./abc：改变abc这个目录的所有者是root
+. chown ‐R root ./abc：改变abc这个目录及其下面所有的文件和目录的所有者是root
+. usermod ‐g 组名 用户名:改变用户所在组
+
+== shell编程
+
+
+== 网络命名空间
+
+Linux Namespaces机制提供一种资源隔离方案。PID,IPC,Network等系统资源不再是全局性的，而是属于某个特定的Namespace。每个namespace下的资源对于其他namespace下的资源都是透明，不可见的。因此在操作系统层面上看，就会出现多个相同pid的进程。系统中可以同时存在两个进程号为0,1,2的进程，由于属于不同的namespace，所以它们之间并不冲突。而在用户层面上只能看到属于用户自己namespace下的资源，例如使用ps命令只能列出自己namespace下的进程。这样每个namespace看上去就像一个单独的Linux系统。
+
+我们启动两个容器test1和test2:
+[source,shell]
+----
+sudo docker run -d --name test1 busybox /bin/sh -c "while true ; do sleep 3600 ; done "
+sudo docker run -d --name test2 busybox /bin/sh -c "while true ; do sleep 3600 ; done "
+----
+
+查看test1的网络信息:
+[source,shell]
+----
+[vagrant@docker-node1 ~]$ docker exec -it test1 ip a
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+7: eth0@if8: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue
+    link/ether 02:42:ac:11:00:02 brd ff:ff:ff:ff:ff:ff
+    inet 172.17.0.2/16 brd 172.17.255.255 scope global eth0
+       valid_lft forever preferred_lft forever
+
+----
+
+查看test2的网络信息:
+[source,shell]
+----
+[vagrant@docker-node1 ~]$ docker exec -it test2 ip a
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+9: eth0@if10: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue
+    link/ether 02:42:ac:11:00:03 brd ff:ff:ff:ff:ff:ff
+    inet 172.17.0.3/16 brd 172.17.255.255 scope global eth0
+       valid_lft forever preferred_lft forever
+----
+
+查看宿主机的网络信息:
+[source,shell]
+----
+[vagrant@docker-node1 ~]$ ip a
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host
+       valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether 52:54:00:26:10:60 brd ff:ff:ff:ff:ff:ff
+    inet 10.0.2.15/24 brd 10.0.2.255 scope global noprefixroute dynamic eth0
+       valid_lft 74956sec preferred_lft 74956sec
+    inet6 fe80::5054:ff:fe26:1060/64 scope link
+       valid_lft forever preferred_lft forever
+3: eth1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether 08:00:27:c6:1c:e6 brd ff:ff:ff:ff:ff:ff
+    inet 192.168.205.10/24 brd 192.168.205.255 scope global noprefixroute eth1
+       valid_lft forever preferred_lft forever
+    inet6 fe80::a00:27ff:fec6:1ce6/64 scope link
+       valid_lft forever preferred_lft forever
+4: docker0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default
+    link/ether 02:42:60:21:c0:59 brd ff:ff:ff:ff:ff:ff
+    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0
+       valid_lft forever preferred_lft forever
+    inet6 fe80::42:60ff:fe21:c059/64 scope link
+       valid_lft forever preferred_lft forever
+8: veth972aa19@if7: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master docker0 state UP group default
+    link/ether aa:25:5a:8a:4f:2b brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet6 fe80::a825:5aff:fe8a:4f2b/64 scope link
+       valid_lft forever preferred_lft forever
+10: veth9b20e2d@if9: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master docker0 state UP group default
+    link/ether 32:c4:48:22:9a:b8 brd ff:ff:ff:ff:ff:ff link-netnsid 1
+    inet6 fe80::30c4:48ff:fe22:9ab8/64 scope link
+       valid_lft forever preferred_lft forever
+----
+
+8 和 10是test1和test2中的7,9网卡对应的.
+
+
+=== namespace管理命令
+
+. ip netns add 名称:添加命名空间
+. ip netns delete 名称:删除命名空间
+. ip netns list:查看已有的命名空间
+
+**查看命名空间下面的虚拟网卡**
+[source,shell]
+----
+[vagrant@docker-node1 ~]$ sudo ip netns exec demo1 ip link
+1: lo: <LOOPBACK> mtu 65536 qdisc noop state DOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+----
+
+[source,shell]
+----
+[vagrant@docker-node1 ~]$ sudo ip netns exec demo1 ip a
+----
+
+==== 创建两个互通的网络命名空间
+
+创建命名空间:
+[source,shell]
+----
+sudo ip netns add demo1
+sudo ip netns add demo2
+----
+
+创建虚拟网卡:
+
+[source,shell]
+----
+sudo ip link add veth-test1 type veth peer name veth-test2
+----
+
+NOTE: 虚拟网卡Veth都是成对出现的，就像一个管道的两端(或者一根网线)，从这个管道的一端的veth进去的数据会从另一端的veth再出来。也就是说，你可以使用veth接口把一个网络命名空间连接到外部的默认命名空间或者global命名空间，而物理网卡就存在这些命名空间里。
+
+默认情况下,创建的虚拟网卡都属于“default”或“global”命名空间,下面的命令绑定两个虚拟网卡到特定的命名空间
+[source,shell]
+----
+sudo ip link set veth-test1 netns demo1
+
+sudo ip link set veth-test2 netns demo2
+----8
+[source,shell]
+----
+sudo ip netns exec demo1 ip addr add 192.168.1.3/24 dev veth-test1
+sudo ip netns exec demo2 ip addr add 192.168.1.2/24 dev veth-test2
+----
+
+开启两个虚拟网卡:
+[source,shell]
+----
+sudo ip netns exec demo1 ip link set dev veth-test1 up
+sudo ip netns exec demo2 ip link set dev veth-test2 up
+----
+
+两个虚拟网卡互通:
+[source,shell]
+----
+sudo ip netns exec demo1 ping 192.168.1.2
+sudo ip netns exec demo2 ping 192.168.1.1
+----
+
+=== 虚拟网卡和实际网卡
+
+
+大概的物理拓补图如下:

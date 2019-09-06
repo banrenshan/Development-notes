@@ -1,0 +1,126 @@
+= spring-cloud-cli
+
+Spring Boot CLI为Spring Cloud提供Spring Boot命令行功能。您可以编写Groovy脚本来运行Spring Cloud组件应用程序（例如@EnableEurekaServer）。您还可以轻松执行加密和解密等操作，以支持具有秘密配置值的Spring Cloud Config客户端。 使用Launcher CLI，您可以从命令行方便地一次性启动Eureka，Zipkin，Config Server等服务（在开发时非常有用）。
+
+== 1. 安装
+
+安装之前,需要先安装 https://github.com/spring-projects/spring-boot[Spring Boot CLI]
+
+----
+$ spring version
+Spring CLI v2.0.0.M6
+----
+
+安装 Spring Cloud插件
+
+== 2. 在开发中运行Spring Cloud Services
+
+Launcher CLI可用于从命令行运行Eureka，Config Server等常用服务。 要列出可用的服务，您可以执行spring cloud --list，并启动一组默认的服务。 
+
+要选择要部署的服务，只需在命令行上列出它们，例如：
+----
+$ spring cloud eureka configserver h2 kafka stubrunner zipkin
+----
+
+支持的服务:
+
+|===
+
+| Service |	Name |	Address	| Description
+| eureka | Eureka Server | http://localhost:8761 | Eureka服务器用于服务注册和发现。默认情况下，所有其他服务都显示在其目录中。
+| configserver | Config Server |http://localhost:8888 | Spring Cloud Config Server在“本机”配置文件中运行，并从本地目录./launcher提供配置
+| h2 |H2 Database |http://localhost:9095 (console), jdbc:h2:tcp://localhost:9096/{data} |关系数据库服务。连接时，请使用{data}的文件路径（例如./target/test）。 请记住，您可以添加; MODE = MYSQL或; MODE = POSTGRESQL以连接与其他服务器类型的兼容性。
+| kafka |Kafka Broker |http://localhost:9091 (actuator endpoints), localhost:9092 |
+| hystrixdashboard | Hystrix Dashboard |http://localhost:7979 |声明Hystrix断路器的任何Spring Cloud应用程序都会在/hystrix.stream上发布指标。 在仪表板中键入该地址以显示所有指标，
+| dataflow |Dataflow Server |http://localhost:9393|具有UI的Spring Cloud Dataflow服务器位于/ admin-ui。 将Dataflow shell连接到根路径的目标。
+|zipkin|Zipkin Server|http://localhost:9411|带有UI的Zipkin Server，用于可视化跟踪。 内存中存储span数据并通过JSON数据的HTTP POST接受它们。
+|stubrunner|Stub Runner Boot|http://localhost:8750|下载WireMock存根，启动WireMock并使用存储的存根提供已启动的服务器。 通过stubrunner.ids传递存根坐标，然后转到http://localhost:8750 / stubs。
+
+
+|===
+
+可以使用具有相同名称的本地YAML文件（在当前工作目录或名为“config”的子目录中或在~/.spring-cloud中）配置这些应用程序。例如。 在configserver.yml中，您可能希望执行类似这样的操作来查找后端的本地git存储库：
+[source,yml]
+----
+spring:
+  profiles:
+    active: git
+  cloud:
+    config:
+      server:
+        git:
+          uri: file://${user.home}/dev/demo/config-repo
+----
+
+例如。 在Stub Runner应用程序中，您可以通过以下方式从本地.m2获取存根。
+[source,yml]
+----
+stubrunner:
+  workOffline: true
+  ids:
+    - com.example:beer-api-producer:+:9876
+----
+
+=== 2.1 添加其他应用程序
+可以将其他应用程序添加到./config/cloud.yml（而不是./config.yml，因为这将替换默认值），例如同
+[source,yml]
+----
+spring:
+  cloud:
+    launcher:
+      deployables:
+        source:
+          coordinates: maven://com.example:source:0.0.1-SNAPSHOT
+          port: 7000
+        sink:
+          coordinates: maven://com.example:sink:0.0.1-SNAPSHOT
+          port: 7001
+----
+
+[source,shell]
+----
+$ spring cloud --list
+source sink configserver dataflow eureka h2 hystrixdashboard kafka stubrunner zipkin
+----
+
+== 3.编写Groovy脚本和运行应用程序
+Spring Cloud CLI支持大多数Spring Cloud声明功能，例如@Enable *类注释。 例如，这是一个功能齐全的Eureka服务器
+
+.app.groovy. 
+[source,groovy]
+----
+@EnableEurekaServer
+class Eureka {}
+----
+
+您可以从命令行运行，如下所示:
+----
+$ spring run app.groovy
+----
+
+要包含其他依赖项，通常只需添加适当的启用功能的注释即可。@EnableConfigServer，@ EnableOAuth2Sso或@EnableEurekaClient.要手动包含依赖关系，您可以坐标的@Grab，即只使用工件ID（不需要组或版本信息），例如，设置客户端应用程序以在AMQP上收听来自Spring CLoud Bus的管理事件：
+[source,groovy]
+----
+@Grab('spring-cloud-starter-bus-amqp')
+@RestController
+class Service {
+  @RequestMapping('/')
+  def home() { [message: 'Hello'] }
+}
+----
+== 4.加密和解密
+
+Spring Cloud CLI附带“加密”和“解密”命令。两者都以相同的形式接受带有指定为“--key”的键的参数，例如
+
+[source,shell]
+----
+$ spring encrypt mysecret --key foo
+682bc583f4641835fa2db009355293665d2647dade3375c0ee201de2a49f7bda
+$ spring decrypt --key foo 682bc583f4641835fa2db009355293665d2647dade3375c0ee201de2a49f7bda
+mysecret
+----
+要使用文件中的密钥（例如用于加密的RSA公钥），用“@”前面加上密钥值，并提供文件路径，例如：
+----
+$ spring encrypt mysecret --key @${HOME}/.ssh/id_rsa.pub
+AQAjPgt3eFZQXwt8tsHAVv/QHiY5sI2dRcR+...
+----

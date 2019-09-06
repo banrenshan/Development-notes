@@ -1,0 +1,977 @@
+= spring官方文档
+赵志强
+:icons: font
+:source-highlighter: highlightjs
+:toclevels: 5
+:toc-title: 目录
+:toc: left
+:sectnums:
+
+== 验证、数据绑定和类型转化
+
+===  简介
+
+Spring Framework 4.0支持Bean Validation 1.0（JSR-303）和Bean Validation 1.1（JSR-349），并将其适配到Spring的Validator接口。
+
+如 <<vd,Spring Validator>> 所述，应用程序可以选择全局启用Bean验证，并专门用于所有验证需求。
+
+应用程序还可以为每个DataBinder实例注册其他Spring Validator实例，如 <<配置DataBinder>> 中所述。这对于插入验证逻辑而不使用注释可能很有用。
+
+将验证视为业务逻辑有优点和缺点，Spring提供了验证（和数据绑定）设计，不排除其中任何一个。具体的验证不应该绑定到Web层，应该易于本地化，应该可以插入任何可用的验证器。考虑到上述情况，Spring已经提出了一个Validator接口，该接口在应用程序的每一层都是基本的和显着的可用的。
+
+数据绑定对于允许用户输入动态绑定到应用程序的域模型（或用于处理用户输入的任何对象）很有用。Spring提供了所谓的DataBinder来完成这件事。Validator和DataBinder组成了验证包，主要用于但不限于MVC框架。
+
+BeanWrapper是Spring框架中的一个基本概念，并在很多地方使用。 但是，您可能不需要直接使用BeanWrapper。因为这是参考文件，所以我们觉得有些解释可能是按顺序的。我们将在本章中解释BeanWrapper，因为如果您打算使用它，那么在尝试将数据绑定到对象时很可能会这样做。
+
+Spring的DataBinder和较低级别的BeanWrapper都使用PropertyEditor来解析和格式化属性值。 PropertyEditor概念是JavaBeans规范的一部分，本章也对此进行了说明。Spring 3引入了一个“core.convert”包，它提供了一个通用的类型转换工具，以及一个用于格式化UI字段值的高级“格式”包。 这些新软件包可以作为PropertyEditor的简单替代品，本章也将对此进行讨论。
+
+===  使用Spring的Validator接口
+
+Spring提供了一个Validator接口，您可以使用它来验证对象。 Validator接口使用Errors对象工作，以便在验证时验证器可以将验证失败报告给Errors对象。
+
+我们来考虑一个小数据对象：
+[source,java]
+----
+public class Person {
+
+    private String name;
+    private int age;
+
+    // the usual getters and setters...
+}
+----
+我们将通过实现org.springframework.validation.Validator接口的以下两个方法来为Person类提供验证行为：
+
+* supports(Class) - 此Validator可否验证提供的类的实例？
+* validate(Object, org.springframework.validation.Errors)-验证给定对象，如果发生验证错误，则将它们注册到给定的Errors对象
+
+实现一个Validator非常简单，特别是当你知道Spring Framework也提供了ValidationUtils助手类的时候。
+[source,java]
+----
+public class PersonValidator implements Validator {
+
+    /**
+     * This Validator validates *just* Person instances
+     */
+    public boolean supports(Class clazz) {
+        return Person.class.equals(clazz);
+    }
+
+    public void validate(Object obj, Errors e) {
+        ValidationUtils.rejectIfEmpty(e, "name", "name.empty");
+        Person p = (Person) obj;
+        if (p.getAge() < 0) {
+            e.rejectValue("age", "negativevalue");
+        } else if (p.getAge() > 110) {
+            e.rejectValue("age", "too.darn.old");
+        }
+    }
+}
+----
+如您所见，ValidationUtils类上的静态rejectIfEmpty（..）方法用于在“name”属性为空或空字符串时拒绝该属性。 查看ValidationUtils javadoc以查看除前面所示示例之外它提供的功能。
+
+尽管可以实现一个Validator类来验证丰富对象中的每个嵌套对象，但最好是将它的每个嵌套对象类的验证逻辑封装在它自己的Validator实现中。“富”对象的一个简单示例是由两个字符串属性（第一个和第二个名称）和一个复杂的Address对象组成的Customer。Address对象可以独立于Customer对象使用，因此已经实现了一个独特的AddressValidator。如果您希望您的CustomerValidator重复使用AddressValidator类中包含的逻辑而无需复制粘贴，则可以在您的CustomerValidator中依赖注入或实例化AddressValidator，并像这样使用它：
+[source,java]
+----
+public class CustomerValidator implements Validator {
+
+    private final Validator addressValidator;
+
+    public CustomerValidator(Validator addressValidator) {
+        if (addressValidator == null) {
+            throw new IllegalArgumentException("The supplied [Validator] is " +
+                "required and must not be null.");
+        }
+        if (!addressValidator.supports(Address.class)) {
+            throw new IllegalArgumentException("The supplied [Validator] must " +
+                "support the validation of [Address] instances.");
+        }
+        this.addressValidator = addressValidator;
+    }
+
+    /**
+     * This Validator validates Customer instances, and any subclasses of Customer too
+     */
+    public boolean supports(Class clazz) {
+        return Customer.class.isAssignableFrom(clazz);
+    }
+
+    public void validate(Object target, Errors errors) {
+        ValidationUtils.rejectIfEmptyOrWhitespace(errors, "firstName", "field.required");
+        ValidationUtils.rejectIfEmptyOrWhitespace(errors, "surname", "field.required");
+        Customer customer = (Customer) target;
+        try {
+            errors.pushNestedPath("address");
+            ValidationUtils.invokeValidator(this.addressValidator, customer.getAddress(), errors);
+        } finally {
+            errors.popNestedPath();
+        }
+    }
+}
+----
+验证错误通过验证器的传递给Errors对象。 在Spring Web MVC的情况下，您可以使用<spring：bind/>标签检查错误消息，但当然您也可以自己检查错误对象。有关它提供的方法的更多信息可以在javadocs中找到。
+
+===  将编码解析为错误消息
+
+我们已经讨论过数据绑定和验证。 输出与验证错误相对应的消息是我们需要讨论的最后一件事。 在上面的例子中，我们拒绝了名字和年龄段。 如果我们要通过使用MessageSource输出错误消息，我们将使用我们在拒绝字段（本例中为'name'和'age'）时给出的错误编码。当您从Errors接口调用（直接或间接使用ValidationUtils类）rejectValue或其他拒绝方法时，基础实现不仅会注册您通过的编码，还会注册一些 其他错误编码。它注册的错误代码由使用的MessageCodesResolver决定。默认情况下，使用DefaultMessageCodesResolver，例如，它不仅会使用您提供的编码注册消息，还会使用包含您传递给拒绝方法的字段名称的消息。因此，如果您拒绝使用rejectValue（“age”，“too.darn.old”）的字段，除了too.darn.old代码外，Spring还会注册too.darn.old.age和too.darn.old.age.int（所以第一个将包含字段名称，第二个将包含字段的类型）; 这是为了方便开发人员定位错误消息等。
+
+有关MessageCodesResolver和默认策略的更多信息可分别在MessageCodesResolver和DefaultMessageCodesResolver的javadoc中找到。
+
+===  Bean操作和BeanWrapper
+org.springframework.beans包遵循Oracle提供的JavaBeans标准。JavaBean只是一个带有默认无参构造函数的类，它遵循一个命名约定，其中一个名为bingoMadness的属性将使用setter方法setBingoMadness（..）和getter方法getBingoMadness（）。 有关JavaBeans和规范的更多信息，请参阅Oracle网站（javabeans）。
+
+Bean包中一个相当重要的类是BeanWrapper接口及其相应的实现（BeanWrapperImpl）。正如javadocs引用的，BeanWrapper提供了设置和获取属性值（单独或批量），获取属性描述符和查询属性以确定它们是否可读或可写的功能。此外，BeanWrapper提供了对嵌套属性的支持，可以将子属性的属性设置为无限深度。 然后，BeanWrapper支持添加标准JavaBeans PropertyChangeListeners和VetoableChangeListeners，而无需在目标类中支持代码。BeanWrapper提供了对设置索引属性的支持。BeanWrapper通常不直接由应用程序代码使用，而是由DataBinder和BeanFactory使用。
+
+BeanWrapper的工作正如他的名字表达的一样：它包装一个bean来对该bean执行操作，比如设置和检索属性。
+
+====  设置和获取基本和嵌套的属性
+设置和获取属性是使用setPropertyValue（s）和getPropertyValue（s）方法完成的，这两个方法都带有几个重载的变体。 它们都在Spring的javadocs中有更详细的描述。 重要的是要知道有几个约定用于指示对象的属性。 几个例子：
+
+|===
+|Expression|Explanation
+|name|指示与方法getName（）或isName（）和setName（..）相对应的属性名称。
+|account.name|表示属性account的嵌套属性名称，例如对应于 到方法getAccount().setName（）或getAccount（）.getName（）
+|account[2]|指示索引属性account的第三个元素。 索引属性可以是数组，列表或其他自然排序的集合
+|account[COMPANYNAME]|指示由Map属性帐户的关键COMPANYNAME索引的条目值
+|===
+
+下面你会发现一些使用BeanWrapper来获取和设置属性的例子。
+
+如果你不打算直接使用BeanWrapper，那么下一节对你来说并不是非常重要，如果你只是使用DataBinder和BeanFactory以及它们的开箱即用的实现，你应该跳到 关于PropertyEditors的部分。
+
+考虑以下两个类：
+[source,java]
+----
+public class Company {
+
+    private String name;
+    private Employee managingDirector;
+
+    public String getName() {
+        return this.name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public Employee getManagingDirector() {
+        return this.managingDirector;
+    }
+
+    public void setManagingDirector(Employee managingDirector) {
+        this.managingDirector = managingDirector;
+    }
+}
+----
+[source,java]
+----
+public class Employee {
+
+    private String name;
+
+    private float salary;
+
+    public String getName() {
+        return this.name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public float getSalary() {
+        return salary;
+    }
+
+    public void setSalary(float salary) {
+        this.salary = salary;
+    }
+}
+----
+以下代码片段显示了如何检索和操作实例化Company和Employee的一些属性的一些示例：
+[source,java]
+----
+BeanWrapper company = new BeanWrapperImpl(new Company());
+// setting the company name..
+company.setPropertyValue("name", "Some Company Inc.");
+// ... can also be done like this:
+PropertyValue value = new PropertyValue("name", "Some Company Inc.");
+company.setPropertyValue(value);
+
+// ok, let's create the director and tie it to the company:
+BeanWrapper jim = new BeanWrapperImpl(new Employee());
+jim.setPropertyValue("name", "Jim Stravinsky");
+company.setPropertyValue("managingDirector", jim.getWrappedInstance());
+
+// retrieving the salary of the managingDirector through the company
+Float salary = (Float) company.getPropertyValue("managingDirector.salary");
+----
+
+====  内置的PropertyEditor实现
+Spring使用PropertyEditors的概念来实现Object和String之间的转换。 如果你仔细想想，有时候可能会很方便地以不同于对象本身的方式表示属性。例如，日期可以用人类可读的方式表示（如String'2007-14-09'），而我们仍然能够将人类可读的形式转换回原始日期（或者甚至更好：将任何 日期以人类可读形式输入，返回日期对象）。 这种行为可以通过注册java.beans.PropertyEditor类型的自定义编辑器来实现。在上一章中提到的在BeanWrapper上注册自定义编辑器，或者在特定的IoC容器中注册自定义编辑器，可以让它了解如何将属性转换为所需类型。在Oracle提供的java.beans包的javadoc中阅读关于PropertyEditors的更多信息。
+Spring中使用属性编辑的几个示例：
+
+* 使用PropertyEditors来设置bean的属性。 当提到java.lang.String作为你在XML文件中声明的某个bean属性的值时，Spring将（如果相应属性的setter具有Class参数）使用ClassEditor尝试将参数解析为 一个Class对象。
+* 在Spring的MVC框架中解析HTTP请求参数是使用各种PropertyEditor完成的，您可以在CommandController的所有子类中手动绑定这些参数。
+
+Spring有许多内置的PropertyEditor。下面列出了它们中的每一个，它们都位于org.springframework.beans.propertyeditors包中。大多数（但不是全部）（如下所示）由BeanWrapperImpl默认注册。 在以某种方式配置属性编辑器的情况下，您当然可以注册自己的变体以覆盖默认的变体：
+
+|===
+|Class|说明
+|ByteArrayPropertyEditor|字节数组编辑器。 字符串将被简单地转换为相应的字节表示。 由BeanWrapperImpl默认注册。
+|ClassEditor|将表示类的字符串解析为实际的类以及其他方式。 当找不到类时，会抛出IllegalArgumentException。 由BeanWrapperImpl默认注册。
+|CustomBooleanEditor|boolean属性的可定制属性编辑器。 通过BeanWrapperImpl默认注册，但是，可以通过将自定义实例注册为自定义编辑器来覆盖它。
+|CustomCollectionEditor|属性编辑器，将任何源集合转换为给定的目标集合类型。
+|CustomDateEditor|可定制的java.util.Date属性编辑器，支持自定义的DateFormat。 没有默认注册。 必须以适当的格式根据需要进行用户注册。
+|CustomNumberEditor|可定制的属性编辑器，用于任何Number子类，如Integer，Long，Float，Double。 通过BeanWrapperImpl默认注册，但可以通过将自定义实例注册为自定义编辑器来覆盖。
+|FileEditor|能够将字符串解析为java.io.File对象。 由BeanWrapperImpl默认注册。
+|InputStreamEditor|单向属性编辑器，能够获取文本字符串并生成（通过中间ResourceEditor和Resource）InputStream，因此InputStream属性可以直接设置为Strings。 请注意，默认的用法不会为您关闭InputStream！ 由BeanWrapperImpl默认注册。
+|LocaleEditor|能够将字符串解析为Locale对象，反之亦然（字符串格式是[country] [variant]，这与Locale提供的toString（）方法是一样的）。 由BeanWrapperImpl默认注册。
+|PatternEditor|能够将字符串解析为java.util.regex.Pattern对象，反之亦然。
+|PropertiesEditor|能够将字符串（使用java.util.Properties类的javadoc中定义的格式进行格式化）转换为Properties对象。 由BeanWrapperImpl默认注册。
+|StringTrimmerEditor|修剪字符串的属性编辑器。 可以选择允许将空字符串转换为空值。 没有默认注册; 必须根据需要进行用户注册。
+|URLEditor|能够将URL的字符串表示形式解析为实际的URL对象。 由BeanWrapperImpl默认注册。
+|===
+
+Spring使用java.beans.PropertyEditorManager来设置可能需要的属性编辑器的搜索路径。 搜索路径还包括sun.bean.editors，其中包括用于Font，Color和大多数基本类型等类型的PropertyEditor实现。还要注意，如果标准JavaBeans基础结构与处理它们的类位于同一个包中，并且与该类具有相同的名称，并附加了“Editor”，则它将自动发现PropertyEditor类（不必显式注册）;例如，可以有以下类和包结构，这足以使FooEditor类被识别并用作Foo类型属性的PropertyEditor。
+----
+com
+  chank
+    pop
+      Foo
+      FooEditor // the PropertyEditor for the Foo class
+----
+请注意，您也可以在这里使用标准的BeanInfo JavaBeans机制（在这里以非惊人的细节描述）。 以下查找使用BeanInfo机制来显式注册一个或多个PropertyEditor实例和关联类的属性的示例。
+----
+com
+  chank
+    pop
+      Foo
+      FooBeanInfo // the BeanInfo for the Foo class
+----
+以下是引用的FooBeanInfo类的Java源代码。 这会将CustomNumberEditor与Foo类的age属性相关联。
+[source,java]
+----
+public class FooBeanInfo extends SimpleBeanInfo {
+
+    public PropertyDescriptor[] getPropertyDescriptors() {
+        try {
+            final PropertyEditor numberPE = new CustomNumberEditor(Integer.class, true);
+            PropertyDescriptor ageDescriptor = new PropertyDescriptor("age", Foo.class) {
+                public PropertyEditor createPropertyEditor(Object bean) {
+                    return numberPE;
+                };
+            };
+            return new PropertyDescriptor[] { ageDescriptor };
+        }
+        catch (IntrospectionException ex) {
+            throw new Error(ex.toString());
+        }
+    }
+}
+----
+===== 注册更多的定制PropertyEditor
+将bean属性设置为字符串值时，Spring IoC容器最终将使用标准JavaBean PropertyEditors将这些字符串转换为该属性的复杂类型。Spring预先注册了一些定制的PropertyEditor（例如，将表示为字符串的类名称转换为真实的Class对象）。此外，Java的标准JavaBean PropertyEditor查找机制允许一个PropertyEditor只需简单地命名为一个PropertyEditor，并放置在与其提供支持的类相同的包中，以便自动找到。
+
+如果需要注册其他自定义PropertyEditor，则有几种可用的机制。假设您有一个BeanFactory引用，最手动的方法(通常不方便或不推荐的)是简单地使用ConfigurableBeanFactory接口的registerCustomEditor（）方法。另一个更方便的机制是使用一个名为CustomEditorConfigurer的特殊的bean工厂后处理器。 尽管Bean Factory后处理器可以与BeanFactory实现一起使用，但CustomEditorConfigurer具有嵌套属性设置，所以强烈建议将它与ApplicationContext一起使用，它可以以类似于任何其他bean的方式进行部署，并自动检测 和应用。
+
+请注意，所有的bean工厂和应用程序上下文都自动使用一些内置的属性编辑器，通过使用称为BeanWrapper的东西来处理属性转换。BeanWrapper注册的标准属性编辑器在上一节中列出。此外，ApplicationContexts还会覆盖或添加更多数量的编辑器，以适合特定应用程序上下文类型的方式处理资源查找。
+
+标准JavaBeans PropertyEditor实例用于将以字符串表示的属性值转换为属性的实际复杂类型。CustomEditorConfigurer是一个bean工厂后处理器，可以方便地将对额外的PropertyEditor实例的支持添加到ApplicationContext中。
+
+考虑一个用户类ExoticType，以及需要设置ExoticType为属性的另一个类DependsOnExoticType：
+[source,java]
+----
+package example;
+
+public class ExoticType {
+
+    private String name;
+
+    public ExoticType(String name) {
+        this.name = name;
+    }
+}
+
+public class DependsOnExoticType {
+
+    private ExoticType type;
+
+    public void setType(ExoticType type) {
+        this.type = type;
+    }
+}
+----
+当事情设置正确时，我们希望能够将类型属性指定为字符串，PropertyEditor将在后台将其转换为实际的ExoticType实例：
+[source,xml]
+----
+<bean id="sample" class="example.DependsOnExoticType">
+    <property name="type" value="aNameForExoticType"/>
+</bean>
+----
+PropertyEditor的实现可能看起来类似于这个：
+[source,java]
+----
+// converts string representation to ExoticType object
+package example;
+
+public class ExoticTypeEditor extends PropertyEditorSupport {
+
+    public void setAsText(String text) {
+        setValue(new ExoticType(text.toUpperCase()));
+    }
+}
+----
+最后，我们使用CustomEditorConfigurer向ApplicationContext注册新的PropertyEditor，然后可以根据需要使用它：
+[source,xml]
+----
+<bean class="org.springframework.beans.factory.config.CustomEditorConfigurer">
+    <property name="customEditors">
+        <map>
+            <entry key="example.ExoticType" value="example.ExoticTypeEditor"/>
+        </map>
+    </property>
+</bean>
+----
+*使用PropertyEditorRegistrars*
+向Spring容器注册属性编辑器的另一种机制是创建和使用PropertyEditorRegistrar。当您需要在几种不同情况下使用同一组属性编辑器时，此接口特别有用：编写相应的注册器并在每种情况下重新使用它。PropertyEditorRegistrars与一个名为PropertyEditorRegistry的接口一起工作，该接口由Spring BeanWrapper（和DataBinder）实现。PropertyEditorRegistrars与CustomEditorConfigurer（在这里介绍）结合使用时特别方便，它提供了一个名为setPropertyEditorRegistrars（..）的属性：以这种方式添加到CustomEditorConfigurer的PropertyEditorRegistrars可以轻松地与DataBinder和Spring MVC控制器共享。此外，它避免了在定制编辑器上进行同步的需要：PropertyEditorRegistrar应该为每次创建bean尝试创建新的PropertyEditor实例。
+
+使用PropertyEditorRegistrar也许是最好的例子。 首先，您需要创建您自己的PropertyEditorRegistrar实现：
+[source,java]
+----
+package com.foo.editors.spring;
+
+public final class CustomPropertyEditorRegistrar implements PropertyEditorRegistrar {
+
+    public void registerCustomEditors(PropertyEditorRegistry registry) {
+
+        // it is expected that new PropertyEditor instances are created
+        registry.registerCustomEditor(ExoticType.class, new ExoticTypeEditor());
+
+        // you could register as many custom property editors as are required here...
+    }
+}
+----
+有关PropertyEditorRegistrar实现的示例，另请参阅org.springframework.beans.support.ResourceEditorRegistrar。注意在它的registerCustomEditors（..）方法的实现中，它为每个属性编辑器创建新的实例。
+
+接下来我们配置一个CustomEditorConfigurer并将其中的CustomPropertyEditorRegistrar实例注入到它中：
+[source,java]
+----
+<bean class="org.springframework.beans.factory.config.CustomEditorConfigurer">
+    <property name="propertyEditorRegistrars">
+        <list>
+            <ref bean="customPropertyEditorRegistrar"/>
+        </list>
+    </property>
+</bean>
+
+<bean id="customPropertyEditorRegistrar"
+    class="com.foo.editors.spring.CustomPropertyEditorRegistrar"/>
+----
+最后，从本章的重点出发，对于那些使用Spring的MVC Web框架的人来说，使用PropertyEditorRegistrars和数据绑定控制器（如SimpleFormController）可以非常方便。 下面查找在使用PropertyEditorRegistrar实现initBinder（..）方法的示例中：
+
+[source,java]
+----
+public final class RegisterUserController extends SimpleFormController {
+
+    private final PropertyEditorRegistrar customPropertyEditorRegistrar;
+
+    public RegisterUserController(PropertyEditorRegistrar propertyEditorRegistrar) {
+        this.customPropertyEditorRegistrar = propertyEditorRegistrar;
+    }
+
+    protected void initBinder(HttpServletRequest request,
+            ServletRequestDataBinder binder) throws Exception {
+        this.customPropertyEditorRegistrar.registerCustomEditors(binder);
+    }
+
+    // other methods to do with registering a User
+}
+----
+这种类型的PropertyEditor注册可以导致简洁的代码（initBinder（..）的实现只是一行！），并允许将常见的PropertyEditor注册代码封装在类中，然后根据需要在众多控制器之间共享。
+
+===  类型转化
+
+Spring 3引入了一个core.convert包，提供了一个通用的类型转换系统。系统定义了一个SPI来实现类型转换逻辑，以及一个在运行时执行类型转换的API。在Spring容器中，该系统可以用作PropertyEditors的替代方法来将外部化的bean属性值字符串转换为所需的属性类型。 公共API也可用于需要进行类型转换的应用程序中的任何位置。
+
+====  Converter SPI
+实现类型转换逻辑的SPI非常简单且强类型化：
+[source,java]
+----
+package org.springframework.core.convert.converter;
+
+public interface Converter<S, T> {
+
+    T convert(S source);
+
+}
+----
+要创建您自己的转换器，只需实现上面的接口。 将S指定为要转换的类型，将T指定为要转换的类型。 如果S的集合或数组需要转换为T的数组或集合，只要委派的数组/集合转换器已被注册（DefaultConversionService默认为），也可以透明地应用此类转换器。
+
+对于每次调用转换（S），源参数保证不为空。 如果转换失败，您的Converter可能会抛出任何未经检查的异常; 具体而言，应抛出IllegalArgumentException异常来报告无效的源值。 注意确保您的Converter实现是线程安全的。
+
+为方便起见，core.convert.support包中提供了几个转换器实现。 这些包括从字符串到数字和其他常见类型的转换器。 以StringToInteger为典型转换器实现的例子：
+----
+package org.springframework.core.convert.support;
+
+final class StringToInteger implements Converter<String, Integer> {
+
+    public Integer convert(String source) {
+        return Integer.valueOf(source);
+    }
+
+}
+----
+
+====  ConverterFactory
+当您需要集中整个类层次结构的转换逻辑时，例如，从String转换为java.lang.Enum对象时，需要实现ConverterFactory：
+[source,java]
+----
+package org.springframework.core.convert.converter;
+
+public interface ConverterFactory<S, R> {
+
+    <T extends R> Converter<S, T> getConverter(Class<T> targetType);
+
+}
+----
+参数化S是您要转换的类型，R是定义可以转换为的类范围的基本类型。 然后实现getConverter（Class <T>），其中T是R的子类。
+以StringToEnum ConverterFactory为例：
+[source,java]
+----
+package org.springframework.core.convert.support;
+
+final class StringToEnumConverterFactory implements ConverterFactory<String, Enum> {
+
+    public <T extends Enum> Converter<String, T> getConverter(Class<T> targetType) {
+        return new StringToEnumConverter(targetType);
+    }
+
+    private final class StringToEnumConverter<T extends Enum> implements Converter<String, T> {
+
+        private Class<T> enumType;
+
+        public StringToEnumConverter(Class<T> enumType) {
+            this.enumType = enumType;
+        }
+
+        public T convert(String source) {
+            return (T) Enum.valueOf(this.enumType, source.trim());
+        }
+    }
+}
+----
+
+====  GenericConverter
+当您需要复杂的Converter实现时，请考虑GenericConverter接口。使用更灵活但类型较弱的签名，GenericConverter支持多种源和目标类型之间的转换。另外，GenericConverter提供了可用于实现转换逻辑的源和目标字段上下文。 这种上下文允许类型转换由字段注释或字段签名上声明的通用信息来驱动。
+[source,java]
+----
+package org.springframework.core.convert.converter;
+
+public interface GenericConverter {
+
+    public Set<ConvertiblePair> getConvertibleTypes();
+
+    Object convert(Object source, TypeDescriptor sourceType, TypeDescriptor targetType);
+
+}
+----
+要实现GenericConverter，请getConvertibleTypes（）返回支持的源→目标类型对。然后实现convert（Object，TypeDescriptor，TypeDescriptor）来实现你的转换逻辑.源类型描述符提供对持有正在转换的值的源字段的访问。 目标TypeDescriptor提供对设置转换值的目标字段的访问权限。
+
+GenericConverter的一个很好的例子是在Java Array和Collection之间转换的转换器。 这样的ArrayToCollectionConverter内省了声明目标Collection类型的字段来解析Collection的元素类型。 这允许源数组中的每个元素在目标字段上设置Collection之前转换为Collection元素类型。
+
+NOTE: 由于GenericConverter是一个更复杂的SPI接口，因此只有在需要时才使用它。 Favor Converter或ConverterFactory用于基本类型转换需求。
+
+有时你只想要在特定的条件下允许转换器执行。例如，如果目标字段上存在特定的注释或者在目标类上定义了特定方法（如静态valueOf方法），才执行一个转换器。ConditionalGenericConverter是GenericConverter和ConditionalConverter接口的联合，允许您定义这样的自定义匹配条件：
+[source,java]
+----
+public interface ConditionalConverter {
+
+    boolean matches(TypeDescriptor sourceType, TypeDescriptor targetType);
+
+}
+
+public interface ConditionalGenericConverter
+    extends GenericConverter, ConditionalConverter {
+
+}
+----
+ConditionalGenericConverter的一个很好的例子,他是一个EntityConverter，在持久实体标识符和实体引用之间进行转换。这种EntityConverter只有在目标实体类型声明静态查找方法时才可匹配，例如findAccount（Long）。 您可以在匹配的实现（TypeDescriptor，TypeDescriptor）中执行这样的finder方法检查。
+
+====  ConversionService API
+
+ConversionService定义了一个用于在运行时执行类型转换逻辑的统一API。 Converters 通常在这个外观接口后执行：
+[source,java]
+----
+package org.springframework.core.convert;
+
+public interface ConversionService {
+
+    boolean canConvert(Class<?> sourceType, Class<?> targetType);
+
+    <T> T convert(Object source, Class<T> targetType);
+
+    boolean canConvert(TypeDescriptor sourceType, TypeDescriptor targetType);
+
+    Object convert(Object source, TypeDescriptor sourceType, TypeDescriptor targetType);
+
+}
+----
+大多数ConversionService实现也实现了ConverterRegistry，它提供了一个用于注册转换器的SPI。 在内部，ConversionService实现委托其注册的转换器执行类型转换逻辑。
+
+core.convert.support包中提供了强大的ConversionService实现。GenericConversionService是适用于大多数环境的通用实现。ConversionServiceFactory为创建常见的ConversionService配置提供了一个便利的工厂。
+
+====  配置ConversionService
+
+ConversionService是一个无状态对象，在应用程序启动时实例化，然后在多个线程之间共享。在Spring应用程序中，您通常为每个Spring容器（或ApplicationContext）配置一个ConversionService实例。该转换服务将被Spring拿起，然后在框架需要执行类型转换时使用。 您也可以将此ConversionService注入到任何bean中并直接调用它。
+
+NOTE: 如果没有使用Spring注册ConversionService，则使用原始的基于PropertyEditor的系统。
+
+要使用Spring注册默认ConversionService，请添加以下具有id conversionService的bean定义：
+[source,java]
+----
+<bean id="conversionService"
+    class="org.springframework.context.support.ConversionServiceFactoryBean"/>
+----
+默认的ConversionService可以在字符串，数字，枚举，集合，Map和其他常用类型之间进行转换。要使用您自己的自定义转换器补充或覆盖默认转换器，请设置转converters属性。属性值可以实现Converter，ConverterFactory或GenericConverter接口。
+[source,xml]
+----
+<bean id="conversionService"
+        class="org.springframework.context.support.ConversionServiceFactoryBean">
+    <property name="converters">
+        <set>
+            <bean class="example.MyCustomConverter"/>
+        </set>
+    </property>
+</bean>
+----
+在Spring MVC应用程序中使用ConversionService也很常见。 请参阅Spring MVC章节中的转换和格式化。
+
+在某些情况下，您可能希望在转换过程中格式化。 有关使用FormattingConversionServiceFactoryBean的详细信息，请参阅FormatterRegistry SPI。
+
+====  以编程方式使用ConversionService
+要以编程方式使用ConversionService实例，只需像为其他任何bean注入引用即可：
+[source,java]
+----
+@Service
+public class MyService {
+
+    @Autowired
+    public MyService(ConversionService conversionService) {
+        this.conversionService = conversionService;
+    }
+
+    public void doIt() {
+        this.conversionService.convert(...)
+    }
+}
+----
+对于大多数用例，可以使用指定targetType的convert方法，但不适用于更复杂的类型，如参数化元素的集合。 例如，如果要以编程方式将整数列表转换为字符串列表，则需要提供源和目标类型的正式定义。
+
+幸运的是，TypeDescriptor提供了多种选项来简单明了：
+[source,java]
+----
+DefaultConversionService cs = new DefaultConversionService();
+
+List<Integer> input = ....
+cs.convert(input,
+    TypeDescriptor.forObject(input), // List<Integer> type descriptor
+    TypeDescriptor.collection(List.class, TypeDescriptor.valueOf(String.class)));
+----
+请注意，DefaultConversionService会自动注册适用于大多数环境的转换器。 这包括集合转换器，标量转换器以及基本的Object to String转换器。可以使用DefaultConversionService类上的静态addDefaultConverters方法向任何ConverterRegistry注册相同的转换器。
+
+值类型的转换器将被重用于数组和集合，因此，假设标准的集合处理是适当的，则不需要创建特定的转换器以从S集合转换为T集合。
+
+===  Spring字段格式化
+
+如前一节所述，core.convert是一个通用类型转换系统。 它提供统一的ConversionService API以及用于实现从一种类型到另一种类型的转换逻辑的强类型转换器SPI。 Spring容器使用这个系统绑定bean属性值。 另外，Spring表达式语言（SpEL）和DataBinder都使用这个系统来绑定字段值。例如，当SpEL需要强制Short to a Long来完成expression.setValue（Object bean，Object value）尝试时，core.convert系统执行强制转化。
+
+现在考虑典型客户端环境（如Web或桌面应用程序）的类型转换要求。 在这样的环境中，您通常读取客户端提交的表单字符串数据，并返回String以支持视图呈现过程。另外，您经常需要本地化字符串值。 更一般的core.convert Converter SPI没有直接解决这种格式化要求。 为了直接解决它们，Spring 3引入了一个方便的Formatter SPI，为客户端环境提供了PropertyEditors的一个简单而强大的替代方案。
+
+通常，在需要实现通用类型转换逻辑时使用Converter SPI; 例如，用于在java.util.Date和java.lang.Long之间进行转换。 在客户端环境（如Web应用程序）中工作时需要使用Formatter SPI，并且需要解析和打印本地化的字段值。 ConversionService为两个SPI提供统一的类型转换API。
+
+====  Formatter SPI
+
+格式化器SPI实现字段格式化逻辑很简单并且强类型化：
+[source,java]
+----
+package org.springframework.format;
+
+public interface Formatter<T> extends Printer<T>, Parser<T> {
+}
+----
+
+----
+public interface Printer<T> {
+    String print(T fieldValue, Locale locale);
+}
+----
+
+----
+import java.text.ParseException;
+
+public interface Parser<T> {
+    T parse(String clientValue, Locale locale) throws ParseException;
+}
+----
+
+要创建自己的格式化程序，只需实现上面的格式化接口即可。 将T参数化为要格式化的对象的类型，例如java.util.Date。 实现print（）操作以打印T的实例以显示在客户端语言环境中。
+
+实现parse（）操作解析客户端环境创建T实例。如果解析尝试失败，则格式化程序应该抛出ParseException或IllegalArgumentException。 注意确保您的Formatter实现是线程安全的。
+
+为了方便起见，格式化子程序包提供了几种格式化程序实现。数字包提供了一个NumberFormatter，CurrencyFormatter和PercentFormatter来格式化使用java.text.NumberFormat创建的java.lang.Number对象。datetime包提供了一个DateFormatter来用java.text.DateFormat格式化java.util.Date对象。 datetime.joda包提供基于Joda-Time库的综合日期时间格式化支持。
+
+考虑将DateFormatter作为格式化器实现的一个示例：
+[source,java]
+----
+package org.springframework.format.datetime;
+
+public final class DateFormatter implements Formatter<Date> {
+
+    private String pattern;
+
+    public DateFormatter(String pattern) {
+        this.pattern = pattern;
+    }
+
+    public String print(Date date, Locale locale) {
+        if (date == null) {
+            return "";
+        }
+        return getDateFormat(locale).format(date);
+    }
+
+    public Date parse(String formatted, Locale locale) throws ParseException {
+        if (formatted.length() == 0) {
+            return null;
+        }
+        return getDateFormat(locale).parse(formatted);
+    }
+
+    protected DateFormat getDateFormat(Locale locale) {
+        DateFormat dateFormat = new SimpleDateFormat(this.pattern, locale);
+        dateFormat.setLenient(false);
+        return dateFormat;
+    }
+
+}
+----
+
+====  Annotation-driven Formatting
+
+您将会看到，字段格式可以通过字段类型或注释进行配置。 要将注释绑定到格式化程序，请实现AnnotationFormatterFactory：
+[source,java]
+----
+package org.springframework.format;
+
+public interface AnnotationFormatterFactory<A extends Annotation> {
+
+    Set<Class<?>> getFieldTypes();
+
+    Printer<?> getPrinter(A annotation, Class<?> fieldType);
+
+    Parser<?> getParser(A annotation, Class<?> fieldType);
+
+}
+----
+参数化A是您希望将格式化逻辑与之关联的字段注释类型，例如org.springframework.format.annotation.DateTimeFormat。getFieldTypes（）返回可能使用注释的字段类型。有getPrinter（）返回一个打印机来打印注释字段的值。让getParser（）返回一个解析器来为一个带注释的字段解析一个clientValue。
+
+下面的示例AnnotationFormatterFactory实现将@NumberFormat注释绑定到格式化程序。 此注释允许指定数字样式或模式：
+[source,java]
+----
+public final class NumberFormatAnnotationFormatterFactory
+        implements AnnotationFormatterFactory<NumberFormat> {
+
+    public Set<Class<?>> getFieldTypes() {
+        return new HashSet<Class<?>>(asList(new Class<?>[] {
+            Short.class, Integer.class, Long.class, Float.class,
+            Double.class, BigDecimal.class, BigInteger.class }));
+    }
+
+    public Printer<Number> getPrinter(NumberFormat annotation, Class<?> fieldType) {
+        return configureFormatterFrom(annotation, fieldType);
+    }
+
+    public Parser<Number> getParser(NumberFormat annotation, Class<?> fieldType) {
+        return configureFormatterFrom(annotation, fieldType);
+    }
+
+    private Formatter<Number> configureFormatterFrom(NumberFormat annotation,
+            Class<?> fieldType) {
+        if (!annotation.pattern().isEmpty()) {
+            return new NumberFormatter(annotation.pattern());
+        } else {
+            Style style = annotation.style();
+            if (style == Style.PERCENT) {
+                return new PercentFormatter();
+            } else if (style == Style.CURRENCY) {
+                return new CurrencyFormatter();
+            } else {
+                return new NumberFormatter();
+            }
+        }
+    }
+}
+----
+要触发格式化，只需使用@NumberFormat注释字段即可：
+[source,java]
+----
+public class MyModel {
+
+    @NumberFormat(style=Style.CURRENCY)
+    private BigDecimal decimal;
+
+}
+----
+===== Format Annotation API
+org.springframework.format.annotation包中存在可移植的格式注释API。 使用@NumberFormat格式化java.lang.Number字段。使用@DateTimeFormat格式化java.util.Date，java.util.Calendar，java.util.Long或Joda-Time字段。
+
+以下示例使用@DateTimeFormat将java.util.Date格式化为ISO日期（yyyy-MM-dd）：
+[source,java]
+----
+public class MyModel {
+
+    @DateTimeFormat(iso=ISO.DATE)
+    private Date date;
+
+}
+----
+
+====  FormatterRegistry SPI
+
+FormatterRegistry是用于注册格式化程序和转换程序的SPI。FormattingConversionService是适用于大多数环境的FormatterRegistry的实现。 这个实现可以使用FormattingConversionServiceFactoryBean以编程方式配置或声明为一个Spring bean。因为这个实现也实现了ConversionService，所以它可以直接配置用于Spring的DataBinder和Spring表达式语言（SpEL）。
+查看下面的FormatterRegistry SPI：
+[source,java]
+----
+package org.springframework.format;
+
+public interface FormatterRegistry extends ConverterRegistry {
+
+    void addFormatterForFieldType(Class<?> fieldType, Printer<?> printer, Parser<?> parser);
+
+    void addFormatterForFieldType(Class<?> fieldType, Formatter<?> formatter);
+
+    void addFormatterForFieldType(Formatter<?> formatter);
+
+    void addFormatterForAnnotation(AnnotationFormatterFactory<?, ?> factory);
+
+}
+----
+如上所示，格式化程序可以通过fieldType或注释进行注册。
+FormatterRegistry SPI允许您集中配置格式化规则，而不是在控制器中复制这种配置。例如，您可能希望强制所有日期字段以特定方式格式化，或者使用特定批注的字段以特定方式格式化。 通过共享的FormatterRegistry，您可以定义这些规则一次，并在需要格式化时应用这些规则。
+
+====  FormatterRegistrar SPI
+FormatterRegistrar是一个用于通过FormatterRegistry注册格式化器和转换器的SPI：
+[source,java]
+----
+package org.springframework.format;
+
+public interface FormatterRegistrar {
+
+    void registerFormatters(FormatterRegistry registry);
+
+}
+----
+FormatterRegistrar在为给定格式类别（例如日期格式）注册多个相关转换器和格式化程序时非常有用。在声明性注册不足的情况下，它也很有用。 例如，格式化程序需要在与其自己的<T>不同的特定字段类型下或在注册打印机/解析器对时进行索引。下一节提供了有关转换器和格式化程序注册的更多信息。
+
+====  Configuring Formatting in Spring MVC
+
+请参阅Spring MVC章节中的转换和格式化。
+
+===  配置全局的时间和日期格式化
+
+默认情况下，未使用@DateTimeFormat注释的日期和时间字段使用DateFormat.SHORT样式从字符串转换。如果你愿意，你可以通过定义你自己的全局格式来改变它。
+
+您需要确保Spring不会注册默认格式化程序，而应该手动注册所有格式化程序。 根据您是否使用Joda-Time库，使用org.springframework.format.datetime.joda.JodaTimeFormatterRegistrar或org.springframework.format.datetime.DateFormatterRegistrar类。
+
+例如，以下Java配置将注册全局“yyyyMMdd”格式。 这个例子不依赖于Joda-Time库：
+[source,java]
+----
+@Configuration
+public class AppConfig {
+
+    @Bean
+    public FormattingConversionService conversionService() {
+
+        // Use the DefaultFormattingConversionService but do not register defaults
+        DefaultFormattingConversionService conversionService = new DefaultFormattingConversionService(false);
+
+        // Ensure @NumberFormat is still supported
+        conversionService.addFormatterForFieldAnnotation(new NumberFormatAnnotationFormatterFactory());
+
+        // Register date conversion with a specific global format
+        DateFormatterRegistrar registrar = new DateFormatterRegistrar();
+        registrar.setFormatter(new DateFormatter("yyyyMMdd"));
+        registrar.registerFormatters(conversionService);
+
+        return conversionService;
+    }
+}
+----
+如果您更喜欢基于XML的配置，则可以使用FormattingConversionServiceFactoryBean。 这是同一个例子，这次使用Joda时间：
+[source,xml]
+----
+    <bean id="conversionService" class="org.springframework.format.support.FormattingConversionServiceFactoryBean">
+        <property name="registerDefaultFormatters" value="false" />
+        <property name="formatters">
+            <set>
+                <bean class="org.springframework.format.number.NumberFormatAnnotationFormatterFactory" />
+            </set>
+        </property>
+        <property name="formatterRegistrars">
+            <set>
+                <bean class="org.springframework.format.datetime.joda.JodaTimeFormatterRegistrar">
+                    <property name="dateFormatter">
+                        <bean class="org.springframework.format.datetime.joda.DateTimeFormatterFactoryBean">
+                            <property name="pattern" value="yyyyMMdd"/>
+                        </bean>
+                    </property>
+                </bean>
+            </set>
+        </property>
+    </bean>
+</beans>
+
+----
+
+
+如果您使用Spring MVC，请记住明确配置使用的转换服务。对于基于Java的@Configuration，这意味着扩展WebMvcConfigurationSupport类并覆盖mvcConversionService（）方法。 对于XML，您应该使用mvc：annotation-driven元素的'conversion-service'属性。
+
+[[vd]]
+===  Spring Validation
+Spring 3引入了对其验证支持的几项增强。 首先，现在完全支持JSR-303 Bean验证API。其次，当以编程方式使用时，Spring的DataBinder现在可以验证对象并绑定到它们。 第三，Spring MVC现在支持声明性验证@Controller输入。
+
+====  JSR-303 Bean Validation API
+
+JSR-303标准化Java平台的验证约束声明和元数据。使用此API，您可以使用声明性验证约束对域模型属性进行注释，并且运行时会强制执行它们。有许多可以利用的内置约束条件。您也可以定义您自己的自定义约束。
+
+为了说明，请考虑一个简单的具有两个属性的PersonForm模型：
+[source,java]
+----
+public class PersonForm {
+    private String name;
+    private int age;
+}
+----
+JSR-303允许你定义对这些属性的声明性验证约束：
+[source,java]
+----
+public class PersonForm {
+
+    @NotNull
+    @Size(max=64)
+    private String name;
+
+    @Min(0)
+    private int age;
+
+}
+----
+当这个类的一个实例被JSR-303验证器验证时，这些约束将被执行。
+
+有关JSR-303 / JSR-349的一般信息，请参阅Bean验证网站。 有关默认参考实现的特定功能的信息，请参阅Hibernate Validator文档。 要学习如何将Bean Validation提供者设置为Spring bean，请继续阅读。
+
+====  配置Bean Validation Provider
+Spring提供对Bean验证API的全面支持。 这包括对作为Spring bean引导JSR-303/JSR-349 Bean验证提供程序的方便支持。这允许在您的应用程序需要验证的任何地方注入javax.validation.ValidatorFactory或javax.validation.Validator。
+
+使用LocalValidatorFactoryBean将默认的Validator配置为Spring bean：
+[source,xml]
+----
+<bean id="validator"
+    class="org.springframework.validation.beanvalidation.LocalValidatorFactoryBean"/>
+----
+
+上面的基本配置将触发Bean Validation使用其默认引导机制进行初始化。 JSR-303 / JSR-349提供程序（如Hibernate验证程序）预计会出现在类路径中，并会自动检测到。
+
+===== 注入Validator
+
+LocalValidatorFactoryBean实现了javax.validation.ValidatorFactory和javax.validation.Validator，以及Spring的org.springframework.validation.Validator。 您可以将这些接口的引用注入到需要调用验证逻辑的bean中。
+
+如果您希望直接使用Bean Validation API，则注入对javax.validation.Validator的引用：
+[source,java]
+----
+import javax.validation.Validator;
+
+@Service
+public class MyService {
+
+    @Autowired
+    private Validator validator;
+----
+如果您的bean需要Spring验证API，则注入对org.springframework.validation.Validator的引用：
+[source,java]
+----
+import org.springframework.validation.Validator;
+
+@Service
+public class MyService {
+
+    @Autowired
+    private Validator validator;
+
+}
+----
+每个Bean验证约束由两部分组成。 首先，声明约束及其可配置属性的@Constraint注释。其次，实现约束行为的javax.validation.ConstraintValidator接口的实现。为了将一个声明和一个实现关联起来，每个@Constraint注解引用一个对应的ValidationConstraint实现类。 在运行时，ConstraintValidatorFactory在您的域模型中遇到约束注释时实例化所引用的实现。
+
+默认情况下，LocalValidatorFactoryBean配置使用Spring创建ConstraintValidator实例的SpringConstraintValidatorFactory。 这允许您的自定义ConstraintValidators像任何其他Spring bean一样受益于依赖注入。
+
+下面显示了一个自定义@Constraint声明的示例，后面跟着一个使用Spring进行依赖注入的相关ConstraintValidator实现：
+[source,java]
+----
+@Target({ElementType.METHOD, ElementType.FIELD})
+@Retention(RetentionPolicy.RUNTIME)
+@Constraint(validatedBy=MyConstraintValidator.class)
+public @interface MyConstraint {
+}
+----
+[source,java]
+----
+import javax.validation.ConstraintValidator;
+
+public class MyConstraintValidator implements ConstraintValidator {
+
+    @Autowired;
+    private Foo aDependency;
+
+    ...
+}
+----
+如你所见，一个ConstraintValidator实现可能像其他Spring bean一样拥有@Autowired依赖。
+
+*Spring-driven Method Validation*
+Bean Validation 1.1支持的方法验证功能以及Hibernate Validator 4.3的自定义扩展可以通过MethodValidationPostProcessor bean定义集成到Spring上下文中：
+[source,xml]
+----
+<bean class="org.springframework.validation.beanvalidation.MethodValidationPostProcessor"/>
+----
+为了符合Spring驱动的方法验证条件，所有的目标类都需要使用Spring的@Validated注解进行注释，可选择声明要使用的验证组。 使用Hibernate Validator和Bean Validation 1.1提供程序查看MethodValidationPostProcessor javadoc以了解安装细节。
+
+*其他配置*
+在大多数情况下，默认的LocalValidatorFactoryBean配置应该足够了。 从消息插值到遍历分辨率，各种Bean验证结构都有许多配置选项。 有关这些选项的更多信息，请参阅LocalValidatorFactoryBean javadocs。
+
+[[配置DataBinder]]
+==== 配置DataBinder
+自Spring 3以来，可以使用Validator配置DataBinder实例。 配置完成后，可以通过调用binder.validate（）来调用Validator。 任何验证错误都会自动添加到binder的BindingResult。
+
+以编程方式使用DataBinder时，可以在绑定到目标对象后使用它来调用验证逻辑：
+[source,java]
+----
+Foo target = new Foo();
+DataBinder binder = new DataBinder(target);
+binder.setValidator(new FooValidator());
+
+// bind to the target object
+binder.bind(propertyValues);
+
+// validate the target object
+binder.validate();
+
+// get BindingResult that includes any validation errors
+BindingResult results = binder.getBindingResult();
+----
+DataBinder也可以通过dataBinder.addValidators和dataBinder.replaceValidators配置多个Validator实例。 将全局配置的Bean验证与在DataBinder实例上本地配置的Spring验证器相结合时，这非常有用。 参见[validation-mvc-configurations]。
+
+====  Spring MVC 3 Validation
+
+请参阅Spring MVC章节中的验证。

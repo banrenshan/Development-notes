@@ -1,0 +1,458 @@
+= spring-cloud-common
+
+== 1. Spring Cloud Context: Application Context Services
+
+=== 1.1 The Bootstrap Application Context
+
+Spring Cloud应用程序通过创建“引导程序”上下文来运行，该上下文是主应用程序的父上下文。它负责从外部源加载配置属性以及解密本地外部配置文件中的属性。这两个上下文共享一个Environment，它是任何Spring应用程序的外部属性的来源。默认情况下，引导属性（不是bootstrap.properties文件中的，而是在引导阶段加载的属性）会以高优先级添加，因此本地配置无法覆盖它们。
+
+引导上下文使用不同于主应用程序上下文的约定来定位外部配置。 除了application.yml（或.properties），你还可以使用bootstrap.yml,使引导程序和主上下文的外部配置保持完全分离。 以下清单显示了一个示例：
+
+.bootstrap.yml
+[source,yml]
+----
+spring:
+  application:
+    name: foo
+  cloud:
+    config:
+      uri: ${SPRING_CONFIG_URI:http://localhost:8888}
+----
+如果您的应用程序需要来自服务器的任何特定于应用程序的配置，则最好设置spring.application.name（在bootstrap.yml或application.yml中）。
+
+您可以通过设置spring.cloud.bootstrap.enabled = false来完全禁用引导过程（例如，在系统属性中）。
+
+=== 1.2 Application Context 层级
+
+如果从SpringApplication或SpringApplicationBuilder构建应用程序上下文，则会将Bootstrap上下文添加为该上下文的父级。Spring的一个特性是子上下文从其父级继承属性源和配置文件，因此与构建没有Spring Cloud Config的相同上下文相比，“主”应用程序上下文包含其他属性源。
+
+=== 1.3 更改Bootstrap配置文件的位置
+bootstrap.yml (or .properties) 位置可以通过指定spring.cloud.bootstrap.name(默认bootstrap)或spring.cloud.bootstrap.location(默认是空)属性值来改变.
+
+=== 1.4覆盖远程属性的值
+
+引导上下文添加到应用程序的属性源通常是“ 远程 ”（例如，来自Spring Cloud Config Server）。默认情况下，它们无法在本地重写。如果要让应用程序使用自己的系统属性或配置文件覆盖远程属性，则远程属性源必须通过设置spring.cloud.config.allowOverride=true（在本地设置它不起作用）。设置该标志后，两个更细粒度的设置将控制远程属性相对于系统属性和应用程序本地配置的位置：
+. spring.cloud.config.overrideNone=true：从任何本地属性源覆盖。
+. spring.cloud.config.overrideSystemProperties=false：只有系统属性，命令行参数和环境变量（但不是本地配置文件）应覆盖远程设置。
+
+=== 1.5自定义Bootstrap配置
+
+通过在/META-INF/spring.properties文件创建名为org.springframework.cloud.bootstrap.BootstrapConfiguration的键值对，可以将引导上下文设置为执行任何操作。该建的值是用逗号分隔的String @Configuration 类列表。你可以在此创建你希望用于主应用程序上下文以进行自动装配的任何Bean。类型ApplicationContextializer的@Beans 有一个特殊的合约。如果要控制启动顺序，可以使用@Order注解来标记类（默认的顺序是last）。
+   
+
+引导过程通过将初始化器注入主SpringApplication 实例（这是正常的Spring Boot启动程序，无论是作为独立应用程序运行还是部署在应用程序服务器中）来结束。首先，引导上下文是从spring.factories中的类创建的。    然后，类型ApplicationContextInitializer的所有@Beans会在启动前被添加到主SpringApplication。
+
+=== 1.6 自定义引导属性源
+
+=== 1.7 日志配置
+
+如果要使用Spring Boot 配置日志设置，则应该将此设置放在bootstrap.[yml|properties] 如果你希望它适用于所有事件。
+
+要使Spring Cloud 正确初始化日志记录配置，你不能使用自定义前缀。例如，初始化日志记录系统时，Spring Cloud 将无法识别custom.loggin.logpath。
+
+
+=== 1.8 Environment Changes
+
+应用程序侦听EnvironmentChangeEvent并以几种标准方式对更改做出反应(用户可以正常方式将其他ApplicationListener添加为@Beans).当观察到EnvironmentChangeEvent时，它有一个已更改的键值列表，应用程序使用它们：
+. 在上下文中重新绑定任何@ConfigurationProperties bean
+. 为logging.level.*中的任何属性设置记录器级别。
+
+请注意，默认情况下，Config Client不会轮询环境中的更改。通常，我们不建议使用这种方法来检测更改（尽管您可以使用@Scheduled注释进行设置）。如果您有一个扩展的客户端应用程序，最好将EnvironmentChangeEvent广播到所有实例，而不是让它们轮询更改（例如，通过使用Spring Cloud Bus）。EnvironmentChangeEvent涵盖了一大类刷新用例，只要您可以实际更改环境并发布事件即可。 请注意，这些API是公共的，并且是Spring核心的一部分）。
+
+您可以通过访问/configprops端点（一个正常的Spring Boot Actuator功能）来验证更改是否绑定到@ConfigurationProperties bean。例如，DataSource可以在运行时更改其maxPoolSize（Spring Boot创建的默认DataSource是通过@ConfigurationProperties bean配置的）并动态增加容量。重新绑定@ConfigurationProperties不包括另一大类用例，在这些用例中，您需要对刷新进行更多控制，以及需要在整个ApplicationContext中进行原子更改的位置。 为了解决这些问题，我们有@RefreshScope。
+
+=== 1.9 刷新范围
+当配置发生变化时，标记为@RefreshScope 的Spring @Bean 会得到特殊处理。此功能解决了有状态bean只有在初始化时才会注入其配置的问题。例如一个数据源有一个打开的链接正在执行数据操作,这时候你通过Environment改变了数据库的url,你希望该链接继续执行未完成的操作,但是再次获取链接执行操作时,数据库的url已经发生了改变.
+
+有时，甚至可能必须在某些bean上应用@RefreshScope注释，这些bean只能初始化一次。如果bean是“不可变的”，则必须使用@RefreshScope注释bean，或者在属性键spring.cloud.refresh.extra-refreshable下指定classname。
+
+Refresh scope beans是懒加载的.初始化成功之后缓存在scope当中,要强制bean在下一个方法调用上重新初始化，必须使其缓存条目无效。
+
+RefreshScope是上下文中的一个bean，它有一个公共refreshAll方法，通过清除目标缓存来刷新作用域中的所有bean。/refresh端点公开此功能（通过HTTP或JMX）。要按名称刷新单个bean，还有一个refresh（String）方法。
+
+要公开/refresh端点，您需要将以下配置添加到您的应用程序：
+
+[source,yml]
+----
+management:
+  endpoints:
+    web:
+      exposure:
+        include: refresh
+----
+
+NOTE: @RefreshScope（在技术上）在@Configuration类上工作，但它可能会导致令人惊讶的行为。例如，它并不意味着该类中定义的所有@Beans本身都在@RefreshScope中。具体来说，依赖于那些bean的任何东西都不能依赖于在启动刷新时更新它们，除非它本身在@RefreshScope中。在这种情况下，它会在刷新时重建，并重新注入其依赖项。此时，它们将从刷新的@Configuration重新初始化。
+
+=== 1.10 加密和解密
+
+Spring Cloud 有一个Environment预处理器，用于在本地解密属性值。它遵循与Config Server相同的规则，并且通过加密有相同的外部配置。因此，你可以使用{cipher}*形式的加密值。并且只要有有效密钥，它们就会在主程序上下文获取环境设置之前被解密。要在应用程序中使用加密功能，你需要在此类路径中包含Spring Security RSA （Maven坐标：“org.springframework.security:spring-security-rsa”），并且你的JVM还需要全面的JCE扩展。
+如果由于“非法密钥大小”而导致异常并且你使用Sun的JDK，则需要安装Java Cryptograpy Extension(JCE) Unlimited Strength Jurisdiction Policy Files。有关更多信息，请参阅一下链接：
+    ·Java 6 JCE
+    ·Java 7 JCE
+    ·Java 8 JCE    
+无论你使用哪种版本的JRE/JDK x64/x86，都要将文件解压到JDK/jre/lib/security 文件夹中。
+
+
+=== 1.11 端点
+
+对比于Spring Boot Actuator 应用程序，可以使用一些其他管理端点。你可以使用：
+    ·POST 到 /actuator/env 以更新环境并重新绑定@ConfigurationProperties 和日志级别。
+    ·/actuator/refresh 重新加载引导上下文并刷新@RefreshScope bean。
+    ·/actuator/restart 关闭ApplicationContext 并重新启动它（默认情况下禁用）。
+    ·/actuator/pause 和 /actuator/resume 用于调用Lifecycle方法（在ApplicationContext上的stop()和start()）。
+
+
+== 2.常见的抽象
+
+服务发现，负载平衡和断路器等模式适用于所有Spring Cloud客户端,spring cloud 使用的公共抽象层，使得我们根据需要采取不同的实现（例如，使用Eureka或Consul进行发现）。
+
+=== 2.1 @EnableDiscoveryClient
+
+Spring Cloud Commons提供@EnableDiscoveryClient注释。 这将使用META-INF/spring.factories查找DiscoveryClient接口的实现。Discovery Client的实现将配置类添加到spring.factories文件中的org.springframework.cloud.client.discovery.EnableDiscoveryClient项下面。DiscoveryClient实现的示例包括Spring Cloud Netflix Eureka，Spring Cloud Consul Discovery和Spring Cloud Zookeeper Discovery。
+
+默认情况下，DiscoveryClient的实现会向远程发现服务器自动注册本地Spring Boot服务器。 通过在@EnableDiscoveryClient中设置autoRegister = false可以禁用此行为。
+
+NOTE: 不再需要@EnableDiscoveryClient。 您可以在类路径上放置DiscoveryClient实现，以使Spring Boot应用程序向服务发现服务器注册。
+
+==== 2.1.1 Health Indicator
+
+Commons创建了一个Spring Boot HealthIndicator，DiscoveryClient实现可以通过实现DiscoveryHealthIndicator来参与。要禁用复合HealthIndicator，请设置spring.cloud.discovery.client.composite-indicator.enabled = false。
+
+基于DiscoveryClient的通用HealthIndicator是自动配置的（DiscoveryClientHealthIndicator）。要禁用它，请设置spring.cloud.discovery.client.health-indicator.enabled = false
+
+要禁用DiscoveryClientHealthIndicator的description字段，请设置spring.cloud.discovery.client.health-indicator.include-description = false。 否则，它可能会像卷起的HealthIndicator的描述一样冒出来。
+
+==== 2.1.2 DiscoveryClient实例的顺序
+
+DiscoveryClient接口扩展了Ordered。这在使用多个客户端时很有用，因为它允许您定义客户端的顺序。默认情况下，任何DiscoveryClient的顺序都设置为0.如果要为自定义DiscoveryClient实现设置不同的顺序，则只需覆盖getOrder（）方法，以便它返回适合的值。除此之外，您还可以使用属性来设置Spring Cloud提供的DiscoveryClient实现的顺序.为了做到这一点，你只需要将spring.cloud.{clientIdentifier} .discovery.order（或Eureka的eureka.client.order）属性设置为所需的值。clientIdentifier的值为ConsulDiscoveryClient, EurekaDiscoveryClient and ZookeeperDiscoveryClient
+
+=== 2.2 服务注册
+
+Commons现在提供ServiceRegistry接口，该接口提供诸如注册（注册）和注销（注册）之类的方法，这些方法允许您自定义注册服务。 注册是一个标记接口。下面的是他的用法:
+[source,java]
+----
+@Configuration
+@EnableDiscoveryClient(autoRegister=false)
+public class MyConfiguration {
+    private ServiceRegistry registry;
+
+    public MyConfiguration(ServiceRegistry registry) {
+        this.registry = registry;
+    }
+
+    // called through some external process, such as an event or a custom actuator endpoint
+    public void register() {
+        Registration registration = constructRegistration();
+        this.registry.register(registration);
+    }
+}
+----
+
+每个ServiceRegistry实现都有自己的Registry实现:
+
+. ZookeeperRegistration 使用 ZookeeperServiceRegistry
+. EurekaRegistration 使用 EurekaServiceRegistry
+. ConsulRegistration 使用 ConsulServiceRegistry
+
+如果您使用的是ServiceRegistry接口，则需要为正在使用的ServiceRegistry实现传递正确的Registry实现。
+
+==== 2.2.1 ServiceRegistry自动注册
+
+默认情况下，ServiceRegistry实现会自动注册正在运行的服务。 要禁用该行为，您可以设置：@EnableDiscoveryClient（autoRegister = false）以永久禁用自动注册,或者使用配置 spring.cloud.service-registry.auto-registration.enabled = false禁用。
+
+**服务注册事件**
+
+当服务自动注册时，将触发两个事件。第一个事件名为InstancePreRegisteredEvent，在注册服务之前触发。第二个事件名为InstanceRegisteredEvent，在注册服务后触发。 您可以注册一个ApplicationListener来监听并响应这些事件。
+
+==== 2.2.2 服务注册的Actuator端点
+
+Spring Cloud Commons提供/service-registry端点。 此端点依赖于Spring Application Context中的Registration bean。 使用GET调用/ service-registry返回注册的状态。使用GET调用/service-registry返回注册的状态。将POST用于具有JSON主体的同一端点会将当前注册的状态更改为新值。json body中必须包含status字段,status的可选值为UP, DOWN, OUT_OF_SERVICE和UNKNOWN.
+
+NOTE:可以用这个端点来操作服务的上下线状态,注意默认该端点不启用,需要设置actuator
+
+=== 2.3 Spring RestTemplate作为负载均衡器客户端
+
+RestTemplate可以自动配置被Riboon使用。 要创建负载平衡的RestTemplate，请创建RestTemplate @Bean并使用@LoadBalanced限定符，如以下示例所示：
+[source,java]
+----
+@Configuration
+public class MyConfiguration {
+
+    @LoadBalanced
+    @Bean
+    RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+}
+
+public class MyClass {
+    @Autowired
+    private RestTemplate restTemplate;
+
+    public String doOtherStuff() {
+        String results = restTemplate.getForObject("http://stores/stores", String.class);
+        return results;
+    }
+}
+----
+
+URI需要使用虚拟主机名（即服务名称，而不是主机名）。Ribbon用于创建完整的物理地址。有关如何设置RestTemplate的详细信息，请参见RibbonAutoConfiguration。
+
+=== 2.4 Spring WebClient作为负载均衡器客户端
+
+WebClient可以自动配置被LoadBalancerClient使用。 要创建负载平衡的WebClient，请创建WebClient.Builder @Bean并使用@LoadBalanced限定符，如以下示例所示：
+
+[source,java]
+----
+@Configuration
+public class MyConfiguration {
+
+	@Bean
+	@LoadBalanced
+	public WebClient.Builder loadBalancedWebClientBuilder() {
+		return WebClient.builder();
+	}
+}
+
+public class MyClass {
+    @Autowired
+    private WebClient.Builder webClientBuilder;
+
+    public Mono<String> doOtherStuff() {
+        return webClientBuilder.build().get().uri("http://stores/stores")
+        				.retrieve().bodyToMono(String.class);
+    }
+}
+----
+
+URI需要使用虚拟主机名（即服务名称，而不是主机名）。Ribbon用于创建完整的物理地址。有关如何设置RestTemplate的详细信息，请参见RibbonAutoConfiguration。
+
+==== 2.4.1 重试失败的请求
+
+可以将负载均衡的RestTemplate配置为重试失败的请求。默认情况下，禁用此逻辑。 您可以通过将Spring Retry添加到应用程序的类路径来启用它。
+
+您可以使用client.ribbon.MaxAutoRetries，client.ribbon.MaxAutoRetriesNextServer和client.ribbon.OkToRetryOnAllOperations属性。 如果要在类路径上使用Spring Retry但是禁用重试逻辑，可以设置spring.cloud.loadbalancer.retry.enabled = false。有关这些属性的说明，请参阅 https://github.com/Netflix/ribbon/wiki/Getting-Started#the-properties-file-sample-clientproperties[文档]。
+
+如果要在重试中实现BackOffPolicy，则需要创建LoadBalancedRetryFactory类型的bean并覆盖createBackOffPolicy方法：
+[source,java]
+----
+@Configuration
+public class MyConfiguration {
+    @Bean
+    LoadBalancedRetryFactory retryFactory() {
+        return new LoadBalancedRetryFactory() {
+            @Override
+            public BackOffPolicy createBackOffPolicy(String service) {
+        		return new ExponentialBackOffPolicy();
+        	}
+        };
+    }
+}
+----
+
+如果要将一个或多个RetryListener实现添加到重试功能，则需要创建一个类型为LoadBalancedRetryListenerFactory的bean，并返回要用于给定服务的RetryListener数组，如以下示例所示：
+[source,java]
+----
+@Configuration
+public class MyConfiguration {
+    @Bean
+    LoadBalancedRetryListenerFactory retryListenerFactory() {
+        return new LoadBalancedRetryListenerFactory() {
+            @Override
+            public RetryListener[] createRetryListeners(String service) {
+                return new RetryListener[]{new RetryListener() {
+                    @Override
+                    public <T, E extends Throwable> boolean open(RetryContext context, RetryCallback<T, E> callback) {
+                        //TODO Do you business...
+                        return true;
+                    }
+
+                    @Override
+                     public <T, E extends Throwable> void close(RetryContext context, RetryCallback<T, E> callback, Throwable throwable) {
+                        //TODO Do you business...
+                    }
+
+                    @Override
+                    public <T, E extends Throwable> void onError(RetryContext context, RetryCallback<T, E> callback, Throwable throwable) {
+                        //TODO Do you business...
+                    }
+                }};
+            }
+        };
+    }
+}
+----
+
+=== 2.5 多个RestTemplate
+
+如果您想要一个非负载平衡的RestTemplate，请创建一个RestTemplate bean并将其注入。 要访问负载平衡的RestTemplate，请在创建@Bean时使用@LoadBalanced限定符，如以下示例所示：
+[source,java]
+----
+@Configuration
+public class MyConfiguration {
+
+    @LoadBalanced
+    @Bean
+    RestTemplate loadBalanced() {
+        return new RestTemplate();
+    }
+
+    @Primary
+    @Bean
+    RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+}
+
+public class MyClass {
+    @Autowired
+    private RestTemplate restTemplate;
+
+    @Autowired
+    @LoadBalanced
+    private RestTemplate loadBalanced;
+
+    public String doOtherStuff() {
+        return loadBalanced.getForObject("http://stores/stores", String.class);
+    }
+
+    public String doStuff() {
+        return restTemplate.getForObject("http://example.com", String.class);
+    }
+}
+---- 
+
+NOTE: 如果您看到 `java.lang.IllegalArgumentException: Can not set org.springframework.web.client.RestTemplate field com.my.app.Foo.restTemplate to com.sun.proxy.$Proxy89` ，请尝试注入RestOperations或设置spring.aop.proxyTargetClass=真。
+
+=== 2.6 Spring WebFlux WebClient作为负载均衡器客户端
+
+可以将WebClient配置为使用LoadBalancerClient。 如果spring-webflux位于类路径上，则自动配置LoadBalancerExchangeFilterFunction。 以下示例显示如何配置WebClient以使用负载均衡器：
+
+[source,java]
+----
+public class MyClass {
+    @Autowired
+    private LoadBalancerExchangeFilterFunction lbFunction;
+
+    public Mono<String> doOtherStuff() {
+        return WebClient.builder().baseUrl("http://stores")
+            .filter(lbFunction)
+            .build()
+            .get()
+            .uri("/stores")
+            .retrieve()
+            .bodyToMono(String.class);
+    }
+}
+----
+
+URI需要使用虚拟主机名(即服务名称，而不是主机名). LoadBalancerClient用于创建完整的物理地址。
+
+=== 2.7 忽略网络接口
+
+有时，忽略某些命名的网络接口以便从服务发现注册中排除它们（例如，在Docker容器中运行时）是有用的。可以设置正则表达式列表以使所需的网络接口被忽略。 以下配置忽略docker0接口和以veth开头的所有接口：
+[source,yml]
+----
+spring:
+  cloud:
+    inetutils:
+      ignoredInterfaces:
+        - docker0
+        - veth.*
+----
+
+您还可以使用正则表达式列表强制仅使用指定的网络地址，如以下示例所示：
+[source,yml]
+----
+spring:
+  cloud:
+    inetutils:
+      preferredNetworks:
+        - 192.168
+        - 10.0
+----
+
+您还可以强制仅使用站点本地地址，如以下示例所示：
+[source,yml]
+----
+spring:
+  cloud:
+    inetutils:
+      useOnlySiteLocalInterfaces: true
+----
+
+有关构成站点本地地址的更多详细信息，请参阅 https://docs.oracle.com/javase/8/docs/api/java/net/Inet4Address.html#isSiteLocalAddress--[Inet4Address.html.isSiteLocalAddress()]。
+
+=== 2.8 HTTP客户端工厂
+
+Spring Cloud Commons提供了用于创建Apache HTTP客户端（ApacheHttpClientFactory）和OK HTTP客户端（OkHttpClientFactory）的bean。 仅当OK HTTP jar位于类路径上时，才会创建OkHttpClientFactory bean。
+
+此外，Spring Cloud Commons提供了用于创建两个客户端使用的连接管理器的bean：用于Apache HTTP客户端的ApacheHttpClientConnectionManagerFactory和用于OK HTTP客户端的OkHttpClientConnectionPoolFactory。如果要自定义在下游项目中创建HTTP客户端的方式，可以提供自己的这些bean实现。 此外，如果您提供类型为HttpClientBuilder或OkHttpClient.Builder的bean，则默认工厂将使用这些构建器作为返回到下游项目的构建器的基础。您还可以通过将spring.cloud.httpclientfactories.apache.enabled或spring.cloud.httpclientfactories.ok.enabled设置为false来禁用这些bean的创建。
+
+=== 2.9 开启features
+
+Spring Cloud Commons提供/features端点。 此端点返回类路径上可用的features以及它们是否已启用。 返回的信息包括features类型，名称，版本和供应商。
+
+==== 2.9.1 Feature types
+
+有两种类型的'Feature'：抽象和命名。
+
+抽象的feature是一个接口或者一个抽象类,并创建了具体实现,例如DiscoveryClient, LoadBalancerClient和LockService.抽象类或接口用于在上下文中查找该类型的bean。版本查看是bean.getClass().getPackage().getImplementationVersion().
+
+命名feature是指没有实现的特定类，例如“断路器”，“API网关”，“Spring Cloud Bus”等.这些功能需要名称和bean类型。
+
+=== 2.9.2 声明Feature
+任何模块都可以声明任意数量的HasFeature bean，如以下示例所示：
+[source,java]
+----
+@Bean
+public HasFeatures commonsFeatures() {
+  return HasFeatures.abstractFeatures(DiscoveryClient.class, LoadBalancerClient.class);
+}
+
+@Bean
+public HasFeatures consulFeatures() {
+  return HasFeatures.namedFeatures(
+    new NamedFeature("Spring Cloud Bus", ConsulBusAutoConfiguration.class),
+    new NamedFeature("Circuit Breaker", HystrixCommandAspect.class));
+}
+
+@Bean
+HasFeatures localFeatures() {
+  return HasFeatures.builder()
+      .abstractFeature(Foo.class)
+      .namedFeature(new NamedFeature("Bar Feature", Bar.class))
+      .abstractFeature(Baz.class)
+      .build();
+}
+----
+
+=== 2.10 Spring Cloud兼容性验证
+
+由于某些用户在设置Spring Cloud应用程序时遇到问题，我们决定添加兼容性验证机制。如果您当前的设置与Spring Cloud要求不兼容，并且报告显示出现了什么问题，它将会中断。
+
+目前我们验证哪个版本的Spring Boot被添加到您的类路径中。
+
+[source]
+----
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Your project setup is incompatible with our requirements due to following reasons:
+
+- Spring Boot [2.1.0.RELEASE] is not compatible with this Spring Cloud release train
+
+
+Action:
+
+Consider applying the following actions:
+
+- Change Spring Boot version to one of the following versions [1.2.x, 1.3.x] .
+You can find the latest Spring Boot versions here [https://spring.io/projects/spring-boot#learn].
+If you want to learn more about the Spring Cloud Release train compatibility, you can visit this page [https://spring.io/projects/spring-cloud#overview] and check the [Release Trains] section.
+----
+
+要禁用此功能，请将spring.cloud.compatibility-verifier.enabled设置为false。 如果要覆盖兼容的Spring Boot版本，只需使用逗号分隔的兼容Spring Boot版本列表设置spring.cloud.compatibility-verifier.compatible-boot-versions属性。

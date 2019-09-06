@@ -1,0 +1,1728 @@
+= spring-kafka
+
+=== 4.1.1 配置主题
+
+
+=== 4.1.2 发送消息
+
+==== 使用KafkaTemplate
+
+==== 事务
+
+==== 使用ReplyingKafkaTemplate
+
+
+=== 4.1.3 接受消息
+
+spring-kafka提供了MessageListenerContainer注册listener和@KafkaListener注解两种方式接受消息.
+
+==== Message Listeners
+
+当使用MessageListenerContainer方式时,你必须给该container指定具体的listener,下面列出了8种类型的listener(两类四种):
+[source,java]
+----
+public interface MessageListener<K, V> {  <1>
+
+    void onMessage(ConsumerRecord<K, V> data);
+
+}
+
+public interface AcknowledgingMessageListener<K, V> {  <2>
+
+    void onMessage(ConsumerRecord<K, V> data, Acknowledgment acknowledgment);
+
+}
+
+public interface ConsumerAwareMessageListener<K, V> extends MessageListener<K, V> {  <3>
+
+    void onMessage(ConsumerRecord<K, V> data, Consumer<?, ?> consumer);
+
+}
+
+public interface AcknowledgingConsumerAwareMessageListener<K, V> extends MessageListener<K, V> {  <4>
+
+    void onMessage(ConsumerRecord<K, V> data, Acknowledgment acknowledgment, Consumer<?, ?> consumer);
+
+}
+
+public interface BatchMessageListener<K, V> {  <5>
+
+    void onMessage(List<ConsumerRecord<K, V>> data);
+
+}
+
+public interface BatchAcknowledgingMessageListener<K, V> {  <6>
+
+    void onMessage(List<ConsumerRecord<K, V>> data, Acknowledgment acknowledgment);
+
+}
+
+public interface BatchConsumerAwareMessageListener<K, V> extends BatchMessageListener<K, V> {  <7>
+
+    void onMessage(List<ConsumerRecord<K, V>> data, Consumer<?, ?> consumer);
+
+}
+
+public interface BatchAcknowledgingConsumerAwareMessageListener<K, V> extends BatchMessageListener<K, V> {  <8>
+
+    void onMessage(List<ConsumerRecord<K, V>> data, Acknowledgment acknowledgment, Consumer<?, ?> consumer);
+
+}
+----
+
+<1> 该接口实现处理kafka消费者通过poll方法拉取到的单个消息,AckMode必须是自动提交或者container管理的提交方法.
+
+<2> 该接口实现处理kafka消费者通过poll方法拉取到的单个消息,AckMode必须是手动提交方式,参考附录<<p1,AckMode的手动提交>>实例
+
+<3> 该接口实现处理kafka消费者通过poll方法拉取到的单个消息,AckMode必须是自动提交或者container管理的提交方法.该接口另外提供了对consumer对象的访问.
+
+<4> 该接口实现处理kafka消费者通过poll方法拉取到的单个消息,AckMode必须是手动提交方式,参考附录手动提交实例.该接口另外提供了对consumer对象的访问.
+
+<5> 该接口实现处理kafka消费者通过poll方法拉取到的多个消息,AckMode必须是自动提交或者container管理的提交方法.
+
+<6> 该接口实现处理kafka消费者通过poll方法拉取到的多个消息,AckMode必须是手动提交方式,参考附录手动提交实例
+
+<7> 该接口实现处理kafka消费者通过poll方法拉取到的多个消息,AckMode必须是自动提交或者container管理的提交方法.该接口另外提供了对consumer对象的访问.
+
+<8> 该接口实现处理kafka消费者通过poll方法拉取到的多个消息,AckMode必须是手动提交方式,参考附录手动提交实例.该接口另外提供了对consumer对象的访问.
+
+NOTE: Consumer对象不是线程安全的。 您只能在调用listener的线程上调用其方法。
+
+==== Message Listener Containers
+
+spring-kafka提供了两种类型的container:
+
+. KafkaMessageListenerContainer
+. ConcurrentMessageListenerContainer
+
+KafkaMessageListenerContainer接收来自单个线程上所有主题或分区的所有消息。ConcurrentMessageListenerContainer委托给一个或多个KafkaMessageListenerContainer实例以提供多线程消费。
+
+**使用KafkaMessageListenerContainer**
+下面是该类的构造函数:
+[source,java]
+----
+public KafkaMessageListenerContainer(ConsumerFactory<K, V> consumerFactory,
+                    ContainerProperties containerProperties)
+
+public KafkaMessageListenerContainer(ConsumerFactory<K, V> consumerFactory,
+                    ContainerProperties containerProperties,
+                    TopicPartitionInitialOffset... topicPartitions)
+----
+
+每个构造函数都支持ConsumerFactory和ContainerProperties属性.第二个构造函数用户很少直接使用,一般是给ConcurrentMessageListenerContainer使用,用来给多个消费者实例设置TopicPartitionInitialOffset.
+
+ContainerProperties有如下构造函数:
+[source,java]
+----
+public ContainerProperties(TopicPartitionInitialOffset... topicPartitions) <1>
+
+public ContainerProperties(String... topics) <2>
+
+public ContainerProperties(Pattern topicPattern) <3>
+----
+
+<1> 函数接受一个TopicPartitionInitialOffset参数数组，以显式指示容器使用哪些分区（使用consumer assign（）方法）和可选的初始偏移量。正值是绝对偏移量,负值默认情况下是相对于最新偏移量的位置.TopicPartitionInitialOffset 提供了可选的boolean参数,如果这是true，则初始偏移（正或负）相对于该消费者的当前位置。启动container时应用偏移量。
+<2> 指定多个主题，Kafka根据group.id属性分配分区,在整个组中分配分区。 
+<3> 使用正则表达式模式来选择主题。
+
+
+要将MessageListener分配给容器，可以在创建Container时使用ContainerProps.setMessageListener方法。 以下示例显示了如何执行此操作：
+
+[source,java]
+----
+ContainerProperties containerProps = new ContainerProperties("topic1", "topic2");
+containerProps.setMessageListener(new MessageListener<Integer, String>() {
+    ...
+});
+DefaultKafkaConsumerFactory<Integer, String> cf =
+                        new DefaultKafkaConsumerFactory<Integer, String>(consumerProps());
+KafkaMessageListenerContainer<Integer, String> container =
+                        new KafkaMessageListenerContainer<>(cf, containerProps);
+return container;
+----
+
+从2.1.1版本开始,支持logContainerConfig属性.设置为true,INFO级别的日志记录每个listener container 配置的属性. `containerProperties.setLogContainerConfig(true)`
+
+默认情况下，在DEBUG日志记录级别执行主题偏移提交的日志记录。 从版本2.1.2开始，ContainerProperties中名为commitLogLevel的属性允许您指定这些消息的日志级别。 例如，要将日志级别更改为INFO，可以使用containerProperties.setCommitLogLevel(LogIfLevelEnabled.Level.INFO).
+
+从2.2版开始，添加了一个名为missingTopicsFatal的新容器属性（默认值：true）。 如果代理上不存在任何已配置的主题，则会阻止容器启动。如果容器配置主题模式（正则表达式），则不适用.以前，容器线程在consumer.poll()方法中循环，根据记录的很多消息来获取主题。除了日志之外，没有迹象表明存在问题。要还原以前的行为，可以将该属性设置为false。
+
+**使用ConcurrentMessageListenerContainer**
+
+构造函数如下:
+[source,java]
+----
+public ConcurrentMessageListenerContainer(ConsumerFactory<K, V> consumerFactory,
+                            ContainerProperties containerProperties)
+----
+
+该实例有concurrency属性,可以通过container.setConcurrency(3)创建三个KafkaMessageListenerContainer.
+
+Kafka使用其组管理功能在消费者之间分配分区。ConcurrentMessageListenerContainer在KafkaMessageListenerContainer实例中分发TopicPartition实例。 
+
+.分区分配
+****
+收听多个主题时，默认分区分发可能与您的预期不同。例如，如果您有三个主题，每个主题有五个分区，并且您希望使用concurrency=15，则只能看到五个active的消费者，每个消费者被分配一个分区，其他10个消费者处于空闲状态。 这是因为默认的Kafka PartitionAssignor是RangeAssignor（请参阅其Javadoc）。 对于这种情况，您可能需要考虑使用RoundRobinAssignor，它将分区分配给所有使用者。然后，为每个消费者分配一个主题或分区。要更改PartitionAssignor，可以在提供给DefaultKafkaConsumerFactory的属性中设置partition.assignment.strategy属性（ConsumerConfigs.PARTITION_ASSIGNMENT_STRATEGY_CONFIG）。
+
+当使用spring boot,你可以这样设置:
+	
+	spring.kafka.consumer.properties.partition.assignment.strategy=\
+org.apache.kafka.clients.consumer.RoundRobinAssignor
+
+****
+
+例如，如果提供了六个TopicPartition实例并且并发性为3; 每个容器有两个分区。 对于五个TopicPartition实例，两个容器获得两个分区，第三个获得一个。如果并发性大于TopicPartitions的数量，则调整并发性以使每个容器获得一个分区。
+
+NOTE: client.id属性（如果设置）后面会附加-n，其中n是与并发相对应的消费者实例的序号。 启用JMX时，需要为MBean提供唯一的名称。
+
+
+从版本1.3开始，MessageListenerContainer提供对底层KafkaConsumer的度量的访问。 对于ConcurrentMessageListenerContainer，metrics()方法返回所有目标KafkaMessageListenerContainer实例的度量标准。通过为底层KafkaConsumer提供的client-id将度量标准分组到Map<MetricName, ? extends Metric>中。
+
+
+.metric的具体内容
+****
+metric主要用来统计该container消费的数据
+
+. records-consumed-total
+. request-size-avg
+. commit-rate
+. io-wait-ratio
+****
+
+
+**Committing Offsets**
+提供了几种用于提交偏移的选项。 如果enable.auto.commit使用者属性为true，则Kafka会根据其配置自动提交偏移量。 如果为false，则容器支持多个AckMode设置（在下一个列表中描述）
+
+消费者poll（）方法返回一个或多个ConsumerRecords。为每条记录调用MessageListener。 以下列表描述了容器为每个AckMode采取的操作：
+
+. RECORD:处理记录后，listener返回时提交偏移量
+. BATCH:在处理poll()返回的所有记录后提交偏移量。
+. TIME:只要已超过自上次提交以来的ackTime，就会在处理poll()返回的所有记录后提交偏移量。
+. COUNT:只要自上次提交以来已收到ackCount记录，就会在处理poll()返回的所有记录时提交偏移量。
+. COUNT_TIME:与TIME和COUNT类似，但如果任一条件为真，则执行提交。
+. MANUAL:在listener中调用acknowledge()来commit。 之后，与BATCH相同的语义
+. MANUAL_IMMEDIATE:调用Acknowledgment.acknowledge()之后,立即提交offset
+
+INFO: MANUAL和MANUAL_IMMEDIATE要求是AcknowledgingMessageListener或BatchAcknowledgingMessageListener。 请参阅消息监听器。
+
+配置syncCommits容器属性,commitSync()或commitAsync()方法被消费者使用.默认syncCommits为true.参阅setSyncCommitTimeout,参阅setCommitCallback 获取异步提交的结果.默认回调是LoggingCommitCallback，它记录发生的错误。
+
+因为侦听器容器具有自己的提交偏移的机制，所以它更喜欢Kafka ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG为false。 从版本2.3开始，它无条件地将其设置为false，除非在消费者工厂中特别设置或容器的消费者属性覆盖。
+
+Acknowledgment接口信息如下:
+[source,java]
+----
+public interface Acknowledgment {
+
+    void acknowledge();
+
+}
+----
+此方法使侦听器可以控制何时提交偏移。
+
+**Listener Container Auto Startup**
+
+侦听器容器实现SmartLifecycle，默认情况下autoStartup为true。容器在spring 上下文靠后的阶段启动（Integer.MAX-VALUE-100）。 处理监听器的其他组件应该在靠前的阶段实现SmartLifecycle.-100为以后的阶段留出了空间，使组件能够在容器之后自动启动。
+
+==== @KafkaListener
+
+@KafkaListener注释用于将bean方法指定为监听容器的监听器。 该bean被MessagingMessageListenerAdapter包装，该MessagingMessageListenerAdapter配置有各种功能，例如转换器以在必要时转换数据以匹配方法参数。
+
+您可以使用SpEL(＃{...})或属性占位符(${...})在注释上配置大多数属性。有关更多信息，请参阅Javadoc。
+
+**Record Listeners**
+
+@KafkaListener注释为简单的POJO监听器提供了一种机制,如下:
+[source,java]
+----
+public class Listener {
+
+    @KafkaListener(id = "foo", topics = "myTopic", clientIdPrefix = "myClientId")
+    public void listen(String data) {
+        ...
+    }
+
+}
+----
+
+该注解需要配置@EnableKafka并且在@Configuration配置类中注册listener container factory,默认经常使用的是ConcurrentMessageListenerContainer.默认情况下，需要名为kafkaListenerContainerFactory的bean。以下示例显示如何使用ConcurrentMessageListenerContainer：
+
+[source,java]
+----
+@Configuration
+@EnableKafka
+public class KafkaConfig {
+
+    @Bean
+    KafkaListenerContainerFactory<ConcurrentMessageListenerContainer<Integer, String>>
+                        kafkaListenerContainerFactory() {
+        ConcurrentKafkaListenerContainerFactory<Integer, String> factory =
+                                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory());
+        factory.setConcurrency(3);
+        factory.getContainerProperties().setPollTimeout(3000);
+        return factory;
+    }
+
+    @Bean
+    public ConsumerFactory<Integer, String> consumerFactory() {
+        return new DefaultKafkaConsumerFactory<>(consumerConfigs());
+    }
+
+    @Bean
+    public Map<String, Object> consumerConfigs() {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, embeddedKafka.getBrokersAsString());
+        ...
+        return props;
+    }
+}
+----
+
+
+请注意，要设置容器属性，必须在工厂中使用getContainerProperties（）方法。 它用作注入容器的实际属性的模板。
+
+从版本2.1.1开始,你可以通过clientIdPrefix设置该注解创建的consumer的client.id属性.clientIdPrefix 以-n结尾,其中n是一个整数，表示使用并发时的容器编号。
+
+从2.2版开始，您现在可以通过使用注释本身的属性来覆盖容器工厂的concurrency和autoStartup属性。属性值可以是简单值，属性占位符或SpEL表达式。以下示例显示了如何执行此操作：
+[source,java]
+----
+@KafkaListener(id = "myListener", topics = "myTopic",
+        autoStartup = "${listen.auto.start:true}", concurrency = "${listen.concurrency:3}")
+public void listen(String data) {
+    ...
+}
+----
+您还可以使用显式主题和分区（以及可选的初始偏移量）配置POJO侦听器。 以下示例显示了如何执行此操作：
+[source,java]
+----
+@KafkaListener(id = "thing2", topicPartitions =
+        { @TopicPartition(topic = "topic1", partitions = { "0", "1" }),
+          @TopicPartition(topic = "topic2", partitions = "0",
+             partitionOffsets = @PartitionOffset(partition = "1", initialOffset = "100"))
+        })
+public void listen(ConsumerRecord<?, ?> record) {
+    ...
+}
+----
+您可以在分区或partitionOffsets属性中指定每个分区，但不能同时指定两者。
+使用手动AckMode时，您还可以在监听器提供确认。以下示例还说明了如何使用其他容器工厂。
+[source,java]
+----
+@KafkaListener(id = "cat", topics = "myTopic",
+          containerFactory = "kafkaManualAckListenerContainerFactory")
+public void listen(String data, Acknowledgment ack) {
+    ...
+    ack.acknowledge();
+}
+----
+
+最后，可以从massage头中获取有关message的元数据。您可以使用以下标头名称来检索message的标头：
+
+. KafkaHeaders.RECEIVED_MESSAGE_KEY
+. KafkaHeaders.RECEIVED_TOPIC
+. KafkaHeaders.RECEIVED_PARTITION_ID
+. KafkaHeaders.RECEIVED_TIMESTAMP
+. KafkaHeaders.TIMESTAMP_TYPE
+
+[source,java]
+----
+@KafkaListener(id = "qux", topicPattern = "myTopic1")
+public void listen(@Payload String foo,
+        @Header(KafkaHeaders.RECEIVED_MESSAGE_KEY) Integer key,
+        @Header(KafkaHeaders.RECEIVED_PARTITION_ID) int partition,
+        @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
+        @Header(KafkaHeaders.RECEIVED_TIMESTAMP) long ts
+        ) {
+    ...
+}
+----
+
+**Batch listeners**
+
+从1.1版开始，您可以配置@KafkaListener方法以接收从消费者poll到的整批消费者记录。 要配置侦听器容器工厂以创建批处理侦听器，可以设置batchListener属性。以下示例显示了如何执行此操作：
+[source,java]
+----
+@Bean
+public KafkaListenerContainerFactory<?> batchFactory() {
+    ConcurrentKafkaListenerContainerFactory<Integer, String> factory =
+            new ConcurrentKafkaListenerContainerFactory<>();
+    factory.setConsumerFactory(consumerFactory());
+    factory.setBatchListener(true);  // <<<<<<<<<<<<<<<<<<<<<<<<<
+    return factory;
+}
+----
+下面的例子展示了如何监听器如何接受多个记录
+[source,java]
+----
+@KafkaListener(id = "list", topics = "myTopic", containerFactory = "batchFactory")
+public void listen(List<String> list) {
+    ...
+}
+----
+
+主题，分区，偏移等, 以下示例显示了如何使用标头：
+[source,java]
+----
+@KafkaListener(id = "list", topics = "myTopic", containerFactory = "batchFactory")
+public void listen(List<String> list,
+        @Header(KafkaHeaders.RECEIVED_MESSAGE_KEY) List<Integer> keys,
+        @Header(KafkaHeaders.RECEIVED_PARTITION_ID) List<Integer> partitions,
+        @Header(KafkaHeaders.RECEIVED_TOPIC) List<String> topics,
+        @Header(KafkaHeaders.OFFSET) List<Long> offsets) {
+    ...
+}
+----
+或者，您可以在每条消息中接收带有每个偏移量和其他详细信息的Message<?>对象列表，但它必须是方法上定义的唯一的参数（除了可选的手动提交时使用的Acknowledgment，and/or Consumer<?, ?> 参数）。 以下示例显示了如何执行此操作：
+[source,java]
+----
+@KafkaListener(id = "listMsg", topics = "myTopic", containerFactory = "batchFactory")
+public void listen14(List<Message<?>> list) {
+    ...
+}
+
+@KafkaListener(id = "listMsgAck", topics = "myTopic", containerFactory = "batchFactory")
+public void listen15(List<Message<?>> list, Acknowledgment ack) {
+    ...
+}
+
+@KafkaListener(id = "listMsgAckConsumer", topics = "myTopic", containerFactory = "batchFactory")
+public void listen16(List<Message<?>> list, Acknowledgment ack, Consumer<?, ?> consumer) {
+    ...
+}
+----
+
+在这种情况下，不对payloads执行转换。
+
+如果BatchMessagingMessageConverter配置了RecordMessageConverter，您还可以向Message参数添加泛型类型并转换payloads。有关详细信息，请参阅使用批量侦听器的payloads转化.
+
+你也可以接受ConsumerRecord<?, ?>对象列表,但必须是唯一参数除了可选的手动提交时使用的Acknowledgment，and/or Consumer<?, ?> 参数）
+
+[source,java]
+----
+@KafkaListener(id = "listCRs", topics = "myTopic", containerFactory = "batchFactory")
+public void listen(List<ConsumerRecord<Integer, String>> list) {
+    ...
+}
+
+@KafkaListener(id = "listCRsAck", topics = "myTopic", containerFactory = "batchFactory")
+public void listen(List<ConsumerRecord<Integer, String>> list, Acknowledgment ack) {
+    ...
+}
+----
+
+从2.2版开始，侦听器可以接收poll()方法返回的完整ConsumerRecords<?,?>对象，让侦听器访问其他方法，例如partitions()(返回列表中的TopicPartition实例)和records(TopicPartition)(获取选择性记录)。再次强调,必须是唯一参数除了可选的手动提交时使用的Acknowledgment，and/or Consumer<?, ?> 参数
+
+[source,java]
+----
+@KafkaListener(id = "pollResults", topics = "myTopic", containerFactory = "batchFactory")
+public void pollResults(ConsumerRecords<?, ?> records) {
+    ...
+}
+----
+
+NOTE: 如果容器配置了RecordFilterStrategy ,ConsumerRecords<?, ?>监听器会忽略它,并发出Warn日志警告.如果使用<List <?>>形式的侦听器，则只能使用batch监听器过滤记录。
+
+**注解中的属性说明**
+版本2.0之后,id属性用作配置消费者的group.id,会覆盖consumer工厂中指定的group.id.您还可以显式设置groupId或将idIsGroup设置为false以恢复使用消费者工厂的group.id。
+
+您可以在大多数注释属性中使用属性占位符或SpEL表达式，如以下示例所示：
+[source,java]
+----
+@KafkaListener(topics = "${some.property}")
+
+@KafkaListener(topics = "#{someBean.someProperty}",
+    groupId = "#{someBean.someProperty}.group")
+----
+
+从版本2.1.2开始，SpEL表达式支持一个特殊的令牌：__listener。它是一个伪bean名称，表示存在此批注的当前bean实例。
+[source,java]
+----
+@Bean
+public Listener listener1() {
+    return new Listener("topic1");
+}
+
+@Bean
+public Listener listener2() {
+    return new Listener("topic2");
+}
+----
+鉴于上一个示例中的bean，我们可以使用以下内容：
+[source,java]
+----
+@Bean
+public Listener listener1() {
+    return new Listener("topic1");
+}
+
+@Bean
+public Listener listener2() {
+    return new Listener("topic2");
+}
+Given the beans in the previous example, we can then use the following:
+
+public class Listener {
+
+    private final String topic;
+
+    public Listener(String topic) {
+        this.topic = topic;
+    }
+
+    @KafkaListener(topics = "#{__listener.topic}",
+        groupId = "#{__listener.topic}.group")
+    public void listen(...) {
+        ...
+    }
+
+    public String getTopic() {
+        return this.topic;
+    }
+
+}
+----
+
+如果您有一个名为__listener的实际bean，则可以使用beanRef属性更改表达式标记。 以下示例显示了如何执行此操作：
+[source,java]
+----
+@KafkaListener(beanRef = "__x", topics = "#{__x.topic}",
+    groupId = "#{__x.topic}.group")
+----
+
+从2.2.4版开始，您可以直接在注释上指定Kafka消费者属性，这些将覆盖在消费者工厂中配置的具有相同名称的任何属性,您不能以这种方式指定group.id和client.id属性;他们会被忽视; 可以使用groupId和clientIdPrefix注解属性来设置.
+
+这些属性被指定为具有普通Java Properties文件格式的单个字符串:foo:bar, foo=bar, or foo bar:
+[source,java]
+----
+@KafkaListener(topics = "myTopic", groupId="group", properties= {
+    "max.poll.interval.ms:60000",
+    ConsumerConfig.MAX_POLL_RECORDS_CONFIG + "=100"
+})
+----
+
+==== 获取消费者的group.id
+
+在多个容器中运行相同的监听器代码时，能够确定记录来自哪个容器（由其group.id消费者属性标识）可能很有用。
+
+您可以在侦听器线程上调用KafkaUtils.getConsumerGroupId（）来执行此操作。 或者，您可以在方法参数中访问组ID。
+[source,java]
+----
+@KafkaListener(id = "bar", topicPattern = "${topicTwo:annotated2}", exposeGroupId = "${always:true}")
+public void listener(@Payload String foo,
+        @Header(KafkaHeaders.GROUP_ID) String groupId) {
+...
+}
+----
+
+NOTE: 这在接收List<?>记录的记录监听器和批处理监听器中可用。它在接收ConsumerRecords <?,?>参数的批处理侦听器中不可用。在这种情况下使用KafkaUtils机制。
+
+==== container线程命名
+监听器容器当前使用两个任务执行器，一个用于调用消费者，另一个用于在kafka消费者属性enable.auto.commit为false时调用listener。您可以通过设置容器的ContainerProperties的consumerExecutor和listenerExecutor属性来提供自定义执行程序。使用线程池执行程序时，请确保有足够的线程供容器使用。使用ConcurrentMessageListenerContainer时，每个消费者使用一个线程（并发）。
+
+如果您未提供消费者executor，则使用SimpleAsyncTaskExecutor.此执行程序创建名称类似于<beanName>-C-1（使用者线程）的线程.对于ConcurrentMessageListenerContainer，线程名称的<beanName>部分变为<beanName>-m，其中m表示使用者实例。每次启动容器时，m都会递增。因此，使用容器的bean名称，容器第一次启动后，此容器中的线程将被命名为container-0-C-1，container-1-C-1 ;container-0-C-2，container-1-C-2等。
+
+==== @KafkaListener作为元注解
+
+版本2.2之后,你可以使用@KafkaListener作为元注解:
+[source,java]
+----
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+@KafkaListener
+public @interface MyThreeConsumersListener {
+
+    @AliasFor(annotation = KafkaListener.class, attribute = "id")
+    String id();
+
+    @AliasFor(annotation = KafkaListener.class, attribute = "topics")
+    String[] topics();
+
+    @AliasFor(annotation = KafkaListener.class, attribute = "concurrency")
+    String concurrency() default "3";
+
+}
+----
+
+除非已在使用者工厂配置中指定了group.id，否则必须至少为其中一个主题，topicPattern或topicPartitions（以及通常为id或groupId）添加别名。以下示例显示了如何执行此操作：
+[source,java]
+----
+@MyThreeConsumersListener(id = "my.group", topics = "my.topic")
+public void listen1(String in) {
+    ...
+}
+----
+
+==== 在类上使用@KafkaListene
+
+在类级别使用@KafkaListener时，必须在方法级别指定@KafkaHandler。传递消息时，转换消息的payload类型用于确定要调用的方法。 以下示例显示了如何执行此操作：
+[source,java]
+----
+@KafkaListener(id = "multi", topics = "myTopic")
+static class MultiListenerBean {
+
+    @KafkaHandler
+    public void listen(String foo) {
+        ...
+    }
+
+    @KafkaHandler
+    public void listen(Integer bar) {
+        ...
+    }
+
+    @KafkaHandler(isDefault = true`)
+    public void listenDefault(Object object) {
+        ...
+    }
+
+}
+----
+
+从版本2.1.3开始，如果与其他方法不匹配，则可以将@KafkaHandler方法指定为调用的默认方法。最多可以指定一种方法。使用@KafkaHandler方法时，payload必须已经转换为域对象（因此可以执行匹配）.使用自定义反序列化器，JsonDeserializer或（String | Bytes）JsonMessageConverter，并将其TypePrecedence设置为TYPE_ID。详情参考序列化章节.
+
+==== @KafkaListener生命周期管理
+
+为@KafkaListener注解创建监听器容器不是应用程序中的上下文bean,而是通过KafkaListenerEndpointRegistry注册的基础架构(infrastructure)bean.该bean由框架自动声明并进行管理容器的生命周期;它将自动启动autoStartup设置为true的任何容器。所有容器工厂创建的容器必须处于同一阶段。您可以使用registry以编程方式管理生命周期。启动或停止egistry将启动或停止所有已注册的容器.或者，你可以使用其id属性获取对单个容器的引用。您可以设置注解上的autoStartup属性，它将覆盖容器工厂中的默认设置。您可以从应用程序上下文中获取对bean的引用，例如@autowired，以管理它注册容器。 以下示例显示了如何执行此操作:
+[source,java]
+----
+@KafkaListener(id = "myContainer", topics = "myTopic", autoStartup = "false")
+public void listen(...) { ... }
+----
+
+[source,java]
+----
+@Autowired
+private KafkaListenerEndpointRegistry registry;
+...
+  this.registry.getListenerContainer("myContainer").start();
+...
+
+----
+
+registry只维护它管理的容器的生命周期;声明为bean的容器是不是由registry管理，可以从应用程序上下文中获取。registry.getListenerContainers()返回registry管理的容器,2.2.5版本后,添加的getAllListenerContainers()方法返回所有registry管理容器和bean注册的容器.该返回的集合将包括已初始化的任何原型bean，但它不会初始化任何懒惰的bean声明。
+
+==== @KafkaListener @Payload 校验
+
+
+从2.2版开始，现在可以更轻松地添加Validator来验证@KafkaListener @Payload参数。以前，您必须配置自定义DefaultMessageHandlerMethodFactory并添加到registrar。现在，您可以将验证程序直接添加到registrar。看下面的代码:
+[source,java]
+----
+@Configuration
+@EnableKafka
+public class Config implements KafkaListenerConfigurer {
+  ...
+  @Override
+  public void configureKafkaListeners(KafkaListenerEndpointRegistrar registrar)
+{
+  registrar.setValidator(new MyValidator());
+  }
+}
+
+----
+
+将Spring Boot与验证启动程序一起使用时，使用LocalValidatorFactoryBean，如以下示例所示：
+[source,java]
+----
+@Configuration
+@EnableKafka
+public class Config implements KafkaListenerConfigurer {
+  @Autowired
+  private LocalValidatorFactoryBean validator;
+  ...
+  @Override
+  public void configureKafkaListeners(KafkaListenerEndpointRegistrar registrar)
+{
+  registrar.setValidator(this.validator);
+  }
+}
+----
+
+下面是如何应用验证的:
+[source,java]
+----
+public static class ValidatedClass {
+  @Max(10)
+  private int bar;
+  public int getBar() {
+  return this.bar;
+  }
+  public void setBar(int bar) {
+  this.bar = bar;
+  }
+}
+----
+
+[source,java]
+----
+@KafkaListener(id="validated", topics = "annotated35", errorHandler =
+"validationErrorHandler",
+  containerFactory = "kafkaJsonListenerContainerFactory")
+public void validatedListener(@Payload @Valid ValidatedClass val) {
+  ...
+}
+@Bean
+public KafkaListenerErrorHandler validationErrorHandler() {
+  return (m, e) -> {
+  ...
+  };
+}
+----
+
+==== Rebalancing Listeners
+
+ContainerProperties有一个名为consumerRebalanceListener的属性，它指定了Kafka客户端接口ConsumerRebalanceListener的实现。如果未提供此属性，则容器将配置日志监听器，以在INFO级别记录该负载事件。 该框架还添加了一个子接口ConsumerAwareRebalanceListener。 以下清单显示了ConsumerAwareRebalanceListener接口定义：
+[source,java]
+----
+public interface ConsumerAwareRebalanceListener extends ConsumerRebalanceListener {
+
+    void onPartitionsRevokedBeforeCommit(Consumer<?, ?> consumer, Collection<TopicPartition> partitions);
+
+    void onPartitionsRevokedAfterCommit(Consumer<?, ?> consumer, Collection<TopicPartition> partitions);
+
+    void onPartitionsAssigned(Consumer<?, ?> consumer, Collection<TopicPartition> partitions);
+
+}
+----
+
+请注意，撤消分区时有两个回调。 第一个是立即调用的。 在提交任何挂起的偏移量之后调用第二个。 如果您希望在某些外部存储库中维护偏移量，这非常有用，如以下示例所示：
+[source,java]
+----
+containerProperties.setConsumerRebalanceListener(new ConsumerAwareRebalanceListener() {
+
+    @Override
+    public void onPartitionsRevokedBeforeCommit(Consumer<?, ?> consumer, Collection<TopicPartition> partitions) {
+        // acknowledge any pending Acknowledgments (if using manual acks)
+    }
+
+    @Override
+    public void onPartitionsRevokedAfterCommit(Consumer<?, ?> consumer, Collection<TopicPartition> partitions) {
+        // ...
+            store(consumer.position(partition));
+        // ...
+    }
+
+    @Override
+    public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+        // ...
+            consumer.seek(partition, offsetTracker.getOffset() + 1);
+        // ...
+    }
+});
+----
+
+==== 转发监听器的返回结果
+
+从2.0版开始，如果您还使用@SendTo注解注释@KafkaListener并且返回结果将转发到@SendTo指定的主题。
+
+@SendTo有下面几种形式:
+
+. @SendTo("someTopic"):路由到指定的主题
+. @SendTo（“#{someExpression}”）路由到在应用程序上下文初始化期间通过计算表达式确定的主题。
+. @SendTo（“!{someExpression}”）路由到通过在运行时计算表达式确定的主题。 评估的#root对象有三个属性：
+	. request:入站ConsumerRecord（或批处理侦听器的ConsumerRecords对象））
+	. source:从请求转换的org.springframework.messaging.Message <？>
+	. result:方法返回的结果
+. @SendTo（无属性）：这被视为！{source.headers ['kafka_replyTopic']}（自版本2.1.3起）。
+
+从版本2.1.11和2.2.1开始，属性占位符可以被@SendTo解析。
+
+表达式求值的结果必须是字符串,表示主题名称。以下示例显示了使用@SendTo的各种方法：
+[source,java]
+----
+@KafkaListener(topics = "annotated21")
+@SendTo("!{request.value()}") // runtime SpEL
+public String replyingListener(String in) {
+    ...
+}
+
+@KafkaListener(topics = "${some.property:annotated22}")
+@SendTo("#{myBean.replyTopic}") // config time SpEL
+public Collection<String> replyingBatchListener(List<String> in) {
+    ...
+}
+
+@KafkaListener(topics = "annotated23", errorHandler = "replyErrorHandler")
+@SendTo("annotated23reply") // static reply topic definition
+public String replyingListenerWithErrorHandler(String in) {
+    ...
+}
+...
+@KafkaListener(topics = "annotated25")
+@SendTo("annotated25reply1")
+public class MultiListenerSendTo {
+
+    @KafkaHandler
+    public String foo(String in) {
+        ...
+    }
+
+    @KafkaHandler
+    @SendTo("!{'annotated25reply2'}")
+    public String bar(@Payload(required = false) KafkaNull nul,
+            @Header(KafkaHeaders.RECEIVED_MESSAGE_KEY) int key) {
+        ...
+    }
+
+}
+----
+从2.2版开始，您可以将ReplyHeadersConfigurer添加到监听器容器工厂。 查阅此信息以确定要在回复消息中设置哪些标头。 以下示例显示如何添加ReplyHeadersConfigurer:
+[source,java]
+----
+@Bean
+public ConcurrentKafkaListenerContainerFactory<Integer, String> kafkaListenerContainerFactory() {
+    ConcurrentKafkaListenerContainerFactory<Integer, String> factory =
+        new ConcurrentKafkaListenerContainerFactory<>();
+    factory.setConsumerFactory(cf());
+    factory.setReplyTemplate(template());
+    factory.setReplyHeadersConfigurer((k, v) -> k.equals("cat"));
+    return factory;
+}
+----
+
+如果您愿意，还可以添加更多标题。 以下示例显示了如何执行此操作：
+[source,java]
+----
+@Bean
+public ConcurrentKafkaListenerContainerFactory<Integer, String> kafkaListenerContainerFactory() {
+    ConcurrentKafkaListenerContainerFactory<Integer, String> factory =
+        new ConcurrentKafkaListenerContainerFactory<>();
+    factory.setConsumerFactory(cf());
+    factory.setReplyTemplate(template());
+    factory.setReplyHeadersConfigurer(new ReplyHeadersConfigurer() {
+
+      @Override
+      public boolean shouldCopy(String headerName, Object headerValue) {
+        return false;
+      }
+
+      @Override
+      public Map<String, Object> additionalHeaders() {
+        return Collections.singletonMap("qux", "fiz");
+      }
+
+    });
+    return factory;
+}
+----
+
+NOTE: 这里的reply名字起的非常操蛋,应该叫forward比较合适.ReplyTemplate是转发消息使用的发送器,ReplyHeadersConfigurer是配置转发头.
+
+使用@SendTo时，必须在其replyTemplate属性中使用KafkaTemplate配置ConcurrentKafkaListenerContainerFactory以执行消息发送。
+
+NOTE: 除非您使用请求/回复语义，否则仅使用简单的send(topic,value)方法，因此您可能希望创建子类来生成分区或键。 以下示例显示了如何执行此操作：
+
+[source,java]
+----
+	@Bean
+	public KafkaTemplate<String, String> myReplyingTemplate() {
+	    return new KafkaTemplate<Integer, String>(producerFactory()) {
+
+	        @Override
+	        public ListenableFuture<SendResult<String, String>> send(String topic, String data) {
+	            return super.send(topic, partitionForData(data), keyForData(data), data);
+	        }
+
+	        ...
+
+	    };
+	}
+----
+
+如果监听器方法返回Message <？>或Collection <Message <？>>，则监听器方法负责设置回复的标头。 例如，在处理来自ReplyingKafkaTemplate的请求时，您可能会执行以下操作：
+[source,java]
+----
+@KafkaListener(id = "messageReturned", topics = "someTopic")
+public Message<?> listen(String in, @Header(KafkaHeaders.REPLY_TOPIC) byte[] replyTo,
+        @Header(KafkaHeaders.CORRELATION_ID) byte[] correlation) {
+    return MessageBuilder.withPayload(in.toUpperCase())
+            .setHeader(KafkaHeaders.TOPIC, replyTo)
+            .setHeader(KafkaHeaders.MESSAGE_KEY, 42)
+            .setHeader(KafkaHeaders.CORRELATION_ID, correlation)
+            .setHeader("someOtherHeader", "someValue")
+            .build();
+}
+----
+使用请求/回复语义时，发件人可以请求目标分区。
+
+即使没有返回结果，也可以使用@SendTo注释@KafkaListener方法。 这是为了允许配置errorHandler，它可以将有关失败消息转发到某个主题。 以下示例显示了如何执行此操作：
+[source,java]
+----
+@KafkaListener(id = "voidListenerWithReplyingErrorHandler", topics = "someTopic",
+        errorHandler = "voidSendToErrorHandler")
+@SendTo("failures") <3>
+public void voidListenerWithReplyingErrorHandler(String in) {
+    throw new RuntimeException("fail"); <1>
+}
+
+@Bean
+public KafkaListenerErrorHandler voidSendToErrorHandler() {
+    return (m, e) -> {
+        return e.getMessage();  <2>
+    };
+}
+----
+
+<1> 在这里抛出里异常.
+<2> 捕获异常之后,返回异常信息A.
+<3> 将异常信息A转发到failures主题.
+
+==== 消息过滤
+
+在某些情况下，例如重新平衡，可以重新传递已经处理的消息。 框架无法知道是否已处理此类消息。 这是一个应用程序级功能。 这被称为Idempotent(等幂) Receiver模式，Spring Integration提供了它的实现。
+
+Spring for Apache Kafka项目还通过FilteringMessageListenerAdapter类提供一些帮助，该类可以包装MessageListener。此类持有RecordFilterStrategy的实现，您可以在其中实现filter方法，以指示消息是重复的并且应该被丢弃。 这有一个名为ackDiscarded的附加属性，它指示适配器是否应该确认(acknowledge)丢弃的记录。 默认情况下为false。
+
+使用@KafkaListener时，在容器工厂上设置RecordFilterStrategy（以及可选的ackDiscarded），以便将监听器包装在适当的过滤适配器中。
+
+此外，还提供了FilteringBatchMessageListenerAdapter，供您在使用批处理消息监听器时使用。
+
+IMPORTANT: 如果@KafkaListener收到ConsumerRecords<?,?>而不是List <ConsumerRecord <?,?>>，则忽略FilteringBatchMessageListenerAdapter，因为ConsumerRecords是不可变的。
+
+.RecordFilterStrategy 
+[source,java]
+----
+public interface RecordFilterStrategy<K, V> {
+	boolean filter(ConsumerRecord<K, V> consumerRecord);
+} 
+----
+
+==== 消息重试
+
+如果监听器抛出异常，默认行为是调用ErrorHandler（如果已配置）或以日志方式记录。
+
+NOTE: 提供了两个错误处理程序接口（ErrorHandler和BatchErrorHandler）。 您必须配置适当的类型以匹配消息监听器。
+
+为了重试传递的消息，提供了一个方便的监听器适配器RetryingMessageListenerAdapter。
+
+您可以使用RetryTemplate和RecoveryCallback <Void>对其进行配置 - 有关这些组件的信息，请参阅spring-retry项目。 如果未提供RecoveryCallback，则在重试耗尽后将向容器抛出异常。 在这种情况下，如果已配置ErrorHandler则调用，否则日志记录该异常。
+
+使用@KafkaListener时，可以在容器工厂上设置RetryTemplate（以及可选的recoveryCallback）。 执行此操作时，监听器将包装在适当的重试适配器中。
+
+传递给RecoveryCallback的RetryContext的内容取决于侦听器的类型。但无论哪种类型的RetryContext,始终具有record属性，该属性记录了故障信息。如果您的监听器正在确认或消费者感知，则可以使用其acknowledgment或consumer属性。为方便起见，RetryingMessageListenerAdapter为这些key提供了静态常量。 有关更多信息，请参阅其Javadoc。
+[source,java]
+----
+public interface RecoveryCallback<T> {
+    T recover(RetryContext context) throws Exception;
+}
+----
+
+没有为任何批处理消息侦听器提供重试适配器，因为框架不知道批处理中发生故障的位置。 如果在使用批量侦听器时需要重试功能，我们建议您在侦听器本身中使用RetryTemplate。
+
+==== 有状态重试
+
+您应该了解上一节中讨论的重试会暂停消费者线程（如果使用BackOffPolicy.在重试期间没有调用Consumer.poll()。kafka有两个属性来确定消费者的健康状况。session.timeout.ms用于确定消费者是否处于活动状态。从版本0.10.1.0开始，心跳在后台线程上发送，因此慢速消费者也不会被诊断为离线状态。max.poll.interval.ms（默认值：五分钟）用于确定消费者是否显示为挂起（从上次轮询处理记录花费的时间太长）。如果poll()调用之间的时间超过此值，则代理将撤消分配的分区并执行重新平衡。 对于冗长的重试序列，回退时，很容易发生这种情况。
+
+从版本2.1.3开始，您可以通过将状态重试与SeekToCurrentErrorHandler结合使用来避免此问题。在这种情况下，每次传递尝试都会将异常抛回到容器中，错误处理程序会重新搜索由于异常而未完全处理的偏移量，并且下一次poll()会重新传递相同的消息。这避免了超出max.poll.interval.ms属性的问题（只要尝试之间的单个延迟不超过它）。因此，在使用ExponentialBackOffPolicy时，必须确保maxInterval小于max.poll.interval.ms属性。Ť要启用有状态重试，可以使用带有状态布尔参数的RetryingMessageListenerAdapter构造函数（将其设置为true）。配置侦听器容器工厂（对于@KafkaListener）时，将工厂的statefulRetry属性设置为true。
+
+==== 检测空闲和无响应的消费者
+
+虽然有效，但异步消费者的一个问题是检测它们何时空闲。如果在一段时间内没有消息到达，您可能需要采取一些措施。您可以将侦听器容器配置为在经过一段时间而没有消息传递时发布ListenerContainerIdleEvent。 当容器空闲时，每隔idleEventInterval毫秒都会发布一个事件。
+
+要配置此功能，请在容器上设置idleEventInterval。 以下示例显示了如何执行此操作：
+[source,java]
+----
+@Bean
+public KafkaMessageListenerContainer(ConsumerFactory<String, String> consumerFactory) {
+    ContainerProperties containerProps = new ContainerProperties("topic1", "topic2");
+    ...
+    containerProps.setIdleEventInterval(60000L);
+    ...
+    KafkaMessageListenerContainer<String, String> container = new KafKaMessageListenerContainer<>(...);
+    return container;
+}
+----
+
+以下示例显示如何为@KafkaListener设置idleEventInterval：
+[source,java]
+----
+@Bean
+public ConcurrentKafkaListenerContainerFactory kafkaListenerContainerFactory() {
+    ConcurrentKafkaListenerContainerFactory<String, String> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+    ...
+    factory.getContainerProperties().setIdleEventInterval(60000L);
+    ...
+    return factory;
+}
+----
+
+上面的两个示例中，当容器空闲时，每分钟发布一次事件。
+
+此外，如果broker无法访问，则消费者poll()方法会一直执行，但不会收到任何消息，也就无法生成空闲事件。要解决此问题，如果轮询未在pollInterval属性的3倍时间内返回，则容器会发布NonResponsiveConsumerEvent。默认情况下，每个容器每30秒执行一次此检查。您可以通过在配置侦听器容器时在ContainerProperties中设置monitorInterval和noPollThreshold属性来修改此行为。 接收此类事件可让您停止容器，让消费者终止poll。
+
+
+**消费者事件**
+
+您可以通过实现ApplicationListener来捕获这些事件 - 可以是一般监听器，也可以是缩小到仅接收此特定事件的监听器。 您还可以使用Spring Framework 4.2中引入的@EventListener。
+
+下一个示例将@KafkaListener和@EventListener组合到一个类中。 您应该了解应用程序监听器获取所有容器的事件，因此如果要根据哪个容器空闲采取特定操作，则可能需要检查监听器ID。 您也可以使用@EventListener条件来实现此目的。
+[source,java]
+----
+public class Listener {
+
+    @KafkaListener(id = "qux", topics = "annotated")
+    public void listen4(@Payload String foo, Acknowledgment ack) {
+        ...
+    }
+
+    @EventListener(condition = "event.listenerId.startsWith('qux-')") <1>
+    public void eventHandler(ListenerContainerIdleEvent event) {
+        ...
+    }
+
+}
+----
+
+<1> 事件监听器查看所有容器的事件。因此,我们根据监听器ID缩小接收的事件。由于为@KafkaListener创建的容器支持并发，因此实际容器名为id-n，其中n是每个实例的唯一值，以支持并发。 这就是我们在条件中使用startsWith的原因。
+
+该事件通常在消费者线程上发布，因此与Consumer对象进行交互是安全的。
+
+如果您希望使用idle事件来停止监听器容器，则不应在调用idle监听器的线程上调用container.stop()。这样做会导致延迟和不必要的日志消息。相反，您应该将事件移交给另一个可以阻止容器的线程。此外，如果容器实例是子容器，则不应该调用该容器stop。 您应该stop父容器(并发容器)。
+
+**空闲时的位置**
+
+请注意，通过在侦听器中实现ConsumerSeekAware，可以在检测到空闲时所在的位置。 请参阅seek特定偏移量中的onIdleContainer()。
+
+==== 主题/分区初始offset
+
+有几种方法可以为分区设置初始偏移量。手动分配分区时，可以在配置的TopicPartitionInitialOffset参数中设置初始偏移量（如果需要）（请参阅消息监听器容器）。您可以随时寻找特定的偏移量。
+
+当你使用组管理来分配分区时:
+
+. 对于新的group.id，初始偏移量由auto.offset.reset消费者属性（earliest or latest）确定。
+. 对于现有组ID，初始偏移量是该组ID的当前偏移量。 但是，您可以在初始化期间（或之后的任何时间）寻找特定的偏移量。
+
+==== 定位到特定的偏移量
+
+为了定位，您的监听器必须实现ConsumerSeekAware，它具有以下方法：
+[source,java]
+----
+public interface ConsumerSeekAware {
+    void registerSeekCallback(ConsumerSeekAware.ConsumerSeekCallback var1); <1>
+
+    void onPartitionsAssigned(Map<TopicPartition, Long> var1, ConsumerSeekAware.ConsumerSeekCallback var2); <2>
+
+    void onIdleContainer(Map<TopicPartition, Long> var1, ConsumerSeekAware.ConsumerSeekCallback var2); <3>
+
+    public interface ConsumerSeekCallback {
+        void seek(String var1, int var2, long var3);
+
+        void seekToBeginning(String var1, int var2);
+
+        void seekToEnd(String var1, int var2);
+    }
+}
+----
+
+<1> 启动容器时调用该方法。在初始化后就定位offset时，您应该使用此回调。您应该保存对回调的引用以备后续执行任意seek。如果在多个容器（或ConcurrentMessageListenerContainer）中使用相同的侦听器，则应将回调存储在ThreadLocal或由侦听器Thread键入的其他一些结构中。
+
+<2> 当使用组管理变更分区时,使用该方法.例如，您可以通过调用回调来使用此方法来设置分区的初始偏移量。您必须使用回调参数，而不是传递给registerSeekCallback的参数。如果您自己显式分配分区，则永远不会调用此方法。在这种情况下使用TopicPartitionInitialOffset。
+
+<3> 当检测到空闲容器时，您还可以从onIdleContainer()执行定位操作。 有关如何启用空闲容器检测，请参阅检测空闲和非响应消费者。
+
+NOTE: 要在运行时任意seek，请在相应的线程获取registerSeekCallback中的回调引用来执行seek。
+
+==== 容器工厂
+
+正如@KafkaListener中所讨论的，ConcurrentKafkaListenerContainerFactory用于为带注释的方法创建容器。
+
+从2.2版开始，您可以使用同一工厂来创建任何ConcurrentMessageListenerContainer。如果要创建具有类似属性的多个容器，或者希望使用某些外部配置的工厂（例如Spring Boot自动配置提供的工厂），这可能很有用。创建容器后，可以进一步修改其属性，其中许多属性是使用container.getContainerProperties（）设置的。以下示例配置ConcurrentMessageListenerContainer：
+[source,java]
+----
+@Bean
+public ConcurrentMessageListenerContainer<String, String>(
+        ConcurrentKafkaListenerContainerFactory<String, String> factory) {
+
+    ConcurrentMessageListenerContainer<String, String> container =
+        factory.createContainer("topic1", "topic2");
+    container.setMessageListener(m -> { ... } );
+    return container;
+}
+----
+
+WARNING: 以这种方式创建的容器不会添加到端点注册表中。 它们应该创建为@Bean定义，以便它们在应用程序上下文中注册。
+
+==== 线程安全
+
+使用并发消息监听器容器时，将在所有消费者线程上调用单个监听器实例。因此，监听器需要是线程安全的，并且最好使用无状态监听器。如果无法使监听器线程安全或添加同步会显着降低添加并发性的好处，则可以使用以下几种技术之一：
+
+. 使用并发为1的容器,并且MessageListener创建的bean是多例的,这样每个容器都会有一个监听器,但是使用@KafkaListener,不适应这种方式.
+. 状态数据保存在ThreadLocal<?>
+. 让单例侦听器委托给在SimpleThreadScope（每个线程对应一个实例）中声明的bean。
+
+为了便于清理线程状态（对于前面列表中的第二项和第三项），从2.2版开始，侦听器容器在每个线程退出时发布ConsumerStoppedEvent。您可以使用ApplicationListener或@EventListener方法监听这些事件来从作用域中删除ThreadLocal<?>实例或remove()线程范围的bean。请注意，SimpleThreadScope不会销毁具有析构接口的bean（例如DisposableBean），因此您应该自己destroy()实例。
+
+WARNING: 默认情况下，应用程序上下文的事件发布者在调用线程上调用事件侦听器。如果更改发布者使用异步执行程序，则线程清理无效。
+
+=== 4.1.4 织入spring bean到生产者/消费者的连接器
+Apache Kafka提供了一种向生产者和消费者添加拦截器的机制。 这些对象由Kafka管理，而不是Spring，因此普通的Spring依赖注入不适用.但是，您可以使用拦截器的config()方法手动连接这些依赖项。以下Spring Boot应用程序说明如何执行此操作。
+[source,java]
+----
+@SpringBootApplication
+public class Application {
+
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+
+    @Bean
+    public ConsumerFactory<?, ?> kafkaConsumerFactory(KafkaProperties properties, SomeBean someBean) {
+        Map<String, Object> consumerProperties = properties.buildConsumerProperties();
+        consumerProperties.put(ConsumerConfig.INTERCEPTOR_CLASSES_CONFIG, MyConsumerInterceptor.class.getName()); <1>
+        consumerProperties.put("some.bean", someBean); <2>
+        return new DefaultKafkaConsumerFactory<>(consumerProperties);
+    }
+
+    @Bean
+    public ProducerFactory<?, ?> kafkaProducerFactory(KafkaProperties properties, SomeBean someBean) {
+        Map<String, Object> producerProperties = properties.buildProducerProperties();
+        producerProperties.put(ProducerConfig.INTERCEPTOR_CLASSES_CONFIG, MyProducerInterceptor.class.getName()); <3>
+        producerProperties.put("some.bean", someBean);<4>
+        DefaultKafkaProducerFactory<?, ?> factory = new DefaultKafkaProducerFactory<>(producerProperties);
+        String transactionIdPrefix = properties.getProducer()
+                .getTransactionIdPrefix();
+        if (transactionIdPrefix != null) {
+            factory.setTransactionIdPrefix(transactionIdPrefix);
+        }
+        return factory;
+    }
+
+    @Bean
+    public SomeBean someBean() {
+        return new SomeBean();
+    }
+
+    @KafkaListener(id = "kgk897", topics = "kgh897")
+    public void listen(String in) {
+        System.out.println("Received " + in);
+    }
+
+    @Bean
+    public ApplicationRunner runner(KafkaTemplate<String, String> template) {
+        return args -> template.send("kgh897", "test");
+    }
+
+    @Bean
+    public NewTopic kRequests() {
+        return TopicBuilder.name("kgh897")
+            .partitions(1)
+            .replicas(1)
+            .build();
+    }
+
+}
+----
+
+<1> 配置消费者拦截器
+<2> 注入依赖的bean
+<3> 配置生产者拦截器
+<4> 注入依赖的bean
+
+
+[source,java]
+----
+public class SomeBean {
+
+    public void someMethod(String what) {
+        System.out.println(what + " in my foo bean");
+    }
+
+}
+----
+
+
+[source,java]
+----
+public class MyProducerInterceptor implements ProducerInterceptor<String, String> {
+
+    private SomeBean bean;
+
+    @Override
+    public void configure(Map<String, ?> configs) {
+        this.bean = (SomeBean) configs.get("some.bean"); <1>
+    }
+
+    @Override
+    public ProducerRecord<String, String> onSend(ProducerRecord<String, String> record) {
+        this.bean.someMethod("producer interceptor");
+        return record;
+    }
+
+    @Override
+    public void onAcknowledgement(RecordMetadata metadata, Exception exception) {
+    }
+
+    @Override
+    public void close() {
+    }
+
+}
+----
+
+<1> 获取注入的bean
+
+[source,java]
+----
+public class MyConsumerInterceptor implements ConsumerInterceptor<String, String> {
+
+    private SomeBean bean;
+
+    @Override
+    public void configure(Map<String, ?> configs) {
+        this.bean = (SomeBean) configs.get("some.bean"); <1>
+    }
+
+    @Override
+    public ConsumerRecords<String, String> onConsume(ConsumerRecords<String, String> records) {
+        this.bean.someMethod("consumer interceptor");
+        return records;
+    }
+
+    @Override
+    public void onCommit(Map<TopicPartition, OffsetAndMetadata> offsets) {
+    }
+
+    @Override
+    public void close() {
+    }
+
+}
+----
+
+<1> 获取注入的bean
+
+结果如下:
+[source,shell]
+----
+producer interceptor in my foo bean
+consumer interceptor in my foo bean
+Received test
+----
+
+==== 4.1.5 暂停和恢复监听器容器
+
+版本2.1.3将pause()和resume()方法添加到侦听器容器。以前，您可以在ConsumerAwareMessageListener中暂停消费者，并通过侦听ListenerContainer的IdlEvent来恢复它，该监听器提供对Consumer对象的访问。虽然您可以使用事件监听器在空闲容器中暂停消费者，但在某些情况下，这不是线程安全的，因为无法保证在消费者线程上调用事件监听器。要安全地暂停和恢复消费者，您应该在监听器容器上使用pause和resume方法。 pause()在下一个poll()之前生效;resume()在当前poll()返回后立即生效。当容器暂停时，它继续poll消费者，如果正在使用组管理为了避免重新平衡，但它不会检索任何记录。 有关更多信息，请参阅Kafka文档。
+
+从版本2.1.5开始，您可以调用isPauseRequested()来查看是否已调用pause()。但是，消费者可能还没有实际spause。如果所有Consumer实例实际都已暂停，则isConsumerPaused()返回true。
+
+此外（也是自2.1.5开始），ConsumerPausedEvent和ConsumerResumedEvent实例以容器作为source属性和partitions属性中持有TopicPartition实例。
+
+以下简单的Spring Boot应用程序通过使用容器注册表来获取对@KafkaListener方法的容器的引用，并暂停或恢复其消费者以及接收相应的事件：
+[source,java]
+----
+@SpringBootApplication
+public class Application implements ApplicationListener<KafkaEvent> {
+
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args).close();
+    }
+
+    @Override
+    public void onApplicationEvent(KafkaEvent event) {
+        System.out.println(event);
+    }
+
+    @Bean
+    public ApplicationRunner runner(KafkaListenerEndpointRegistry registry,
+            KafkaTemplate<String, String> template) {
+        return args -> {
+            template.send("pause.resume.topic", "thing1");
+            Thread.sleep(10_000);
+            System.out.println("pausing");
+            registry.getListenerContainer("pause.resume").pause();
+            Thread.sleep(10_000);
+            template.send("pause.resume.topic", "thing2");
+            Thread.sleep(10_000);
+            System.out.println("resuming");
+            registry.getListenerContainer("pause.resume").resume();
+            Thread.sleep(10_000);
+        };
+    }
+
+    @KafkaListener(id = "pause.resume", topics = "pause.resume.topic")
+    public void listen(String in) {
+        System.out.println(in);
+    }
+
+    @Bean
+    public NewTopic topic() {
+        return TopicBuilder.name("pause.resume.topic")
+            .partitions(2)
+            .replicas(1)
+            .build();
+    }
+
+}
+----
+结果如下:
+[source,shell]
+----
+partitions assigned: [pause.resume.topic-1, pause.resume.topic-0]
+thing1
+pausing
+ConsumerPausedEvent [partitions=[pause.resume.topic-1, pause.resume.topic-0]]
+resuming
+ConsumerResumedEvent [partitions=[pause.resume.topic-1, pause.resume.topic-0]]
+thing2
+----
+
+==== 4.1.6. Events
+
+以下事件由监听器容器及其消费者发布：
+. ListenerContainerIdleEvent:在idleInterval中未收到任何消息时发出（如果已配置）
+. NonResponsiveConsumerEvent:当消费者在poll方法中被阻塞时发出。
+. ConsumerPausedEvent:当容器暂停时由每个消费者发布。
+. ConsumerResumedEvent:当容器恢复时由每个消费者发布。
+. ConsumerStoppingEvent:在停止之前由每个消费者发布
+. ConsumerStoppedEvent:消费者关闭后发布。
+. ContainerStoppedEvent:所有消费者终止后发布。
+
+WARNING: 默认.应用程序的事件发布者发布事件和时间监听在同一个线程.如果你修改了此行为在不同的线程,请不要在事件中传递consumer对象.
+
+ContainerIdleEvent有以下属性:
+. source:发布事件的监听器容器实例。
+. container:监听器容器或父监听器容器（如果源容器是子容器）。
+. id:监听器ID（或容器bean名称）。
+. idleTime:事件发布时容器空闲的时间。
+. topicPartitions:生成事件时分配容器的主题和分区。
+. consumer:对Kafka Consumer对象的引用。 例如，如果先前调用了消费者的pause方法，则可以在收到事件时resume。
+. paused:容器当前是否已暂停。 
+
+NonResponsiveConsumerEvent有以下属性:
+. source:发布事件的容器
+. container:监听器容器或父监听器容器（如果源容器是子容器）
+. id:监听器ID（或容器bean名称）。
+. timeSinceLastPoll:生成事件时分配容器的主题和分区。
+. consumer:对Kafka Consumer对象的引用。 例如，如果先前调用了消费者的pause方法，则可以在收到事件时resume。
+. paused:容器当前是否已暂停。 
+
+ConsumerPausedEvent, ConsumerResumedEvent, and ConsumerStopping有以下属性:
+. source:发布事件的容器
+. container:监听器容器或父监听器容器（如果源容器是子容器）
+. partitions:涉及的TopicPartition实例。
+
+ConsumerStoppedEvent and ContainerStoppedEvent有以下属性:
+
+. source:发布事件的容器
+. container:监听器容器或父监听器容器（如果源容器是子容器）
+
+所有容器（无论是子容器还是父容器）发布ContainerStoppedEvent。 对于父容器，source和container属性是相同的。
+
+==== 4.1.7. 序列化和消息类型转化
+
+Apache Kafka提供了一个高级API，用于序列化和反序列化记录值及其key。 它与org.apache.kafka.common.serialization.Serializer<T>和org.apache.kafka.common.serialization.Deserializer<T>抽象一起提供，内置一些实现。 同时，我们可以使用Producer或Consumer配置属性指定序列化程序和反序列化程序类。 以下示例显示了如何执行此操作：
+
+[source,java]
+----
+props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, IntegerDeserializer.class);
+props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+...
+props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, IntegerSerializer.class);
+props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+----
+
+对于更复杂或特殊的情况，KafkaConsumer（以及KafkaProducer）提供重载的构造函数，分别接受key和value的Serializer和Deserializer实例。
+
+使用此API时，DefaultKafkaProducerFactory和DefaultKafkaConsumerFactory还提供属性（通过构造函数或setter方法），以将自定义Serializer和Deserializer实例注入目标Producer或Consumer。
+
+Spring kafka还提供了基于Jackson JSON对象映射器的JsonSerializer和JsonDeserializer实现。JsonSerializer允许将任何Java对象写为JSON byte[]。 JsonDeserializer需要一个额外的Class<?> targetType参数，以允许将byte[]反序列化为正确的目标对象。以下示例显示如何创建JsonDeserializer：
+[source,java]
+----
+JsonDeserializer<Thing> thingDeserializer = new JsonDeserializer<>(Thing.class);
+----
+
+您可以使用ObjectMapper自定义JsonSerializer和JsonDeserializer。您还可以继承它们重写configure(Map <String,?> configs,boolean isKey)方法实现某些特定的配置逻辑。
+
+从版本2.3开始，默认情况下，所有支持JSON的组件都配置有JacksonUtils.enhancedObjectMapper()实例，该实例附带了MapperFeature.DEFAULT_VIEW_INCLUSION和DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES功能。此类实例还提供了用于自定义数据类型的模块，例如Java时间和Kotlin支持。
+
+同样从版本2.3开始，JsonDeserializer提供基于TypeReference的构造函数，以更好地处理目标通用容器类型。
+
+从2.1版开始，您可以在记录标题中传递类型信息，从而允许处理多种类型。此外，您可以使用以下Kafka属性配置序列化程序和反序列化程序：
+
+. JsonSerializer.ADD_TYPE_INFO_HEADERS (default true): 您可以将其设置为false以在JsonSerializer上禁用此功能（设置addTypeInfo属性）。
+. JsonSerializer.TYPE_MAPPINGS (default empty):参考映射类型
+. JsonDeserializer.USE_TYPE_INFO_HEADERS (default true):您可以将其设置为false以忽略序列化程序设置的标头。
+. JsonDeserializer.REMOVE_TYPE_INFO_HEADERS (default true):您可以将其设置为false以保留序列化程序设置的标头。
+. JsonDeserializer.KEY_DEFAULT_TYPE:如果不存在标题信息，则用于反序列化key的后备类型。
+. JsonDeserializer.VALUE_DEFAULT_TYPE:如果不存在标题信息，则用于反序列化value的后备类型。
+. JsonDeserializer.TRUSTED_PACKAGES (default java.util, java.lang):逗号分隔的允许反序列化包模式列表。*表示反序列化所有。
+. JsonDeserializer.TYPE_MAPPINGS (default empty):参考映射类型
+
+从2.2版开始，反序列化器将删除类型信息头（如果由序列化程序添加）。 您可以通过直接在反序列化器上或使用前面描述的配置属性将removeTypeHeaders属性设置为false来恢复到以前的行为。
+
+
+**映射类型**
+
+从2.2版开始，您现在可以使用前面列表中的属性提供类型映射。以前，您必须在序列化程序和反序列化程序中自定义类型映射器。映射由逗号分隔的token：className对列表组成。在出站时，playload的类名称将映射到相应的token。在入站时，类型标头中的token将映射到相应的类名。
+
+下面的例子说明如何设置mapping:
+[source,java]
+----
+senderProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
+senderProps.put(JsonSerializer.TYPE_MAPPINGS, "cat:com.mycat.Cat, hat:com.myhat.hat");
+...
+consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
+consumerProps.put(JsonDeSerializer.TYPE_MAPPINGS, "cat:com.yourcat.Cat, hat:com.yourhat.hat");
+----
+
+
+如果使用Spring Boot，则可以在application.properties（或yaml）文件中提供这些属性。 以下示例显示了如何执行此操作：
+
+[source,shell]
+----
+spring.kafka.producer.value-serializer=org.springframework.kafka.support.serializer.JsonSerializer
+spring.kafka.producer.properties.spring.json.type.mapping=cat:com.mycat.Cat,hat:com.myhat.Hat
+----
+您只能使用属性执行简单配置。 对于更高级的配置（例如在序列化程序和反序列化程序中使用自定义ObjectMapper），您应该使用接受预构建的序列化程序和反序列化程序的生产者和消费者工厂构造函数。 以下Spring Boot示例将覆盖默认工厂：
+
+[source,java]
+----
+@Bean
+public ConsumerFactory<Foo, Bar> kafkaConsumerFactory(KafkaProperties properties,
+    JsonDeserializer customDeserializer) {
+
+    return new DefaultKafkaConsumerFactory<>(properties.buildConsumerProperties(),
+        customDeserializer, customDeserializer);
+}
+
+@Bean
+public ProducererFactory<Foo, Bar> kafkaProducerFactory(KafkaProperties properties,
+    JsonSserializer customSerializer) {
+
+    return new DefaultKafkaConsumerFactory<>(properties.buildProducerProperties(),
+        customSerializer, customSerializer);
+}
+----
+
+还提供了Setter，作为使用这些构造函数的替代方法。
+
+从2.2版开始，您可以显式配置反序列化器使用的目标类型，并通过使用具有布尔值useHeadersIfPresent（默认情况下为true）的重载构造函数忽略标头中的类型信息。 以下示例显示了如何执行此操作：
+[source,java]
+----
+DefaultKafkaConsumerFactory<Integer, Cat1> cf = new DefaultKafkaConsumerFactory<>(props,
+        new IntegerDeserializer(), new JsonDeserializer<>(Cat1.class, false));
+----
+
+**spring消息类型转化**
+
+尽管从低级Kafka Consumer和Producer角度来看，Serializer和Deserializer API非常简单和灵活，但在使用@KafkaListener或Spring Integration时，您可能需要更强的灵活性。为了让您轻松地与org.springframework.messaging.Message进行转换，Spring for Apache Kafka提供了MessageConverter抽象，其中包含MessagingMessageConverter实现(子类StringJsonMessageConverter和BytesJsonMessageConverter)。您可以直接将MessageConverter注入KafkaTemplate实例，并使用@KafkaListener.containerFactory属性的AbstractKafkaListenerContainerFactory bean定义。 以下示例显示了如何执行此操作：
+[source,java]
+----
+@Bean
+public KafkaListenerContainerFactory<?> kafkaJsonListenerContainerFactory() {
+    ConcurrentKafkaListenerContainerFactory<Integer, String> factory =
+        new ConcurrentKafkaListenerContainerFactory<>();
+    factory.setConsumerFactory(consumerFactory());
+    factory.setMessageConverter(new StringJsonMessageConverter());
+    return factory;
+}
+...
+@KafkaListener(topics = "jsonData",
+                containerFactory = "kafkaJsonListenerContainerFactory")
+public void jsonListener(Cat cat) {
+...
+}
+----
+使用@KafkaListener时，会将参数类型提供给消息转换器以协助转换。
+
+NOTE: 只有在方法级别声明@KafkaListener批注时，才能实现此类型推断。对于类级别的@KafkaListener，有效内容类型用于选择要调用的@KafkaHandler方法，因此在选择方法之前必须已经转换它。
+
+NOTE: 使用StringJsonMessageConverter时，在使用Spring Integration或KafkaTemplate.send(Message<?>message)方法时，应在Kafka消费者配置中使用StringDeserializer，在Kafka生产者配置中使用StringSerializer。使用BytesJsonMessageConverter时，在使用Spring Integration或KafkaTemplate.send(Message<?> message)方法时，应在Kafka消费者配置中使用BytesDeserializer，在Kafka生产者配置中使用BytesSerializer。通常，BytesJsonMessageConverter更有效，因为它避免了String和byte[]转换。
+
+**ErrorHandlingDeserializer**
+当反序列化器无法反序列化消息时，Spring无法处理该问题，因为它发生在poll()返回之前。 为解决此问题，2.2版引入了ErrorHandlingDeserializer2。这个反序列化器委托给一个真正的反序列化器（键或值）。如果委托无法反序列化记录内容，则ErrorHandlingDeserializer2将在包含原因和原始字节的标头中返回空值和DeserializationException。
+
+当您使用记录级MessageListener时，如果ConsumerRecord包含键或值的DeserializationException标头，容器的ErrorHandler被会调用处理该情况。但是这条消息的内容不会传递给监听器。或者，您可以通过提供failedDeserializationFunction来配置ErrorHandlingDeserializer2来创建自定义值，该函数是BiConsumer<byte[]Headers,T>。调用此函数以创建T的实例，该实例传递给监听器。原始记录值和标题将提供给该函数。您可以在标头中找到DeserializationException（作为序列化Java对象）。有关更多信息，请参阅ErrorHandlingDeserializer2的Javadoc。
+
+NOTE: 使用BatchMessageListener时，必须提供failedDeserializationFunction。 否则，该批记录不是类型安全的。
+
+您可以使用DefaultKafkaConsumerFactory构造函数，该构造函数接受键和值Deserializer对象，通过配置合适的委托来配置的相应ErrorHandlingDeserializer2实例。或者，您可以使用使用消费者配置属性（由ErrorHandlingDeserializer使用）实例化该委托。属性名称为ErrorHandlingDeserializer2.KEY_DESERIALIZER_CLASS和ErrorHandlingDeserializer2.VALUE_DESERIALIZER_CLASS。属性值可以是类或类名。以下示例显示如何设置这些属性：
+[source,java]
+----
+props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer2.class);
+props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer2.class);
+props.put(ErrorHandlingDeserializer.KEY_DESERIALIZER_CLASS, JsonDeserializer.class);
+props.put(JsonDeserializer.KEY_DEFAULT_TYPE, "com.example.MyKey")
+props.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, JsonDeserializer.class.getName());
+props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, "com.example.MyValue")
+props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.example")
+return new DefaultKafkaConsumerFactory<>(props);
+----
+下面的例子讲述如何使用failedDeserializationFunction
+[source,java]
+----
+public class BadFoo extends Foo {
+
+  private final byte[] failedDecode;
+
+  public BadFoo(byte[] failedDecode) {
+    this.failedDecode = failedDecode;
+  }
+
+  public byte[] getFailedDecode() {
+    return this.failedDecode;
+  }
+
+}
+
+public class FailedFooProvider implements BiFunction<byte[], Headers, Foo> {
+
+  @Override
+  public Foo apply(byte[] t, Headers u) {
+    return new BadFoo(t);
+  }
+
+}
+----
+上面的示例使用以下配置：
+[source,shell]
+----
+consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer2.class);
+consumerProps.put(ErrorHandlingDeserializer2.VALUE_DESERIALIZER_CLASS, JsonDeserializer.class);
+consumerProps.put(ErrorHandlingDeserializer2.VALUE_FUNCTION, FailedFooProvider.class);
+----
+
+**批处理监听器的类型转化**
+
+从版本1.3.2开始，在使用批量消息监听器容器工厂时,你可以在BatchMessagingMessageConverter中使用StringJsonMessageConverter或BytesJsonMessageConverter转换批处理消息。默认情况下，转换的类型是从监听器参数推断出来的。 如果将（字节|字符串）JsonMessageConverter配置为DefaultJackson2TypeMapper,其TypePrecedence设置为TYPE_ID（而不是默认的INFERRED）的，则转换器将使用标头中的类型信息（如果存在）。例如，这允许使用接口而不是具体类声明监听器方法。此外，类型转换器支持映射，因此反序列化可以是与源不同的类型（只要数据兼容）。当您使用类级别的@KafkaListener实例时，这也很有用，其中必须已转换playload以确定要调用的方法。以下示例创建使用此方法的bean：
+[source,java]
+----
+@Bean
+public KafkaListenerContainerFactory<?> kafkaListenerContainerFactory() {
+    ConcurrentKafkaListenerContainerFactory<Integer, String> factory =
+            new ConcurrentKafkaListenerContainerFactory<>();
+    factory.setConsumerFactory(consumerFactory());
+    factory.setBatchListener(true);
+    factory.setMessageConverter(new BatchMessagingMessageConverter(converter()));
+    return factory;
+}
+
+@Bean
+public StringJsonMessageConverter converter() {
+    return new StringJsonMessageConverter();
+}
+----
+请注意，为此，转换目标的方法签名必须是具有单个通用参数类型的容器对象，如下所示：
+[source,java]
+----
+@KafkaListener(topics = "blc1")
+public void listen(List<Foo> foos, @Header(KafkaHeaders.OFFSET) List<Long> offsets) {
+    ...
+}
+----
+请注意，您仍然可以访问批处理标题。
+
+如果批处理转换器具有支持它的记录转换器，您还可以接收根据通用类型转换playload的消息列表。以下示例显示了如何执行此操作：
+[source,java]
+----
+@KafkaListener(topics = "blc3", groupId = "blc3")
+public void listen1(List<Message<Foo>> fooMessages) {
+    ...
+}
+----
+
+**自定义ConversionService**
+
+o.s.messaging.handler.annotation.support.MessageHandlerMethodFactory(默认被使用)使用org.springframework.core.convert.ConversionService解析监听器的参数让该监听器被匹配到的类型调用,版本2.1.1之后,下面的几个接口支持该机制:
+. org.springframework.core.convert.converter.Converter
+. org.springframework.core.convert.converter.GenericConverter
+. org.springframework.format.Formatter
+
+这使您可以进一步自定义侦听器反序列化，而无需更改ConsumerFactory和KafkaListenerContainerFactory的默认配置。
+
+NOTE: 通过KafkaListenerConfigurer bean在KafkaListenerEndpointRegistrar上设置自定义MessageHandlerMethodFactory会禁用此功能。
+
+==== 4.1.8. 消息头
+
+0.11.0.0客户端引入了对消息中标头的支持。 从版本2.0开始，Spring for Apache Kafka现在支持将这些头与Spring消息传递MessageHeaders进行映射。
+
+以前的版本将ConsumerRecord和ProducerRecord映射到spring-messaging Message<?>，其中value属性映射到playloads和其他属性（主题，分区等）映射到标头。现在仍然如此，但现在可以映射其他（任意）标头。
+
+Apache Kafka头信息有一个简单的API，如以下界面定义所示：
+[source,java]
+----
+public interface Header {
+
+    String key();
+
+    byte[] value();
+
+}
+----
+
+KafkaHeaderMapper提供了Kafka标头和MessageHeaders之间的映射。 其接口定义如下：
+[source,java]
+----
+public interface KafkaHeaderMapper {
+
+    void fromHeaders(MessageHeaders headers, Headers target);
+
+    void toHeaders(Headers source, Map<String, Object> target);
+
+}
+----
+DefaultKafkaHeaderMapper提供了key/value到MessageHeaders映射的实现,为了扩展出站消息头的类型,Json转化被支持.这些特殊头(key是spring_json_header_types)包含JSON格式(<key>:<type>),此标头用于入站端，以便将每个标头值转换为原始类型。
+
+在入站端，所有Kafka Header实例都映射到MessageHeaders。 在出站端，默认情况下，映射所有MessageHeaders，但id，timestamp和映射到ConsumerRecord属性的标头除外。
+
+您可以通过向映射器提供模式来指定要为出站消息映射的标头。 以下清单显示了许多示例映射：
+[source,java]
+----
+public DefaultKafkaHeaderMapper() {  <1>
+    ...
+}
+
+public DefaultKafkaHeaderMapper(ObjectMapper objectMapper) { <2>
+    ...
+}
+
+public DefaultKafkaHeaderMapper(String... patterns) { <3>
+    ...
+}
+
+public DefaultKafkaHeaderMapper(ObjectMapper objectMapper, String... patterns) { <4>
+    ...
+}
+----
+
+<1> 使用默认的Jackson ObjectMapper并映射大多数标头，如示例前所述。
+<2> 使用提供的Jackson ObjectMapper并映射大多数标头，如示例前所述。
+<3> 使用默认的Jackson ObjectMapper并根据提供的模式映射标头。
+<4> 使用提供的Jackson ObjectMapper并根据提供的模式映射标题
+
+模式相当简单，可以包含前导通配符()，尾随通配符或两者（例如，.cat.*）。 你可以用否定模式!匹配标题名称。第一个被匹配的模式会获胜.当您提供自己的模式时，我们建议包括!id和!timestamp，因为这些标头在入站端是只读的。
+
+NOTE: 默认情况下，映射器仅反序列化java.lang和java.util中的类。您可以通过addTrustedPackages方法添加受信任的包来信任其他（或所有）包。如果您收到来自不受信任来源的消息，您可能只希望添加您信任的软件包。 要信任所有包，可以使用mapper.addTrustedPackages("*")。
+
+NOTE: 在与不知道映射器的JSON格式的系统通信时，以原始形式映射字符串标头值很有用。
+
+从版本2.2.5开始，您可以指定不使用JSON映射某些字符串值的标头，而是使用原始byte[]进行映射。 AbstractKafkaHeaderMapper具有新属性; mapAllStringsOut设置为true时，所有字符串值的标头将使用charset属性（默认UTF-8）转换为byte[]。另外，还有一个属性rawMappedHeaders，它是一个map,key是消息头,value为bool类型.如果map包含头名称，并且头包含String值，则它将使用charset映射为原始byte[]。 此映射还用于使用charset将原始传入byte[]标头映射到String，并且仅当映射值中的布尔值为true时才会映射。如果布尔值为false，或者标题名称不在具有true值的映射中，则传入标头将简单地映射为原始未映射标头。
+以下测试用例说明了这种机制。
+[source,java]
+----
+@Test
+public void testSpecificStringConvert() {
+    DefaultKafkaHeaderMapper mapper = new DefaultKafkaHeaderMapper();
+    Map<String, Boolean> rawMappedHeaders = new HashMap<>();
+    rawMappedHeaders.put("thisOnesAString", true);
+    rawMappedHeaders.put("thisOnesBytes", false);
+    mapper.setRawMappedHaeaders(rawMappedHeaders);
+    Map<String, Object> headersMap = new HashMap<>();
+    headersMap.put("thisOnesAString", "thing1");
+    headersMap.put("thisOnesBytes", "thing2");
+    headersMap.put("alwaysRaw", "thing3".getBytes());
+    MessageHeaders headers = new MessageHeaders(headersMap);
+    Headers target = new RecordHeaders();
+    mapper.fromHeaders(headers, target);
+    assertThat(target).containsExactlyInAnyOrder(
+            new RecordHeader("thisOnesAString", "thing1".getBytes()),
+            new RecordHeader("thisOnesBytes", "thing2".getBytes()),
+            new RecordHeader("alwaysRaw", "thing3".getBytes()));
+    headersMap.clear();
+    mapper.toHeaders(target, headersMap);
+    assertThat(headersMap).contains(
+            entry("thisOnesAString", "thing1"),
+            entry("thisOnesBytes", "thing2".getBytes()),
+            entry("alwaysRaw", "thing3".getBytes()));
+}
+----
+
+默认情况下，只要Jackson在类路径上，就会在MessagingMessageConverter和BatchMessagingMessageConverter中使用DefaultKafkaHeaderMapper。
+
+使用批处理转换器，转换的标头在KafkaHeaders.BATCH_CONVERTED_HEADERS中可用作List<Map<String，Object >>，其中列表位置中的映射对应于有效负载中的数据位置。
+
+如果没有转换器（因为Jackson不存在或显式设置为null），则消费者记录中的标头在KafkaHeaders.NATIVE_HEADERS标头。 此标头是Headers对象（或批处理转换器中的List <Headers>），其中列表中的位置对应于playload中的数据位置）。
+
+
+某些类型不适合JSON序列化，并且对于这些类型，可能首选简单的toString（）序列化。 DefaultKafkaHeaderMapper有一个名为addToStringClasses（）的方法，它允许您提供应以这种方式处理出站映射的类的名称。 在入站映射期间，它们被映射为String。 默认情况下，只有org.springframework.util.MimeType和org.springframework.http.MediaType以这种方式映射。
+
+==== 4.1.9. Null Payloads和Tombstone记录日志压缩
+
+使用日志压缩时，可以发送和接收具有空playload的消息，以识别删除的key。您还可以出于其他原因接收空值，例如在无法反序列化值时可能返回null。
+
+要使用KafkaTemplate发送空playload，可以将null传递给send()方法的value参数。 一个例外是send（Message <？> message）变体。 由于Spring-messaging Message <？>不能具有null有效负载，因此可以使用名为KafkaNull的特殊playload类型，并且框架将发送null。 为方便起见，提供了静态KafkaNull.INSTANCE。
+
+使用消息监听器容器时，收到的ConsumerRecord具有空值。要配置@KafkaListener以处理空playload，必须使用带有required = false的@Payload批注。 如果它是压缩日志的逻辑删除消息，您通常还需要key，以便您的应用程序可以确定哪个key被“删除”。 以下示例显示了这样的配置：
+[source,java]
+----
+@KafkaListener(id = "deletableListener", topics = "myTopic")
+public void listen(@Payload(required = false) String value, @Header(KafkaHeaders.RECEIVED_MESSAGE_KEY) String key) {
+    // value == null represents key deletion
+}
+----
+
+当您使用具有多个@KafkaHandler方法的类级别@KafkaListener时，需要一些其他配置。具体来说，您需要一个带有KafkaNull playload的@KafkaHandler方法。 以下示例显示如何配置一个：
+[source,java]
+----
+@KafkaListener(id = "multi", topics = "myTopic")
+static class MultiListenerBean {
+
+    @KafkaHandler
+    public void listen(String cat) {
+        ...
+    }
+
+    @KafkaHandler
+    public void listen(Integer hat) {
+        ...
+    }
+
+    @KafkaHandler
+    public void delete(@Payload(required = false) KafkaNull nul, @Header(KafkaHeaders.RECEIVED_MESSAGE_KEY) int key) {
+        ...
+    }
+
+}
+----
+
+
+
+==== 4.1.11. Kerberos
+从2.0版开始，添加了KafkaJaasLoginModuleInitializer类以协助Kerberos配置。您可以使用所需的配置将此Bean添加到应用程序上下文中。 以下示例配置了这样一个bean：
+[source,java]
+----
+@Bean
+public KafkaJaasLoginModuleInitializer jaasConfig() throws IOException {
+    KafkaJaasLoginModuleInitializer jaasConfig = new KafkaJaasLoginModuleInitializer();
+    jaasConfig.setControlFlag("REQUIRED");
+    Map<String, String> options = new HashMap<>();
+    options.put("useKeyTab", "true");
+    options.put("storeKey", "true");
+    options.put("keyTab", "/etc/security/keytabs/kafka_client.keytab");
+    options.put("principal", "kafka-client-1@EXAMPLE.COM");
+    jaasConfig.setOptions(options);
+    return jaasConfig;
+}
+----
+
+
+== 批注
+
+[[p1]]
+=== AckMode的手动提交
+
+kafka处理完消息后,会自动提交offset,该offset记录了该客户端访问某个topic的偏移量.应用重启后会继续从这个位置poll消息.如果不提交offset,客户端就不知道自己消费到了哪个位置,就会从topic的开始位置或者上次提交的位置开始消费,这样必定会出现重复消费的情况.因此,每次处理完消息之后,我们都应该去提交offset.spring-kafka提供了多种方式来提交offset,下面的实例是关于开发者自动提交的.
+
+
+1.指定提交的方式
+[source,java]
+----
+   containerProperties.setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+----
+
+2.设置监听器
+
+[source,java]
+----
+        containerProperties.setMessageListener(new AcknowledgingMessageListener<Integer, String>() {
+
+            public void onMessage(ConsumerRecord<Integer, String> consumerRecord, Acknowledgment acknowledgment) {
+                System.err.println("收到消息:" + consumerRecord);
+                acknowledgment.acknowledge(); <1>
+            }
+        });
+----
+
+<1> 手动提交,如果注释该代码,重启之后,之前消费的记录还会被再次消费
+
